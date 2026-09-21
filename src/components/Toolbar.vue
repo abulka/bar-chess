@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { SPEEDS } from '../game/constants'
 import type { GameMode, GameSnapshot, OverlayFlags } from '../game/game'
 import type { StanceMode } from '../game/types'
 
@@ -21,7 +22,7 @@ const emit = defineEmits<{
   (e: 'toggle-hud'): void
 }>()
 
-const speeds = [0.5, 1, 2, 4]
+const speeds = SPEEDS
 const stances: Array<{ id: StanceMode; label: string; keys: string; title: string }> = [
   { id: 'move', label: 'Move', keys: '1/m', title: 'Move stance: travel, only return fire' },
   { id: 'attack', label: 'Attack', keys: '2/a', title: 'Attack stance: engage nearby, flee when low' },
@@ -34,6 +35,7 @@ const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
   { key: 'rangeArcs', label: 'range' },
   { key: 'grid', label: 'grid' },
   { key: 'health', label: 'health' },
+  { key: 'reload', label: 'firing recharge' },
 ]
 
 // Blur after change so global hotkeys keep working when a toolbar control was

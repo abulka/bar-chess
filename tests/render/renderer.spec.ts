@@ -5,7 +5,7 @@ vi.mock('../../src/render/terrain', () => ({
   bakeTerrain: () => ({ width: 0, height: 0 }),
 }))
 
-import { Motion } from '../../src/ecs/components'
+import { Health, Motion, PieceType, Position, Render } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
 import { Renderer } from '../../src/render/renderer'
 import { orderAttack, placePiece } from '../helpers'
@@ -23,8 +23,17 @@ interface Stroke {
   points: { x: number; y: number }[]
 }
 
+interface Rect {
+  x: number
+  y: number
+  w: number
+  h: number
+  style: string
+}
+
 class RecordingContext {
   strokes: Stroke[] = []
+  rects: Rect[] = []
   strokeStyle = ''
   fillStyle = ''
   lineWidth = 1
@@ -65,7 +74,9 @@ class RecordingContext {
     })
   }
   fillRect(): void {}
-  strokeRect(): void {}
+  strokeRect(x: number, y: number, w: number, h: number): void {
+    this.rects.push({ x, y, w, h, style: this.strokeStyle })
+  }
   fillText(): void {}
   drawImage(): void {}
   setLineDash(dash: number[]): void {
@@ -153,5 +164,25 @@ describe('Renderer firing-line overlay', () => {
     expect(route!.dash.length).toBeGreaterThan(0)
     expect(route!.points[0]).toEqual(center(4, 4))
     expect(route!.points[route!.points.length - 1]).toEqual(center(4, 5))
+  })
+})
+
+describe('Renderer reload overlay', () => {
+  it('draws one firing-recharge bar per piece only when enabled', () => {
+    const { renderer, ctx, game } = setup()
+    const pieces = game.world.query(Position, Render, Health, PieceType).length
+    expect(pieces).toBeGreaterThan(0)
+
+    ctx.rects = []
+    game.overlays.reload = true
+    renderer.draw(game)
+    const withReload = ctx.rects.length
+
+    ctx.rects = []
+    game.overlays.reload = false
+    renderer.draw(game)
+    const withoutReload = ctx.rects.length
+
+    expect(withReload - withoutReload).toBe(pieces)
   })
 })

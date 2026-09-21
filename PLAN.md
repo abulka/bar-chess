@@ -173,8 +173,9 @@ Scope: the **selection** always shows full detail; `my orders` (`o`) and
   the board.
 - **Health + reload bars**: every piece shows a thin health bar and a **plain
   red** weapon reload bar (tile-relative, so it stays inside the square), making
-  it clear how hurt a piece is and whether it can fire. All pieces render at a
-  uniform size. Projectiles are small and distinct per piece (dot / shell /
+  it clear how hurt a piece is and whether it can fire. Both are toggleable
+  (`health`, and `firing recharge` for the reload bar) and the choices persist.
+  All pieces render at a uniform size. Projectiles are small and distinct per piece (dot / shell /
   lance / tumbling bomb) and travel and rotate in flight.
 - A wide **turn bar** under the toolbar fills as a turn (gold) or replay
   (violet) progresses and reads READY when the next turn can be taken.

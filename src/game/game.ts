@@ -22,7 +22,7 @@ import type { MotionData, OrderData, OrderStep } from '../ecs/components'
 import { Board } from './board'
 import type { BoardSize, Placement } from './boards'
 import { createBoardData, initialArmy } from './boards'
-import { FIXED_DT, MAX_STEPS_PER_FRAME, PATH_BUDGET_PER_TICK, TEAM_COLORS, TEAM_NAMES } from './constants'
+import { FIXED_DT, MAX_STEPS_PER_FRAME, PATH_BUDGET_PER_TICK, SPEEDS, TEAM_COLORS, TEAM_NAMES } from './constants'
 import { coordName } from './coords'
 import { containsCell, fireCells } from './geometry'
 import type { OccupiedFn } from './geometry'
@@ -37,6 +37,7 @@ import { anchorFor, planStep } from './queue'
 import { buildBoard, buildWorldSnapshot, serializePosition, validatePosition } from './position'
 import type { SavedPosition } from './position'
 import { formatForLlm, formatShorthand } from './shorthand'
+import type { GameSettings, SettingsPatch } from './settings'
 import { Rng } from './rng'
 
 export type GameMode = 'human-vs-ai' | 'ai-vs-ai' | 'human-vs-human'
@@ -90,6 +91,7 @@ export interface OverlayFlags {
   moveCells: boolean
   attackCells: boolean
   rangeArcs: boolean
+  reload: boolean
 }
 
 interface TurnState {
@@ -195,6 +197,7 @@ export class Game {
     moveCells: true,
     attackCells: true,
     rangeArcs: false,
+    reload: true,
   }
 
   selected: Entity[] = []
@@ -482,6 +485,36 @@ export class Game {
   setSpeed(speed: number): void {
     this.speed = speed
     this.bus.emit('info', `speed x${speed}`)
+  }
+
+  /** Current UI/session preferences, ready to persist. */
+  settings(): GameSettings {
+    return {
+      overlays: { ...this.overlays },
+      hudVisible: this.hudVisible,
+      orderMode: this.orderMode,
+      speed: this.speed,
+      gameMode: this.gameMode,
+    }
+  }
+
+  /**
+   * Apply persisted preferences, validating every field so a stale or corrupt
+   * entry cannot leave the game in an invalid state.
+   */
+  applySettings(settings: SettingsPatch): void {
+    if (settings.overlays) {
+      for (const key of Object.keys(this.overlays) as Array<keyof OverlayFlags>) {
+        const value = settings.overlays[key]
+        if (typeof value === 'boolean') this.overlays[key] = value
+      }
+    }
+    if (typeof settings.hudVisible === 'boolean') this.hudVisible = settings.hudVisible
+    if (settings.orderMode === 'move' || settings.orderMode === 'attack') this.orderMode = settings.orderMode
+    if (typeof settings.speed === 'number' && SPEEDS.includes(settings.speed)) this.speed = settings.speed
+    if (settings.gameMode && GAME_MODES.some((m) => m.id === settings.gameMode)) {
+      this.setGameMode(settings.gameMode)
+    }
   }
 
   private frame = (now: number): void => {

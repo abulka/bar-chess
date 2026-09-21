@@ -9,13 +9,15 @@ import type { BoardSize } from './game/boards'
 import { SNAPSHOT_INTERVAL_MS } from './game/constants'
 import { Game } from './game/game'
 import type { GameMode, GameSnapshot, OverlayFlags } from './game/game'
+import { loadSettings, saveSettings } from './game/settings'
 import { deleteSlot, listSlots, loadSlot, saveSlot } from './game/storage'
 import type { SlotMeta } from './game/storage'
 import type { StanceMode, TeamId } from './game/types'
 
 const game = new Game(8)
+game.applySettings(loadSettings() ?? {})
 const snapshot = shallowRef<GameSnapshot>(game.snapshot())
-const stance = ref<StanceMode>('move')
+const stance = ref<StanceMode>(game.orderMode)
 const copied = ref('')
 const boardView = ref<InstanceType<typeof BoardView> | null>(null)
 const slots = ref<SlotMeta[]>([])
@@ -27,6 +29,10 @@ let timer = 0
 
 function refresh(): void {
   snapshot.value = game.snapshot()
+}
+
+function persistSettings(): void {
+  saveSettings(game.settings())
 }
 
 function onDeploy(team: TeamId, key: string): void {
@@ -42,12 +48,20 @@ function onSelectSize(size: number): void {
 
 function onSetGameMode(mode: GameMode): void {
   game.setGameMode(mode)
+  persistSettings()
   refresh()
 }
 
 function onSetStance(mode: StanceMode): void {
   stance.value = mode
   game.setOrderMode(mode)
+  persistSettings()
+  refresh()
+}
+
+function onSetSpeed(speed: number): void {
+  game.setSpeed(speed)
+  persistSettings()
   refresh()
 }
 
@@ -57,11 +71,13 @@ function onOrdered(): void {
 
 function onToggleOverlay(key: keyof OverlayFlags): void {
   game.overlays[key] = !game.overlays[key]
+  persistSettings()
   refresh()
 }
 
 function onToggleHud(): void {
   game.hudVisible = !game.hudVisible
+  persistSettings()
   refresh()
   nextTick(() => boardView.value?.fit())
 }
@@ -239,7 +255,7 @@ onBeforeUnmount(() => {
       @step="game.stepOnce(); refresh()"
       @turn="onTurn"
       @replay="onReplay"
-      @set-speed="game.setSpeed($event); refresh()"
+      @set-speed="onSetSpeed"
       @set-stance="onSetStance"
       @toggle-overlay="onToggleOverlay"
       @reset="onReset"

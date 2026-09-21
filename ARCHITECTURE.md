@@ -382,8 +382,10 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   range arcs are reserved for selected pieces so the board stays readable.
 
 `overlays` flags: `grid`, `health`, `myOrders`, `enemyPlans`, `moveCells`,
-`attackCells`, `rangeArcs`. `rangeArcs` is off by default; move/attack cells and
-range arcs are drawn for selected pieces only, army scopes show paths/goals/targets.
+`attackCells`, `rangeArcs`, `reload` (firing-recharge bars over pieces).
+`rangeArcs` is off by default; movement cells, attack cells and range arcs are
+drawn for selected pieces only; the health and recharge bars are drawn for every
+piece (each gated by its toggle), and army scopes show paths/goals/targets.
 
 The toolbar sets a **global order mode** (Move / Attack) with `1`/`m` and
 `2`/`a`; it also stamps that policy onto the current selection. Right-click then
@@ -430,6 +432,19 @@ anything is mutated.
 `Rng.getState()` is canonicalized to 32 bits so a save/restore produces a
 byte-identical stream (see §10).
 
+### Settings persistence
+
+UI/session preferences survive a reload (and a dev-server restart) via
+`src/game/settings.ts`: `Game.settings()` snapshots them and `Game.applySettings`
+applies a validated patch. Stored under `bar-chess.settings`:
+`overlays` (all flags), `hudVisible`, `orderMode` (Move/Attack stance), `speed`
+and `gameMode`. `loadSettings` drops malformed or out-of-range fields (unknown
+overlay keys, non-boolean flags, speeds outside `SPEEDS`, unknown modes), and
+`saveSettings` swallows storage failures (private mode, quota) so persistence can
+never break the game. `App.vue` applies the patch once at startup and re-saves on
+every toolbar/hotkey change. This is separate from `SavedPosition`, which still
+carries overlays for a specific saved battle.
+
 ### Shorthand for reading (LLM / debugging)
 
 The lossless JSON is ~16k tokens for the opening position — wasteful to paste
@@ -473,8 +488,9 @@ tracking chain, the Attack stance badge, and the ring drawn around a piece that 
 the target of an attack order. Pieces no longer draw a default ring. Target
 rings/chains are computed from **scoped** pieces only (selection + `my orders` /
 `enemy plans`), so they never float permanently. Every piece draws a thin health
-bar and a **plain red** reload bar (tile-relative so it stays inside the cell);
-all pieces render at a uniform size.
+bar and a **plain red** reload bar, each hideable via its `health` / `reload`
+overlay toggle (tile-relative so the bars stay inside the cell); all pieces render
+at a uniform size.
 
 ---
 
@@ -569,6 +585,7 @@ src/
     factory.ts                 createPiece
     position.ts                SavedPosition serialize/validate/restore
     shorthand.ts               compact read-oriented position dump for LLMs
+    settings.ts                persisted UI/session preferences (localStorage)
     storage.ts                 localStorage save slots
     game.ts                    Game facade + loop + GameSnapshot + runTicks
   render/

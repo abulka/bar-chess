@@ -634,7 +634,7 @@ export class Renderer {
       const weapon = game.world.get(e, Weapon)
       const kind = game.world.get(e, PieceType)?.kind
       const def = kind ? PIECES[kind] : undefined
-      if (weapon && def) {
+      if (weapon && def && game.overlays.reload) {
         const cd = WEAPONS[def.weapon].cooldown
         if (cd > 0) {
           this.drawBar(ctx, pos.x, barY + barH + 1, barW, barH, 1 - weapon.left / cd, '#e0503a', 'rgba(140,40,25,0.9)')

@@ -17,6 +17,27 @@ test('drag box-selects the pieces it touches', async ({ page }) => {
   expect(selected).toBe(32)
 })
 
+test('overlay options persist across a page reload', async ({ page }) => {
+  const read = () =>
+    page.evaluate(() => {
+      const o = (window as any).game.overlays
+      return { rangeArcs: o.rangeArcs, myOrders: o.myOrders, reload: o.reload }
+    })
+  const before = await read()
+
+  await page.locator('label.toggle').filter({ hasText: 'range' }).click()
+  await page.locator('label.toggle').filter({ hasText: 'my orders' }).click()
+  await page.locator('label.toggle').filter({ hasText: 'firing recharge' }).click()
+  const toggled = await read()
+  expect(toggled.rangeArcs).toBe(!before.rangeArcs)
+  expect(toggled.myOrders).toBe(!before.myOrders)
+  expect(toggled.reload).toBe(!before.reload)
+
+  await page.reload()
+  await page.waitForFunction(() => Boolean((window as any).game && (window as any).__renderer))
+  expect(await read()).toEqual(toggled)
+})
+
 test('the step hotkey advances the simulation one tick', async ({ page }) => {
   const before = await page.evaluate(() => (window as any).game.tick)
   await page.keyboard.press('s')
