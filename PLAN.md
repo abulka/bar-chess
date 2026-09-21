@@ -244,8 +244,17 @@ to `localStorage`.
 - TypeScript strict with `erasableSyntaxOnly`, `verbatimModuleSyntax`,
   `noUnusedLocals`, `noUnusedParameters`. No `enum`/`namespace`/constructor
   parameter properties. Type-only imports must use `import type`.
-- Only runtime dependency is Vue. `npm run build` (`vue-tsc -b && vite build`)
-  is the only gate; no test suite, no linter.
+- Only runtime dependency is Vue. Gates: `npm run build` (`vue-tsc -b && vite build`),
+  `npm run test:run` (Vitest unit/render), and `npm run test:e2e` (Playwright). No linter.
+- Testing: pure logic lives in headless modules and is unit-tested directly
+  (`tests/unit`). Overlay visuals are pure data — `src/render/overlays.ts`
+  (`firingLine`, `routePolyline`) returns styled segments the renderer just
+  strokes — so routing/firing-line drawing is tested by asserting coordinates and
+  line styles (`tests/render`), plus a mock 2D context for the renderer's stroke
+  order. `Game.runTicks(n)` drives turns/replay deterministically without the rAF
+  loop. Playwright (`tests/e2e`) covers real canvas interaction and a pixel probe
+  of the rendered firing line. Component stores are module-level singletons, so
+  tests that build multiple worlds must `clearComponents()` between cases.
 - No comments unless asked.
 - Determinism: all randomness through `Rng` (seeded `mulberry32`); never
   `Math.random()` in `src/ecs` or `src/game`.

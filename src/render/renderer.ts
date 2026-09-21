@@ -15,12 +15,13 @@ import {
 } from '../ecs/components'
 import type { Entity } from '../ecs/world'
 import { buildOccupancy, makeOccupied } from '../game/occupancy'
-import { containsCell, fireCells, moveDestinations } from '../game/geometry'
+import { fireCells, moveDestinations } from '../game/geometry'
 import { PIECES, WEAPONS } from '../game/pieces'
 import { resolveGeometry } from '../game/types'
 import { coordName, fileLabel } from '../game/coords'
 import type { Game } from '../game/game'
 import { Camera } from './camera'
+import { firingLine, routePolyline } from './overlays'
 import { bakeTerrain } from './terrain'
 
 const STANCE_COLORS: Record<string, string> = {
@@ -194,17 +195,7 @@ export class Renderer {
     // A gold route for goto/autonomous moves; attack orders draw their own red
     // route below so the two do not overlap.
     if (motion && motion.path.length > 0 && order?.kind !== 'attack') {
-      ctx.strokeStyle = full ? '#ffd166' : 'rgba(255,209,102,0.7)'
-      ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
-      ctx.setLineDash([5 / this.camera.zoom, 4 / this.camera.zoom])
-      ctx.beginPath()
-      ctx.moveTo(pos.x, pos.y)
-      for (const c of motion.path) {
-        const center = board.cellCenter(c.x, c.y)
-        ctx.lineTo(center.x, center.y)
-      }
-      ctx.stroke()
-      ctx.setLineDash([])
+      this.drawRoute(ctx, board, pos, motion.path, full)
     }
 
     // Suspended attack: an amber dashed chain to the parked target marks the
@@ -231,97 +222,46 @@ export class Renderer {
       const tc = game.world.get(target, Cell)
       if (tp && tc) {
         const endCell = motion && motion.path.length > 0 ? motion.path[motion.path.length - 1] : cell
-        const end = board.cellCenter(endCell.x, endCell.y)
         const weaponGeom = WEAPONS[def.weapon].geometry
         const reachable = order?.reachable ?? true
-        const clearShot =
-          reachable && containsCell(fireCells(board, endCell, weaponGeom, team, occupied), tc.x, tc.y)
+        const line = firingLine(board, endCell, tc, weaponGeom, team, reachable, occupied)
 
         // Movement route (same gold "route" style as a move order), so it reads
         // separately from the red/grey firing line that follows it.
-        if (motion && motion.path.length > 0) {
-          ctx.strokeStyle = full ? '#ffd166' : 'rgba(255,209,102,0.7)'
-          ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
-          ctx.setLineDash([5 / this.camera.zoom, 4 / this.camera.zoom])
-          ctx.beginPath()
-          ctx.moveTo(pos.x, pos.y)
-          for (const c of motion.path) {
-            const center = board.cellCenter(c.x, c.y)
-            ctx.lineTo(center.x, center.y)
-          }
-          ctx.stroke()
-          ctx.setLineDash([])
-        }
+        if (motion && motion.path.length > 0) this.drawRoute(ctx, board, pos, motion.path, full)
 
         const dash = [5 / this.camera.zoom, 4 / this.camera.zoom]
-        const segment = (ax: number, ay: number, bx: number, by: number) => {
-          ctx.beginPath()
-          ctx.moveTo(ax, ay)
-          ctx.lineTo(bx, by)
-          ctx.stroke()
-        }
-        const lineColor = !reachable ? UNREACHABLE_COLOR : TRACK_COLOR
+        const lineColor = line.kind === 'unreachable' ? UNREACHABLE_COLOR : TRACK_COLOR
         ctx.strokeStyle = lineColor
-        ctx.lineWidth = (full ? (clearShot ? 2.2 : 1.6) : 1.4) / this.camera.zoom
-
-        if (!reachable) {
-          ctx.setLineDash(dash)
-          segment(end.x, end.y, tp.x, tp.y)
-        } else if (clearShot) {
-          ctx.setLineDash([])
-          segment(end.x, end.y, tp.x, tp.y)
-        } else {
-          // Positionally reachable but blocked: solid red up to the first
-          // blocker, dashed red from there to the victim.
-          const dx = tc.x - endCell.x
-          const dy = tc.y - endCell.y
-          const straight = dx === 0 || dy === 0 || Math.abs(dx) === Math.abs(dy)
-          const steps = Math.max(Math.abs(dx), Math.abs(dy))
-          const sx = Math.sign(dx)
-          const sy = Math.sign(dy)
-          let blocker: { x: number; y: number } | null = null
-          if (straight && steps > 1) {
-            for (let k = 1; k < steps; k++) {
-              const x = endCell.x + sx * k
-              const y = endCell.y + sy * k
-              if (occupied(x, y) || board.blocksVision(x, y)) {
-                blocker = { x, y }
-                break
-              }
-            }
-          }
-          if (blocker) {
-            const bp = board.cellCenter(blocker.x, blocker.y)
-            ctx.setLineDash([])
-            segment(end.x, end.y, bp.x, bp.y)
-            ctx.setLineDash(dash)
-            segment(bp.x, bp.y, tp.x, tp.y)
-          } else {
-            ctx.setLineDash(dash)
-            segment(end.x, end.y, tp.x, tp.y)
-          }
+        ctx.lineWidth = (full ? (line.clear ? 2.2 : 1.6) : 1.4) / this.camera.zoom
+        for (const seg of line.segments) {
+          ctx.setLineDash(seg.dashed ? dash : [])
+          ctx.beginPath()
+          ctx.moveTo(seg.from.x, seg.from.y)
+          ctx.lineTo(seg.to.x, seg.to.y)
+          ctx.stroke()
         }
         ctx.setLineDash([])
 
-        const ang = Math.atan2(tp.y - end.y, tp.x - end.x)
+        const ang = Math.atan2(line.target.y - line.end.y, line.target.x - line.end.x)
         const ah = t * 0.2
         ctx.fillStyle = lineColor
         ctx.beginPath()
-        ctx.moveTo(tp.x, tp.y)
-        ctx.lineTo(tp.x - Math.cos(ang - 0.4) * ah, tp.y - Math.sin(ang - 0.4) * ah)
-        ctx.lineTo(tp.x - Math.cos(ang + 0.4) * ah, tp.y - Math.sin(ang + 0.4) * ah)
+        ctx.moveTo(line.target.x, line.target.y)
+        ctx.lineTo(line.target.x - Math.cos(ang - 0.4) * ah, line.target.y - Math.sin(ang - 0.4) * ah)
+        ctx.lineTo(line.target.x - Math.cos(ang + 0.4) * ah, line.target.y - Math.sin(ang + 0.4) * ah)
         ctx.closePath()
         ctx.fill()
         ctx.strokeStyle = TRACK_COLOR
         ctx.lineWidth = (full ? 2.2 : 1.5) / this.camera.zoom
         ctx.beginPath()
-        ctx.arc(tp.x, tp.y, t * 0.24, 0, Math.PI * 2)
+        ctx.arc(line.target.x, line.target.y, t * 0.24, 0, Math.PI * 2)
         ctx.stroke()
         ctx.beginPath()
-        ctx.moveTo(tp.x - t * 0.33, tp.y)
-        ctx.lineTo(tp.x + t * 0.33, tp.y)
-        ctx.moveTo(tp.x, tp.y - t * 0.33)
-        ctx.lineTo(tp.x, tp.y + t * 0.33)
+        ctx.moveTo(line.target.x - t * 0.33, line.target.y)
+        ctx.lineTo(line.target.x + t * 0.33, line.target.y)
+        ctx.moveTo(line.target.x, line.target.y - t * 0.33)
+        ctx.lineTo(line.target.x, line.target.y + t * 0.33)
         ctx.stroke()
       }
       return
@@ -370,6 +310,25 @@ export class Renderer {
     ctx.beginPath()
     ctx.arc(tp.x, tp.y, t * 0.2, 0, Math.PI * 2)
     ctx.stroke()
+  }
+
+  /** Gold dashed movement route from the piece to its planned path cells. */
+  private drawRoute(
+    ctx: CanvasRenderingContext2D,
+    board: Game['board'],
+    from: { x: number; y: number },
+    path: readonly { x: number; y: number }[],
+    full: boolean,
+  ): void {
+    if (path.length === 0) return
+    ctx.strokeStyle = full ? '#ffd166' : 'rgba(255,209,102,0.7)'
+    ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
+    ctx.setLineDash([5 / this.camera.zoom, 4 / this.camera.zoom])
+    ctx.beginPath()
+    ctx.moveTo(from.x, from.y)
+    for (const c of routePolyline(board, path)) ctx.lineTo(c.x, c.y)
+    ctx.stroke()
+    ctx.setLineDash([])
   }
 
   /** Faint per-piece destinations + paths for the current hovered order. */

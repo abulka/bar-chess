@@ -1,0 +1,38 @@
+import { describe, expect, it } from 'vitest'
+import { EventBus } from '../../src/ecs/events'
+import { Pipeline } from '../../src/ecs/pipeline'
+import type { System } from '../../src/ecs/pipeline'
+import type { SimContext } from '../../src/ecs/types'
+
+describe('EventBus', () => {
+  it('counts events by type and returns the tail', () => {
+    const bus = new EventBus()
+    bus.emit('info', 'a')
+    bus.emit('shot', 'b')
+    bus.emit('info', 'c')
+    expect(bus.total).toBe(3)
+    expect(bus.count('info')).toBe(2)
+    expect(bus.count('shot')).toBe(1)
+    expect(bus.tail().map((e) => e.msg)).toEqual(['a', 'b', 'c'])
+    expect(bus.tail(2).map((e) => e.msg)).toEqual(['b', 'c'])
+  })
+
+  it('caps the ring buffer at max, keeping the newest records', () => {
+    const bus = new EventBus(3)
+    for (const msg of ['a', 'b', 'c', 'd', 'e']) bus.emit('info', msg)
+    expect(bus.total).toBe(5)
+    expect(bus.tail().map((e) => e.msg)).toEqual(['c', 'd', 'e'])
+  })
+})
+
+describe('Pipeline', () => {
+  it('runs systems in order', () => {
+    const seen: string[] = []
+    const system = (name: string): System => ({ name, update: () => void seen.push(name) })
+    const pipeline = new Pipeline([system('first'), system('second'), system('third')])
+
+    pipeline.run({ bus: new EventBus() } as unknown as SimContext)
+    expect(seen).toEqual(['first', 'second', 'third'])
+    expect(pipeline.timings.map((t) => t.name)).toEqual(['first', 'second', 'third'])
+  })
+})

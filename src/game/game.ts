@@ -314,6 +314,15 @@ export class Game {
   }
 
   /**
+   * Advance the simulation by `n` fixed steps synchronously, bypassing the rAF
+   * loop. Turns and replays keep running through `step`, so this drives them
+   * deterministically for tests and tooling.
+   */
+  runTicks(n: number): void {
+    for (let i = 0; i < n; i++) this.step()
+  }
+
+  /**
    * A "turn" is one movement step per piece. Every piece may make at most one
    * move, then the turn pauses (waiting for in-flight moves to land first).
    * Move cooldowns are cleared at the start so each piece is ready, which makes
@@ -456,7 +465,11 @@ export class Game {
     this.rng.setState(state.rng)
     this.tick = state.tick
     this.turn = state.turn
-    this.teams = structuredClone(state.teams)
+    // Mutate the existing team objects in place: `ctx.teams` already points at
+    // this record, so replacing it would leave systems writing to a stale copy.
+    for (const id of ['red', 'blue'] as TeamId[]) {
+      this.teams[id] = structuredClone(state.teams[id])
+    }
     this.winner = state.winner
     this.occupancy.clear()
     this.selected = this.selected.filter((e) => this.world.isAlive(e))

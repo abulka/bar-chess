@@ -4,3 +4,6 @@ dist
 .DS_Store
 .vite
 .playwright-mcp/
+coverage
+test-results
+playwright-report
