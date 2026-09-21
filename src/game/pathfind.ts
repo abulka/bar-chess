@@ -66,13 +66,67 @@ export interface PathResult {
   expanded: number
 }
 
+// Reachability ignoring pieces is a pure function of (board terrain, geometry,
+// team, origin cell), and orders/AI ask the same question for the same piece
+// every tick. Memoize it with a small LRU so the flood fill runs once per
+// (cell, geometry) instead of once per tick. Cleared whenever the board object
+// or its terrain changes.
+const REACH_CACHE_LIMIT = 512
+let reachCache = new Map<number, Uint8Array>()
+let reachCacheBoard: Board | null = null
+let reachCacheVersion = -1
+let nextGeomId = 1
+const geomIds = new WeakMap<Geometry, number>()
+
+function geometryId(geom: Geometry): number {
+  let id = geomIds.get(geom)
+  if (id === undefined) {
+    id = nextGeomId++
+    geomIds.set(geom, id)
+  }
+  return id
+}
+
 /**
  * Every cell a piece can ever step onto, ignoring other pieces (walls and
  * impassable terrain still block). This is the reachability `findPath` uses with
  * no occupancy, computed in a single flood fill instead of one A* per target —
  * which matters when a long-range attacker probes many approach cells at once.
+ *
+ * The returned array is shared/cached: treat it as read-only.
  */
 export function reachableCells(
+  board: Board,
+  from: Vec2,
+  geom: Geometry,
+  team: TeamId,
+): Uint8Array {
+  if (board !== reachCacheBoard || board.terrainVersion !== reachCacheVersion) {
+    reachCache = new Map()
+    reachCacheBoard = board
+    reachCacheVersion = board.terrainVersion
+  }
+  if (!Number.isInteger(from.x) || !Number.isInteger(from.y) || !board.inBounds(from.x, from.y)) {
+    return computeReachable(board, from, geom, team)
+  }
+  const key = (((geometryId(geom) * 2 + (team === 'red' ? 1 : 0)) * board.height + from.y) * board.width + from.x)
+  const hit = reachCache.get(key)
+  if (hit) {
+    // Refresh LRU recency (Map preserves insertion order).
+    reachCache.delete(key)
+    reachCache.set(key, hit)
+    return hit
+  }
+  const result = computeReachable(board, from, geom, team)
+  reachCache.set(key, result)
+  if (reachCache.size > REACH_CACHE_LIMIT) {
+    const oldest = reachCache.keys().next().value
+    if (oldest !== undefined) reachCache.delete(oldest)
+  }
+  return result
+}
+
+function computeReachable(
   board: Board,
   from: Vec2,
   geom: Geometry,

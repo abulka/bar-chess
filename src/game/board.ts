@@ -55,6 +55,8 @@ export class Board {
   readonly tile: number
   readonly data: MapData
   readonly terrain: Uint8Array
+  /** Bumped on every terrain edit; keys derived caches such as reachability. */
+  terrainVersion = 0
 
   constructor(data: MapData) {
     this.data = data
@@ -88,6 +90,7 @@ export class Board {
   setTerrain(x: number, y: number, id: number): void {
     if (!this.inBounds(x, y)) return
     this.terrain[y * this.width + x] = id
+    this.terrainVersion++
   }
 
   /** A cell a ground piece may stand on (ignores other pieces). */

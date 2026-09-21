@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findPath } from '../../src/game/pathfind'
+import { findPath, reachableCells } from '../../src/game/pathfind'
 import { PIECES, WEAPONS } from '../../src/game/pieces'
 import { flatBoard, occupiedCells } from '../helpers'
 
@@ -34,5 +34,40 @@ describe('findPath', () => {
     const result = findPath(board, { x: 0, y: 0 }, { x: 7, y: 0 }, rook, 'blue')
     expect(result.found).toBe(false)
     expect(result.cells[result.cells.length - 1]).toEqual({ x: 2, y: 0 })
+  })
+})
+
+describe('reachableCells', () => {
+  it('flood-fills the movement geometry, respecting colour and walls', () => {
+    const seen = reachableCells(flatBoard(), { x: 4, y: 4 }, PIECES.bishop.move, 'blue')
+    expect(seen[4 * 8 + 4]).toBe(1)
+    expect(seen[0 * 8 + 0]).toBe(1)
+    expect(seen[0 * 8 + 1]).toBe(0)
+  })
+
+  it('memoizes identical queries', () => {
+    const board = flatBoard()
+    const first = reachableCells(board, { x: 0, y: 0 }, PIECES.rook.move, 'blue')
+    const second = reachableCells(board, { x: 0, y: 0 }, PIECES.rook.move, 'blue')
+    expect(second).toBe(first)
+  })
+
+  it('invalidates when the terrain changes on the same board', () => {
+    const board = flatBoard()
+    const before = reachableCells(board, { x: 0, y: 0 }, PIECES.rook.move, 'blue')
+    expect(before[1]).toBe(1)
+
+    board.setTerrain(1, 0, 4)
+    board.setTerrain(0, 1, 4)
+    const after = reachableCells(board, { x: 0, y: 0 }, PIECES.rook.move, 'blue')
+
+    expect(after).not.toBe(before)
+    expect(after[1]).toBe(0)
+  })
+
+  it('does not leak between different boards', () => {
+    const first = reachableCells(flatBoard(), { x: 0, y: 0 }, PIECES.rook.move, 'blue')
+    const second = reachableCells(flatBoard(), { x: 0, y: 0 }, PIECES.rook.move, 'blue')
+    expect(second).not.toBe(first)
   })
 })

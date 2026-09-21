@@ -427,6 +427,46 @@ all pieces render at a uniform size.
 - Avoid: `Math.random()` in sim code, mutating the world from the renderer or
   Vue, putting wall-clock time into gameplay.
 
+### Reachability and the 64×64 hot spot (fixed)
+
+`attackApproachCells` produces many candidate firing squares (a long slide can
+probe ~192). `firingPositionExists` / `previewFiringCell` used to call `findPath`
+**once per candidate**, which was catastrophic when the target is positionally
+unreachable (e.g. a bishop on the opposite colour): each failed A* exhausted the
+piece's whole reachable component, every tick, for every pursuing piece. At 64×64
+that was ~50 ms per call and ~80 ms/tick overall (`orders` was ~100% of the
+frame).
+
+`reachableCells` (`src/game/pathfind.ts`) replaces the per-candidate searches
+with one allocation-free flood fill over the movement geometry (walls block,
+pieces are ignored — exactly the reachability `findPath` used with no occupancy).
+`approach.ts` now answers reachability in O(1) per candidate. Results are
+memoized in a small LRU keyed by geometry id + team + origin cell, invalidated
+when the board object changes or `Board.terrainVersion` bumps (terrain is edited
+via `setTerrain`). Measured on the 64×64 AI-vs-AI sim: **80.6 → 1.6 ms/tick**,
+`orders` 6.6 ms → ~0.04 ms/tick.
+
+`tests/unit/perf.spec.ts` guards this with generous wall-clock bounds (the
+unreachable-bishop preview and three 64×64 turns). It is deliberately loose so it
+fails on a regression of this magnitude, not on a slow CI machine.
+
+### Reading the stats bar: fps vs tps vs refresh rate
+
+- `tps` is **simulation ticks per second**, not frames. `FIXED_DT = 1/30`, so at
+  speed ×1 a healthy game shows `tps ≈ 30`; during a turn/replay (0.5×) it is
+  ~15. `tps = 0` simply means paused.
+- `fps` is the **rAF frame rate**, i.e. `1 / frame delta`. It can never exceed the
+  display/browser refresh rate. Before blaming the game, confirm the machine is
+  not capped at 30 Hz — run this in a **blank** tab:
+  `let last=performance.now(),d=[];const f=t=>{d.push(t-last);last=t;d.length<60?requestAnimationFrame(f):console.log((1000/(d.slice(5).reduce((x,y)=>x+y,0)/(d.length-5))).toFixed(1),'fps')};requestAnimationFrame(f)`
+  If a blank tab reports 30, the whole browser is 30 Hz (macOS Low Power Mode,
+  a 30 Hz external panel, etc.) and the game is already at the cap.
+- At 64×64 AI-vs-AI the renderer draws in ~0.2 ms and the sim runs at ~600 fps of
+  headroom, so on a 60 Hz display the loop is display-bound, not game-bound. The
+  only tooling lever left is capping `devicePixelRatio` in `Renderer.resize()` to
+  cut HiDPI canvas compositing — not needed unless profiling shows GPU-bound
+  frames.
+
 ---
 
 ## 11. File index
@@ -463,14 +503,19 @@ src/
     boards.ts                  board generation, initial armies, sizes
     geometry.ts                moveDestinations, fireCells, lineClear
     occupancy.ts               Cell -> entity map
-    pathfind.ts                geometry A*
+    pathfind.ts                geometry A* + memoized reachableCells flood fill
     pieces.ts                  Piece/Weapon/Projectile defs, weaponVision
     factory.ts                 createPiece
-    game.ts                    Game facade + loop + GameSnapshot
+    game.ts                    Game facade + loop + GameSnapshot + runTicks
   render/
     camera.ts                  centre-based camera with fit floor
     terrain.ts                 bakeTerrain
+    overlays.ts                pure firingLine/routePolyline segment data
     renderer.ts                canvas draw pipeline + overlays
   components/
     Toolbar.vue BoardView.vue ReinforcementBar.vue StatsBar.vue EventLog.vue
+tests/
+  unit/                        logic, systems, Game integration, perf guards
+  render/                      overlays + mock-2D-context renderer strokes
+  e2e/                         Playwright interaction + canvas pixel probes
 ```
