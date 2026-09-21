@@ -35,6 +35,7 @@ import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { findPath } from './pathfind'
 import { buildBoard, buildWorldSnapshot, serializePosition, validatePosition } from './position'
 import type { SavedPosition } from './position'
+import { formatForLlm, formatShorthand } from './shorthand'
 import { Rng } from './rng'
 
 export type GameMode = 'human-vs-ai' | 'ai-vs-ai' | 'human-vs-human'
@@ -854,6 +855,16 @@ export class Game {
    */
   exportPosition(): SavedPosition {
     return serializePosition(this)
+  }
+
+  /** Compact, read-oriented position dump for debugging (not importable). */
+  shorthand(): string {
+    return formatShorthand(this)
+  }
+
+  /** `shorthand()` prefixed with a one-time explanation for an LLM. */
+  llmShorthand(): string {
+    return formatForLlm(this)
   }
 
   /**

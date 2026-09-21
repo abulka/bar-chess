@@ -16,7 +16,7 @@ import type { StanceMode, TeamId } from './game/types'
 const game = new Game(8)
 const snapshot = shallowRef<GameSnapshot>(game.snapshot())
 const stance = ref<StanceMode>('move')
-const copied = ref(false)
+const copied = ref('')
 const boardView = ref<InstanceType<typeof BoardView> | null>(null)
 const slots = ref<SlotMeta[]>([])
 const slotName = ref('')
@@ -85,15 +85,28 @@ function onReplay(): void {
   refresh()
 }
 
-async function copyJson(): Promise<void> {
-  const json = JSON.stringify(game.exportPosition(), null, 2)
+async function copyText(text: string, kind: string): Promise<void> {
   try {
-    await navigator.clipboard.writeText(json)
-    copied.value = true
-    window.setTimeout(() => (copied.value = false), 1200)
+    await navigator.clipboard.writeText(text)
+    copied.value = kind
+    window.setTimeout(() => {
+      if (copied.value === kind) copied.value = ''
+    }, 1200)
   } catch {
-    console.log(json)
+    console.log(text)
   }
+}
+
+function copyJson(): void {
+  void copyText(JSON.stringify(game.exportPosition(), null, 2), 'json')
+}
+
+function copyShorthand(): void {
+  void copyText(game.shorthand(), 'shorthand')
+}
+
+function copyLlm(): void {
+  void copyText(game.llmShorthand(), 'llm')
 }
 
 function refreshSlots(): void {
@@ -318,7 +331,13 @@ onBeforeUnmount(() => {
           <li><span class="ln ln-unreachable"></span> out of reach</li>
         </ul>
         <div class="rail-title">position</div>
-        <button class="ctl copy-btn" @click="copyJson">{{ copied ? 'Copied!' : 'Copy position JSON' }}</button>
+        <button class="ctl copy-btn" @click="copyJson">{{ copied === 'json' ? 'Copied!' : 'Copy position JSON' }}</button>
+        <div class="io-row">
+          <button class="ctl" @click="copyShorthand">
+            {{ copied === 'shorthand' ? 'Copied!' : 'Copy shorthand' }}
+          </button>
+          <button class="ctl" @click="copyLlm">{{ copied === 'llm' ? 'Copied!' : 'Copy for LLM' }}</button>
+        </div>
         <div class="save-row">
           <input
             v-model="slotName"

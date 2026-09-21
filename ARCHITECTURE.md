@@ -404,12 +404,31 @@ anything is mutated.
 - **Save/Load**: named slots in `localStorage` (`src/game/storage.ts`), keys
   `bar-chess.positions.index` and `bar-chess.positions.<id>`; a same-named save
   overwrites. Load/Delete confirm first.
-- **Copy / Export / Import**: the copy button and **Export JSON** emit the same
-  `SavedPosition` (so copied/exported JSON can be re-imported); **Import JSON**
-  reads a file. `Game.toDebugJson()` remains the terse debug view.
+- **Copy / Export / Import**: the **Copy position JSON** button and **Export
+  JSON** emit the same `SavedPosition` (so copied/exported JSON can be
+  re-imported); **Import JSON** reads a file. `Game.toDebugJson()` remains the
+  terse debug view.
 
 `Rng.getState()` is canonicalized to 32 bits so a save/restore produces a
 byte-identical stream (see §10).
+
+### Shorthand for reading (LLM / debugging)
+
+The lossless JSON is ~16k tokens for the opening position — wasteful to paste
+into an LLM. `formatShorthand(game)` (`src/game/shorthand.ts`) emits a compact,
+line-oriented dump instead: a header (map/size/tick/turn/mode/you/winner), team
+totals, sparse non-floor terrain, an ASCII grid for boards up to 16×16, one line
+per piece with only non-default attributes (`hp`, `@M`/`@A` stance, `goto`/`atk`
+orders with `#id(cell)` references, `tgt`, `goal`, `path` hops, `blk`, `moving`,
+`w` reload, …), selection ids and in-flight projectiles. Opening 8×8 ≈ 80 tokens;
+a 16×16 mid-game ≈ 250.
+
+- **Copy shorthand** copies the position plus a one-line `# fmt:` legend.
+- **Copy for LLM** prepends `LLM_PREAMBLE`, a constant explaining the game,
+  geometry, turn model and every field, for the first message of a conversation.
+- Both go through `Game.shorthand()` / `Game.llmShorthand()`, available on
+  `window.game` in dev. The shorthand is read-only — `SavedPosition` JSON stays
+  the import/round-trip format.
 
 Keyboard: `1`/`m` Move and `2`/`a` Attack order mode, `space` turn, `p` pause,
 `s` step, `r` replay, `c`/`Backspace` clear orders, `o` my orders, `e` enemy
@@ -529,6 +548,7 @@ src/
     pieces.ts                  Piece/Weapon/Projectile defs, weaponVision
     factory.ts                 createPiece
     position.ts                SavedPosition serialize/validate/restore
+    shorthand.ts               compact read-oriented position dump for LLMs
     storage.ts                 localStorage save slots
     game.ts                    Game facade + loop + GameSnapshot + runTicks
   render/

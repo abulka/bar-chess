@@ -55,6 +55,22 @@ test('imports a position from a JSON file', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => (window as any).game.board.width)).toBe(16)
 })
 
+test('copies the shorthand and the LLM report', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.evaluate(() => (window as any).game.loadSize(8))
+
+  await page.getByRole('button', { name: 'Copy shorthand' }).click()
+  const shorthand = await page.evaluate(() => navigator.clipboard.readText())
+  expect(shorthand).toContain('# board-8 8x8')
+  expect(shorthand).toContain('# grid')
+  expect(shorthand).toContain('# fmt:')
+
+  await page.getByRole('button', { name: 'Copy for LLM' }).click()
+  const llm = await page.evaluate(() => navigator.clipboard.readText())
+  expect(llm).toContain('Bar Chess is a real-time')
+  expect(llm).toContain('# board-8 8x8')
+})
+
 test('reports invalid imported JSON without breaking the game', async ({ page }) => {
   await page.setInputFiles('input[type=file]', {
     name: 'bad.json',
