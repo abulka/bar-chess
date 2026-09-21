@@ -2,7 +2,7 @@ import { moveDestinations } from '../../game/geometry'
 import { lerp } from '../../game/math'
 import { buildOccupancy, cellIndex, occupiedExcept } from '../../game/occupancy'
 import { PIECES } from '../../game/pieces'
-import { Cell, Motion, PieceType, Position, Team } from '../components'
+import { Cell, Motion, Order, PieceType, Position, Team } from '../components'
 import type { System } from '../pipeline'
 
 const system: System = {
@@ -23,12 +23,13 @@ const system: System = {
       }
     }
 
-    for (const e of ctx.world.query(Motion, Cell, Position, PieceType, Team)) {
+    for (const e of ctx.world.query(Motion, Cell, Position, PieceType, Team, Order)) {
       const motion = ctx.world.require(e, Motion)
       const cell = ctx.world.require(e, Cell)
       const pos = ctx.world.require(e, Position)
       const kind = ctx.world.require(e, PieceType).kind
       const team = ctx.world.require(e, Team)
+      const order = ctx.world.require(e, Order)
       const def = PIECES[kind]
       if (!def) continue
 
@@ -59,8 +60,9 @@ const system: System = {
       if (ctx.turnActive && (motion.movedThisTurn || anyMoving)) continue
       // AI move budget: an AI team facing a human may not out-move them. Its
       // cumulative moves are capped by the human's, unused budget carries over.
-      // In AI-vs-AI both sides are free.
-      if (ctx.turnActive && ctx.teams[team].controller === 'ai') {
+      // In AI-vs-AI both sides are free. Player-issued orders bypass the budget,
+      // so you can command enemy pieces directly.
+      if (ctx.turnActive && ctx.teams[team].controller === 'ai' && order.kind === 'none') {
         const other = team === 'red' ? 'blue' : 'red'
         if (ctx.teams[other].controller === 'human') {
           const allowance = Math.max(0, ctx.teams[other].movesMade - ctx.teams[team].movesMade)

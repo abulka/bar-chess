@@ -70,6 +70,13 @@ piece and set with the toolbar buttons or `1` / `2`(`a`) / `3`:
   treats an occupied square as a plain move (best-effort advance), never as a
   target, and a move order clears any stale target.
 - Repeating an order toggles it off; `c` or `4` clears orders on the selection.
+- The attack's route is planned immediately and drawn as a red dashed path (like
+  a move) with a lock reticle on the victim, instead of a straight line.
+- Issuing an attack or a Hold command returns the toolbar to Move; Move/Fight
+  stay selected. An attack leaves the piece in **Hold** so once the target dies
+  it stops and fires at whatever comes into range (no wandering).
+- You can select and command **enemy pieces too** — a player-issued order
+  bypasses the AI move budget, so you can drive either side.
 - Tracking rings/chains follow the overlay scope: visible for the selection and,
   when on, `my orders` (`o`) / `enemy plans` (`e`) — never floating permanently.
 
@@ -88,8 +95,10 @@ The battle **starts paused**. Give orders, then take a turn:
 - `space` — **Turn**: pieces move **one at a time**, each making at most one
   move, then the turn auto-pauses. Move cooldowns are cleared at the start, and
   every turn runs a minimum beat (~1s of sim time) so reloads and in-range fire
-  still progress even when nobody moves. A piece with no orders (or blocked with
-  no route) simply does not move.
+  still progress even when nobody moves. A turn also ends early if no move has
+  started for a while (blocked pieces don't stall it). `space` is ignored while a
+  turn is already running, so it always starts the next turn rather than
+  cancelling the current one.
 - `p` — pause / resume. Pausing mid-turn cancels the turn.
 - `s` — single simulation step (one tick), for tracing.
 - `r` — **Replay last turn**: the world + RNG + tick are snapshotted at turn
@@ -124,10 +133,13 @@ Scope: the **selection** always shows full detail; `my orders` (`o`) and
   circle for queen/king, forward half-disc for pawn, 8 dots for knight. **Off by
   default** (enable with the `range` toggle) so targeting circles don't clutter
   the board.
-- **Health + reload bars**: every piece shows a thin health bar and a **red
-  dashed** weapon reload bar, so it is clear both how hurt it is and whether it
-  can fire. Projectiles are small and distinct per piece (dot / shell / lance /
-  tumbling bomb) and travel and rotate in flight.
+- **Health + reload bars**: every piece shows a thin health bar and a **plain
+  red** weapon reload bar (tile-relative, so it stays inside the square), making
+  it clear how hurt a piece is and whether it can fire. All pieces render at a
+  uniform size. Projectiles are small and distinct per piece (dot / shell /
+  lance / tumbling bomb) and travel and rotate in flight.
+- A wide **turn bar** under the toolbar fills as a turn (gold) or replay
+  (violet) progresses and reads READY when the next turn can be taken.
 - Pawns fire the **two forward diagonals** (chess capture). A piece directly
   ahead blocks a pawn, exactly as in chess, and is not a target.
 - **Path** — dashed gold route; **destination** crosshair (red if blocked);
@@ -144,7 +156,10 @@ the control hints + stance legend live in always-visible side rails (even with
 the HUD hidden). A **Copy position JSON** button captures the full situation.
 
 Keyboard summary: `1/2/3` stance, `space` turn, `p` pause, `s` step, `r` replay,
-`c` clear orders, `o` my orders, `e` enemy plans, `h` HUD, `Esc` clear selection.
+`b` rewind (undo last turn), `c`/`4` clear orders, `o` my orders, `e` enemy
+plans, `h` HUD, `Esc` clear selection. Turns and replays both play at 0.5× speed
+(one move at a time), and the wide **turn bar** under the toolbar sweeps the full
+width (same colour for both).
 
 ## Roadmap
 

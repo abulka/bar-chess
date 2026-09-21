@@ -204,17 +204,30 @@ export class Renderer {
     const autoTarget = game.world.get(e, Target)?.entity ?? null
     const target = order?.kind === 'attack' ? order.target : autoTarget
 
-    // Attack order: a "glued" tracking chain and a lock reticle on the victim.
+    // Attack order: show the route it will take (like a move) plus a lock
+    // reticle on the victim. Falls back to a straight line once in position.
     if (order?.kind === 'attack' && target !== null && game.world.isAlive(target)) {
       const tp = game.world.get(target, Position)
       if (tp) {
         ctx.strokeStyle = TRACK_COLOR
-        ctx.lineWidth = (full ? 2.4 : 1.6) / this.camera.zoom
-        ctx.setLineDash([])
-        ctx.beginPath()
-        ctx.moveTo(pos.x, pos.y)
-        ctx.lineTo(tp.x, tp.y)
-        ctx.stroke()
+        ctx.lineWidth = (full ? 2.2 : 1.5) / this.camera.zoom
+        if (motion && motion.path.length > 0) {
+          ctx.setLineDash([5 / this.camera.zoom, 4 / this.camera.zoom])
+          ctx.beginPath()
+          ctx.moveTo(pos.x, pos.y)
+          for (const c of motion.path) {
+            const center = board.cellCenter(c.x, c.y)
+            ctx.lineTo(center.x, center.y)
+          }
+          ctx.stroke()
+          ctx.setLineDash([])
+        } else {
+          ctx.setLineDash([])
+          ctx.beginPath()
+          ctx.moveTo(pos.x, pos.y)
+          ctx.lineTo(tp.x, tp.y)
+          ctx.stroke()
+        }
         const ang = Math.atan2(tp.y - pos.y, tp.x - pos.x)
         const ah = t * 0.2
         ctx.fillStyle = TRACK_COLOR
@@ -474,16 +487,24 @@ export class Renderer {
 
       // Two stacked bars: health (team-tinted) and weapon reload (cyan), so it
       // is always clear both how hurt a piece is and whether it can fire.
-      const barY = pos.y - size * 0.6
+      // Thin, uniform bars anchored near the top of the square (tile-relative,
+      // so big pieces don't push them outside the cell).
+      const barW = t * 0.46
+      const barH = Math.max(1, t * 0.035)
+      const barY = pos.y - t * 0.4
       if (game.overlays.health) {
-        this.drawHealthBar(ctx, pos.x, barY, size, health.cur / health.max, render.tint)
+        const ratio = health.cur / health.max
+        const fill = ratio > 0.5 ? '#5ad469' : ratio > 0.25 ? '#e3b341' : '#e8503a'
+        this.drawBar(ctx, pos.x, barY, barW, barH, ratio, fill, render.tint)
       }
       const weapon = game.world.get(e, Weapon)
       const kind = game.world.get(e, PieceType)?.kind
       const def = kind ? PIECES[kind] : undefined
       if (weapon && def) {
         const cd = WEAPONS[def.weapon].cooldown
-        if (cd > 0) this.drawReloadBar(ctx, pos.x, barY + size * 0.08, size, 1 - weapon.left / cd)
+        if (cd > 0) {
+          this.drawBar(ctx, pos.x, barY + barH + 1, barW, barH, 1 - weapon.left / cd, '#e0503a', 'rgba(140,40,25,0.9)')
+        }
       }
 
       const team = game.world.get(e, Team)
@@ -513,46 +534,23 @@ export class Renderer {
     }
   }
 
-  private drawReloadBar(
+  private drawBar(
     ctx: CanvasRenderingContext2D,
     x: number,
     y: number,
-    width: number,
+    w: number,
+    h: number,
     ratio: number,
+    fill: string,
+    stroke: string,
   ): void {
-    const w = width * 0.56
-    const h = Math.max(1.5, width * 0.04)
     const left = x - w / 2
     const r = Math.max(0, Math.min(1, ratio))
     ctx.fillStyle = 'rgba(0,0,0,0.6)'
     ctx.fillRect(left, y, w, h)
-    ctx.fillStyle = r >= 1 ? '#e0503a' : '#7a2418'
+    ctx.fillStyle = fill
     ctx.fillRect(left, y, w * r, h)
-    // Dashed red outline keeps the reload bar visually distinct from health.
-    ctx.strokeStyle = '#ff6b4a'
-    ctx.lineWidth = 1 / this.camera.zoom
-    ctx.setLineDash([2 / this.camera.zoom, 2 / this.camera.zoom])
-    ctx.strokeRect(left, y, w, h)
-    ctx.setLineDash([])
-  }
-
-  private drawHealthBar(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    width: number,
-    ratio: number,
-    tint: string,
-  ): void {
-    const w = width * 0.56
-    const h = Math.max(1.5, width * 0.045)
-    const left = x - w / 2
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'
-    ctx.fillRect(left, y, w, h)
-    const r = Math.max(0, Math.min(1, ratio))
-    ctx.fillStyle = r > 0.5 ? '#5ad469' : r > 0.25 ? '#e3b341' : '#e8503a'
-    ctx.fillRect(left, y, w * r, h)
-    ctx.strokeStyle = tint
+    ctx.strokeStyle = stroke
     ctx.lineWidth = 1 / this.camera.zoom
     ctx.strokeRect(left, y, w, h)
   }

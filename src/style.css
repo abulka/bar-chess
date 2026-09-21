@@ -39,11 +39,43 @@ input {
 .app {
   height: 100vh;
   display: grid;
-  grid-template-rows: auto minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 2fr) minmax(0, 1fr);
 }
 
 .app.hud-hidden {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.turnbar {
+  position: relative;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.turnbar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0;
+  opacity: 0.5;
+  background: linear-gradient(90deg, #ffb347, #ffd166);
+  transition: width 0.1s linear;
+}
+
+.turnbar-label {
+  position: relative;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.turnbar.active .turnbar-label,
+.turnbar.replay .turnbar-label {
+  color: var(--accent);
 }
 
 /* ---------- toolbar ---------- */

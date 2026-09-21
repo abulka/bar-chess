@@ -40,11 +40,16 @@ function onSetGameMode(mode: GameMode): void {
 }
 
 function onSetStance(mode: StanceMode): void {
-  stance.value = mode
-  if (game.selected.length > 0) {
-    game.setStance(mode)
-    refresh()
-  }
+  if (game.selected.length > 0) game.setStance(mode)
+  // Hold is a one-shot command (returns to Move); Move/Fight stay selected so
+  // the next right-click uses them.
+  stance.value = mode === 'hold' ? 'move' : mode
+  refresh()
+}
+
+function onOrdered(): void {
+  stance.value = 'move'
+  refresh()
 }
 
 function onToggleOverlay(key: keyof OverlayFlags): void {
@@ -65,8 +70,10 @@ function onReset(): void {
 }
 
 function onTurn(): void {
-  if (game.turnActive) game.togglePause()
-  else game.beginTurn()
+  // Ignore during an active turn/replay so space always starts the next turn
+  // rather than cancelling the current one.
+  if (game.turnActive || snapshot.value.replaying) return
+  game.beginTurn()
   refresh()
 }
 
@@ -101,6 +108,9 @@ function onKey(event: KeyboardEvent): void {
     refresh()
   } else if (event.key === 'r') {
     onReplay()
+  } else if (event.key === 'b') {
+    game.rewindTurn()
+    refresh()
   } else if (event.key === 'c' || event.key === '4') {
     game.clearOrders()
     refresh()
@@ -150,6 +160,28 @@ onBeforeUnmount(() => {
       @toggle-hud="onToggleHud"
     />
 
+    <div
+      class="turnbar"
+      :class="{ active: snapshot.turnActive, replay: snapshot.replaying }"
+      :title="snapshot.turnActive ? 'turn in progress (space)' : 'press space for a turn, r to replay'"
+    >
+      <div
+        class="turnbar-fill"
+        :style="{ width: (snapshot.turnActive ? snapshot.turnProgress : snapshot.replaying ? snapshot.replayProgress : 0) * 100 + '%' }"
+      ></div>
+      <span class="turnbar-label">
+        {{
+          snapshot.turnActive
+            ? 'TURN'
+            : snapshot.replaying
+              ? 'REPLAY'
+              : snapshot.canReplay
+                ? 'READY — space for next turn'
+                : 'press space for a turn'
+        }}
+      </span>
+    </div>
+
     <div class="stage" :class="{ 'no-rosters': !snapshot.hudVisible }">
       <aside class="rail left">
         <div class="rail-title">controls</div>
@@ -160,7 +192,7 @@ onBeforeUnmount(() => {
           <li><b>right-click</b> enemy → attack / track</li>
           <li><b>1</b>/<b>2</b>(<b>a</b>)/<b>3</b> stance Move/Fight/Hold</li>
           <li><b>space</b> turn · <b>p</b> pause · <b>s</b> step</li>
-          <li><b>r</b> replay · <b>c</b>/<b>4</b> clear orders</li>
+          <li><b>r</b> replay · <b>b</b> rewind · <b>c</b>/<b>4</b> clear orders</li>
           <li><b>o</b> my orders · <b>e</b> enemy · <b>h</b> HUD</li>
         </ul>
       </aside>
@@ -174,7 +206,7 @@ onBeforeUnmount(() => {
 
       <div class="center">
         <div class="board-area">
-          <BoardView ref="boardView" :game="game" @changed="refresh" />
+          <BoardView ref="boardView" :game="game" @changed="refresh" @ordered="onOrdered" />
         </div>
       </div>
 

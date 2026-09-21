@@ -8,7 +8,7 @@ const props = defineProps<{
   game: Game
 }>()
 
-const emit = defineEmits<{ (e: 'changed'): void }>()
+const emit = defineEmits<{ (e: 'changed'): void; (e: 'ordered'): void }>()
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const wrapperRef = ref<HTMLDivElement | null>(null)
@@ -57,6 +57,7 @@ function additive(event: PointerEvent | MouseEvent): boolean {
 }
 
 function onPointerDown(event: PointerEvent): void {
+  button = event.button
   if (event.button === 2) return
   canvasRef.value?.setPointerCapture(event.pointerId)
   const p = pointerPos(event)
@@ -65,7 +66,6 @@ function onPointerDown(event: PointerEvent): void {
   lastX = p.x
   lastY = p.y
   moved = false
-  button = event.button
   shiftDown = event.shiftKey
   pointerDown = true
 
@@ -138,6 +138,7 @@ function onPointerUp(event: PointerEvent): void {
 function onContextMenu(event: MouseEvent): void {
   event.preventDefault()
   props.game.orderAt(cellAt(event))
+  emit('ordered')
   emit('changed')
 }
 

@@ -133,11 +133,14 @@ requestAnimationFrame(frame):
 - `advanceTurn()` ends the turn when no piece is *pending* — not mid-move, not
   already moved, and either has no goal or no route — and at least
   `MIN_TURN_TICKS = 30` ticks (~1s) have elapsed, so reloads and fire advance
-  even when nobody moves. `TURN_MAX_TICKS = 240` is the ceiling, after which
-  `snapMoves()` lands stragglers. `finishTurn()` then pauses and stores the start
-  snapshot + tick count.
-- `replayTurn()` restores that snapshot and re-runs the recorded ticks at 0.5×
-  speed (moves read one by one), returning to the exact same end state.
+  even when nobody moves. A stall guard also ends the turn if no move has started
+  for 45 ticks (blocked pieces can otherwise keep reporting a route forever).
+  `TURN_MAX_TICKS = 240` is the final ceiling, after which `snapMoves()` lands
+  stragglers. `finishTurn()` pauses and stores the snapshot + tick count.
+- `rewindTurn()` (key `b`) restores the last completed turn's start snapshot for
+  a one-step undo. `replayTurn()` restores the same snapshot and re-runs the
+  recorded ticks at 0.5× speed (moves read one by one), returning to the exact
+  same end state. Live turns run at 0.5× too.
   `World.capture()/restore()` does a deep `structuredClone` of every component
   store; `Rng.getState()/setState()` restores the PRNG. During replay
   `ctx.turnActive` is forced true so the one-move-per-turn gate matches the
@@ -251,7 +254,9 @@ cell/reservation during movement validation and path planning.
   (one move per turn) **and only one piece may be `moving` at a time**, so turns
   (and replays) read as a sequence of individual moves. Travel time scales with
   the slide length. An AI team whose opponent is human is also capped by the
-  opponent's cumulative `movesMade`, so it cannot out-move the player.
+  opponent's cumulative `movesMade`, so it cannot out-move the player. A
+  player-issued order (`Order.kind !== 'none'`) bypasses the budget, so either
+  side's pieces can be commanded directly.
 - **combat** — ticks `Weapon.left`; when ready, fires at `Target.entity` if it is
   inside `fireCells`. Because targeting decides whether a target exists at all,
   combat inherits the stance/order fire policy automatically.
@@ -318,7 +323,7 @@ Control hints + stance legend + hover readout live in always-visible side rails
 `GameSnapshot` fields (`src/game/game.ts`): `running paused tick fps tps speed
 boardId boardSize boardSizes teams timings events eventCount shots kills
 warnings selected selectedLines counts winner overlays hudVisible playerTeam
-turnActive canReplay replaying terrainVersion`.
+turnActive canReplay replaying turnProgress replayProgress terrainVersion`.
 
 | Component | Responsibility |
 | --------- | -------------- |
@@ -360,15 +365,20 @@ Chess coordinates (`coordName`) label the board margins. The right rail has a
 
 Keyboard: `1`/`2`(`a`)/`3` stance, `space` turn, `p` pause, `s` step, `r` replay,
 `c`/`4` clear orders, `o` my orders, `e` enemy plans, `h` HUD, `Esc` clear
-selection. `Game.orderAt` makes a goto on an empty square and an attack on an
-enemy, and repeating the same order toggles it off.
+selection. `Game.orderAt` makes a goto on any square and an attack on an enemy only
+in Fight stance; repeating the same order toggles it off. An attack also sets the
+piece's stance to **Hold**, so after the kill it stops and fires in range, and
+`planAttack` routes it to a firing position immediately (visible while paused). A
+right-click never changes the selection. `space` is ignored while a turn/replay
+is running; `b` rewinds the last turn.
 
 Team colour is Orange vs Blue; **red is reserved for attack indicators**: the
 tracking chain, the Fight stance badge, and the ring drawn around a piece that is
 the target of an attack order. Pieces no longer draw a default ring. Target
 rings/chains are computed from **scoped** pieces only (selection + `my orders` /
 `enemy plans`), so they never float permanently. Every piece draws a thin health
-bar and a **red dashed** reload bar (kept small so it does not dominate).
+bar and a **plain red** reload bar (tile-relative so it stays inside the cell);
+all pieces render at a uniform size.
 
 ---
 

@@ -24,10 +24,11 @@ import type { BoardSize, Placement } from './boards'
 import { createBoardData, initialArmy } from './boards'
 import { FIXED_DT, MAX_STEPS_PER_FRAME, PATH_BUDGET_PER_TICK, TEAM_COLORS, TEAM_NAMES } from './constants'
 import { coordName } from './coords'
+import { attackApproachCells, containsCell, fireCells } from './geometry'
 import { createPiece } from './factory'
 import { buildOccupancy, occupiedExcept } from './occupancy'
 import type { StanceMode, TeamId, Vec2 } from './types'
-import { PIECE_LIST, PIECES } from './pieces'
+import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { findPath } from './pathfind'
 import { Rng } from './rng'
 
@@ -123,6 +124,8 @@ export interface GameSnapshot {
   turnActive: boolean
   canReplay: boolean
   replaying: boolean
+  turnProgress: number
+  replayProgress: number
   terrainVersion: number
 }
 
@@ -189,9 +192,14 @@ export class Game {
 
   turnActive = false
   canReplay = false
+  turnProgress = 0
+  replayProgress = 0
 
   private turnSnapshot: TurnState | null = null
   private turnTicks = 0
+  private turnMovesSeen = 0
+  private turnNoProgressTicks = 0
+  private lastTurnTicks = 0
   private lastTurn: { snapshot: TurnState; ticks: number } | null = null
   private replaying = false
   private replayTicks = 0
@@ -318,8 +326,24 @@ export class Game {
     this.turnSnapshot = this.captureTurn()
     this.canReplay = false
     this.turnActive = true
+    this.turnProgress = 0
+    this.turnMovesSeen = this.teams.red.movesMade + this.teams.blue.movesMade
+    this.turnNoProgressTicks = 0
     this.paused = false
     this.bus.emit('info', 'turn started')
+  }
+
+  /** Undo the most recent completed turn (restore its start snapshot). */
+  rewindTurn(): void {
+    if (this.turnActive || this.replaying || !this.lastTurn) return
+    this.restoreTurn(this.lastTurn.snapshot)
+    this.selected = []
+    this.lastTurn = null
+    this.canReplay = false
+    this.turnProgress = 0
+    this.replayProgress = 0
+    this.paused = true
+    this.bus.emit('info', 'rewound last turn')
   }
 
   replayTurn(): void {
@@ -328,6 +352,7 @@ export class Game {
     this.selected = []
     this.replaying = true
     this.replayTicks = 0
+    this.replayProgress = 0
     this.paused = false
     this.bus.emit('info', `replaying last turn (${this.lastTurn.ticks} ticks)`)
   }
@@ -349,7 +374,23 @@ export class Game {
     }
     // Even when everyone is settled, hold the turn open for a minimum beat so
     // weapon cooldowns and in-range fire actually progress.
-    if (pending === 0 && this.turnTicks >= Game.MIN_TURN_TICKS) {
+    // Time-based bar, same mechanism as replay: ticks / expected duration
+    // (last turn's length), clamped just under full until the turn really ends.
+    const estimate = this.lastTurnTicks > 0 ? this.lastTurnTicks : Game.MIN_TURN_TICKS
+    this.turnProgress = Math.min(0.98, this.turnTicks / estimate)
+
+    // Watch for a stall: blocked pieces can keep reporting a non-empty route
+    // forever, so end the turn once no move has started for a while.
+    const moves = this.teams.red.movesMade + this.teams.blue.movesMade
+    if (moves !== this.turnMovesSeen) {
+      this.turnMovesSeen = moves
+      this.turnNoProgressTicks = 0
+    } else {
+      this.turnNoProgressTicks++
+    }
+
+    const stalled = this.turnNoProgressTicks >= 45
+    if ((pending === 0 || stalled) && this.turnTicks >= Game.MIN_TURN_TICKS) {
       this.finishTurn()
       return
     }
@@ -378,6 +419,8 @@ export class Game {
 
   private finishTurn(): void {
     this.turnActive = false
+    this.turnProgress = 1
+    this.lastTurnTicks = this.turnTicks
     this.paused = true
     if (this.turnSnapshot) {
       this.lastTurn = { snapshot: this.turnSnapshot, ticks: this.turnTicks }
@@ -427,7 +470,8 @@ export class Game {
     }
 
     if (!this.paused) {
-      const scale = this.replaying ? 0.5 : this.speed
+      // Turns and replays both play at half speed (one move at a time).
+      const scale = this.turnActive || this.replaying ? 0.5 : this.speed
       this.accumulator += delta * scale
       let steps = 0
       while (this.accumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
@@ -456,8 +500,11 @@ export class Game {
 
     if (this.replaying) {
       this.replayTicks++
-      if (this.replayTicks >= (this.lastTurn?.ticks ?? 0)) {
+      const total = this.lastTurn?.ticks ?? 0
+      this.replayProgress = total > 0 ? Math.min(1, this.replayTicks / total) : 1
+      if (this.replayTicks >= total) {
         this.replaying = false
+        this.replayProgress = 1
         this.paused = true
         this.bus.emit('info', 'replay finished')
       }
@@ -619,6 +666,12 @@ export class Game {
         motion.goal = null
         motion.path = []
         motion.arrived = true
+        // After the kill the piece reverts to Hold: stop and fire in range,
+        // rather than wandering in Fight.
+        const stance = this.world.get(e, Stance)
+        if (stance) stance.mode = 'hold'
+        // Plan the route to a firing position now so it is visible while paused.
+        this.planAttack(e, motion, occupant)
       } else {
         order.kind = 'goto'
         order.dest = cell
@@ -743,6 +796,39 @@ export class Game {
     }
   }
 
+  /** Route an attack order to the nearest firing position (skipped if in range). */
+  private planAttack(e: Entity, motion: MotionData, target: Entity): void {
+    const cell = this.world.get(e, Cell)
+    const kind = this.world.get(e, PieceType)?.kind
+    const team = this.world.get(e, Team)
+    const tcell = this.world.get(target, Cell)
+    if (!cell || !kind || !team || !tcell) return
+    const def = PIECES[kind]
+    if (!def) return
+    const geometry = WEAPONS[def.weapon].geometry
+    const occ = buildOccupancy(this.world, this.board)
+    const blocked = occupiedExcept(this.board, occ, e)
+    if (containsCell(fireCells(this.board, cell, geometry, team, blocked), tcell.x, tcell.y)) {
+      motion.goal = null
+      motion.path = []
+      return
+    }
+    const candidates = attackApproachCells(this.board, tcell, geometry, team, blocked)
+    let best: Vec2 | null = null
+    let bestDist = Infinity
+    for (const c of candidates) {
+      const d = (c.x - cell.x) ** 2 + (c.y - cell.y) ** 2
+      if (d < bestDist) {
+        bestDist = d
+        best = c
+      }
+    }
+    if (best) {
+      motion.goal = best
+      this.planNow(e, motion, best)
+    }
+  }
+
   private planNow(e: Entity, motion: MotionData, dest: Vec2): void {
     const cell = this.world.get(e, Cell)
     const kind = this.world.get(e, PieceType)?.kind
@@ -839,6 +925,8 @@ export class Game {
       turnActive: this.turnActive,
       canReplay: this.canReplay,
       replaying: this.replaying,
+      turnProgress: this.turnProgress,
+      replayProgress: this.replayProgress,
       terrainVersion: this.terrainVersion,
     }
   }

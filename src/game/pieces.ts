@@ -121,7 +121,7 @@ export const PIECES: Record<string, PieceDef> = {
     buildTime: 2.5,
     supply: 1,
     cap: 16,
-    size: 0.72,
+    size: 0.8,
     radius: 0.3,
   },
   knight: {
@@ -135,7 +135,7 @@ export const PIECES: Record<string, PieceDef> = {
     buildTime: 6,
     supply: 3,
     cap: 6,
-    size: 0.82,
+    size: 0.8,
     radius: 0.34,
   },
   bishop: {
@@ -149,7 +149,7 @@ export const PIECES: Record<string, PieceDef> = {
     buildTime: 5,
     supply: 3,
     cap: 6,
-    size: 0.82,
+    size: 0.8,
     radius: 0.34,
   },
   rook: {
@@ -163,7 +163,7 @@ export const PIECES: Record<string, PieceDef> = {
     buildTime: 8,
     supply: 5,
     cap: 4,
-    size: 0.9,
+    size: 0.8,
     radius: 0.38,
   },
   queen: {
@@ -177,7 +177,7 @@ export const PIECES: Record<string, PieceDef> = {
     buildTime: 12,
     supply: 7,
     cap: 2,
-    size: 0.95,
+    size: 0.8,
     radius: 0.4,
   },
   king: {
@@ -191,7 +191,7 @@ export const PIECES: Record<string, PieceDef> = {
     buildTime: 15,
     supply: 8,
     cap: 1,
-    size: 1,
+    size: 0.8,
     radius: 0.42,
   },
 }
