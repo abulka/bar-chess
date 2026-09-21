@@ -37,6 +37,8 @@ export interface OrderData {
   kind: OrderKind
   dest: Vec2 | null
   target: Entity | null
+  /** For an attack order: whether the target is positionally reachable at all. */
+  reachable: boolean
 }
 
 export interface TargetData {

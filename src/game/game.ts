@@ -26,9 +26,10 @@ import { FIXED_DT, MAX_STEPS_PER_FRAME, PATH_BUDGET_PER_TICK, TEAM_COLORS, TEAM_
 import { coordName } from './coords'
 import { containsCell, fireCells } from './geometry'
 import type { OccupiedFn } from './geometry'
-import { bestFiringCell } from './approach'
+import { closestEmptyCell, firingPositionExists, previewFiringCell } from './approach'
 import { createPiece } from './factory'
 import { buildOccupancy, occupiedExcept } from './occupancy'
+import type { Occupancy } from './occupancy'
 import type { StanceMode, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { findPath } from './pathfind'
@@ -171,7 +172,7 @@ export class Game {
   speed = 1
   running = false
   paused = false
-  hudVisible = true
+  hudVisible = false
   winner: TeamId | null = null
   terrainVersion = 0
   playerTeam: TeamId = 'blue'
@@ -668,7 +669,7 @@ export class Game {
         motion.path = []
         motion.arrived = true
         // Plan the route to a firing position now so it is visible while paused.
-        this.planAttack(e, motion, occupant)
+        order.reachable = this.planAttack(e, motion, occupant)
       } else {
         order.kind = 'goto'
         order.dest = cell
@@ -680,7 +681,9 @@ export class Game {
           t.lastAttacker = null
         }
         motion.goal = cell
-        this.planNow(e, motion, cell, occupiedExcept(this.board, occ, e))
+        // Fall back to a friendly-passable route when boxed in, so a blocked
+        // move still shows a path instead of a bare straight line.
+        this.planNow(e, motion, cell, occupiedExcept(this.board, occ, e), this.friendlyPass(occ, e, team))
       }
       n++
     }
@@ -769,7 +772,9 @@ export class Game {
         pos: { x: Math.round(pos.x), y: Math.round(pos.y) },
         hp: hp ? { cur: hp.cur, max: hp.max } : null,
         stance: stance?.mode ?? null,
-        order: order ? { kind: order.kind, dest: order.dest, target: order.target } : null,
+        order: order
+          ? { kind: order.kind, dest: order.dest, target: order.target, reachable: order.reachable }
+          : null,
         target: target ? { entity: target.entity, lastAttacker: target.lastAttacker } : null,
         motion: motion
           ? {
@@ -798,41 +803,67 @@ export class Game {
     }
   }
 
-  /** Route an attack order to the nearest firing position (skipped if in range). */
-  private planAttack(e: Entity, motion: MotionData, target: Entity): void {
+  /**
+   * Route an attack order to the nearest firing position (skipped if in range).
+   * Returns whether the target is positionally reachable at all.
+   */
+  private planAttack(e: Entity, motion: MotionData, target: Entity): boolean {
     const cell = this.world.get(e, Cell)
     const kind = this.world.get(e, PieceType)?.kind
     const team = this.world.get(e, Team)
     const tcell = this.world.get(target, Cell)
-    if (!cell || !kind || !team || !tcell) return
+    if (!cell || !kind || !team || !tcell) return false
     const def = PIECES[kind]
-    if (!def) return
+    if (!def) return false
     const geometry = WEAPONS[def.weapon].geometry
     const occ = buildOccupancy(this.world, this.board)
     const blocked = occupiedExcept(this.board, occ, e)
+    const reachable = firingPositionExists(this.board, cell, tcell, def.move, geometry, team)
     if (containsCell(fireCells(this.board, cell, geometry, team, blocked), tcell.x, tcell.y)) {
       motion.goal = null
       motion.path = []
-      return
+      return true
     }
-    const best = bestFiringCell(this.board, cell, tcell, def.move, geometry, team, blocked)
-    if (best) {
-      motion.goal = best
-      this.planNow(e, motion, best, blocked)
-    }
+    // Navigation is theoretical (future): other pieces are assumed to move, so
+    // the route only avoids walls and the target's own square and is shown even
+    // when the board is currently blocked. It should still end on a real square,
+    // so the goal is chosen against the live board (a firing cell, else the
+    // closest empty reachable cell). The firing line itself is judged against
+    // the live board: clear / blocked / out of reach.
+    const targetIdx = tcell.y * this.board.width + tcell.x
+    const planOccupied: OccupiedFn = (x, y) => y * this.board.width + x === targetIdx
+    const goal =
+      previewFiringCell(this.board, cell, tcell, def.move, geometry, team, blocked) ??
+      closestEmptyCell(this.board, cell, tcell, def.move, team, blocked) ??
+      { x: tcell.x, y: tcell.y }
+    motion.goal = goal
+    this.planNow(e, motion, goal, planOccupied)
+    return reachable
   }
 
-  private planNow(e: Entity, motion: MotionData, dest: Vec2, occupied: OccupiedFn): void {
+  private planNow(e: Entity, motion: MotionData, dest: Vec2, occupied: OccupiedFn, fallback?: OccupiedFn): void {
     const cell = this.world.get(e, Cell)
     const kind = this.world.get(e, PieceType)?.kind
     const team = this.world.get(e, Team)
     if (!cell || !kind || !team) return
     const def = PIECES[kind]
     if (!def) return
-    const result = findPath(this.board, cell, dest, def.move, team, occupied)
+    let result = findPath(this.board, cell, dest, def.move, team, occupied)
+    if (!result.found && result.cells.length === 0 && fallback) {
+      result = findPath(this.board, cell, dest, def.move, team, fallback)
+    }
     motion.path = result.cells
     motion.replanAt = this.tick + 15
     motion.blocked = !result.found
+  }
+
+  /** Treats friendly pieces as passable (they move); enemies and walls block. */
+  private friendlyPass(occ: Occupancy, self: Entity, team: TeamId): OccupiedFn {
+    return (x, y) => {
+      const other = occ.get(y * this.board.width + x)
+      if (other === undefined || other === self) return false
+      return this.world.get(other, Team) !== team
+    }
   }
 
   paint(x: number, y: number, terrain: number): void {

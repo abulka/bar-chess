@@ -83,8 +83,7 @@ const system: System = {
         }
         order.kind = 'none'
         order.target = null
-        // The order is done; return to no stance so the piece stands down.
-        stance.mode = 'none'
+        // The order is done; the stance is kept so the piece stays in Attack.
       }
 
       // 2. Goto order: advance toward the objective (best effort if unreachable).

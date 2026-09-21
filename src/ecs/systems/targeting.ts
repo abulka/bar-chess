@@ -1,3 +1,4 @@
+import { firingPositionExists } from '../../game/approach'
 import { fireCells } from '../../game/geometry'
 import { buildOccupancy, makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS, weaponVision } from '../../game/pieces'
@@ -91,13 +92,18 @@ const system: System = {
         if (t !== null && ctx.world.isAlive(t) && ctx.world.has(t, Cell)) {
           target.entity = t
           target.retargetAt = ctx.tick + RETARGET_TICKS
+          // Keep the reachability flag current as the target moves.
+          const cell = ctx.world.require(e, Cell)
+          const tcell = ctx.world.get(t, Cell)
+          if (tcell) {
+            order.reachable = firingPositionExists(ctx.board, cell, tcell, def.move, WEAPONS[def.weapon].geometry, team)
+          }
           continue
         }
         order.kind = 'none'
         order.target = null
         target.entity = null
-        // The order is done; return to no stance so the piece stands down.
-        stance.mode = 'none'
+        // The order is done, but the stance is kept (the player can change it).
         continue
       }
 

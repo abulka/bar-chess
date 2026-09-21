@@ -15,7 +15,7 @@ import {
 } from '../ecs/components'
 import type { Entity } from '../ecs/world'
 import { buildOccupancy, makeOccupied } from '../game/occupancy'
-import { fireCells, moveDestinations } from '../game/geometry'
+import { containsCell, fireCells, moveDestinations } from '../game/geometry'
 import { PIECES, WEAPONS } from '../game/pieces'
 import { resolveGeometry } from '../game/types'
 import { coordName, fileLabel } from '../game/coords'
@@ -28,6 +28,7 @@ const STANCE_COLORS: Record<string, string> = {
   attack: '#ff3b30',
 }
 const TRACK_COLOR = '#ff2d20'
+const UNREACHABLE_COLOR = '#a0a6ac'
 
 export class Renderer {
   camera = new Camera()
@@ -205,14 +206,25 @@ export class Renderer {
       ctx.setLineDash([])
     }
 
-    // Attack order: draw the route to the firing position plus a lock reticle on
-    // the victim. No direct source→victim line: the route is the display.
+    // Attack order: a gold dashed movement route to the firing position, then a
+    // firing line to the victim — solid red when the shot is clear, solid red
+    // up to a blocker + dashed red beyond it, or dashed grey when out of reach.
     if (order?.kind === 'attack' && target !== null && game.world.isAlive(target)) {
       const tp = game.world.get(target, Position)
-      if (tp) {
-        ctx.strokeStyle = TRACK_COLOR
-        ctx.lineWidth = (full ? 2.2 : 1.5) / this.camera.zoom
+      const tc = game.world.get(target, Cell)
+      if (tp && tc) {
+        const endCell = motion && motion.path.length > 0 ? motion.path[motion.path.length - 1] : cell
+        const end = board.cellCenter(endCell.x, endCell.y)
+        const weaponGeom = WEAPONS[def.weapon].geometry
+        const reachable = order?.reachable ?? true
+        const clearShot =
+          reachable && containsCell(fireCells(board, endCell, weaponGeom, team, occupied), tc.x, tc.y)
+
+        // Movement route (same gold "route" style as a move order), so it reads
+        // separately from the red/grey firing line that follows it.
         if (motion && motion.path.length > 0) {
+          ctx.strokeStyle = full ? '#ffd166' : 'rgba(255,209,102,0.7)'
+          ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
           ctx.setLineDash([5 / this.camera.zoom, 4 / this.camera.zoom])
           ctx.beginPath()
           ctx.moveTo(pos.x, pos.y)
@@ -223,15 +235,68 @@ export class Renderer {
           ctx.stroke()
           ctx.setLineDash([])
         }
-        const ang = Math.atan2(tp.y - pos.y, tp.x - pos.x)
+
+        const dash = [5 / this.camera.zoom, 4 / this.camera.zoom]
+        const segment = (ax: number, ay: number, bx: number, by: number) => {
+          ctx.beginPath()
+          ctx.moveTo(ax, ay)
+          ctx.lineTo(bx, by)
+          ctx.stroke()
+        }
+        const lineColor = !reachable ? UNREACHABLE_COLOR : TRACK_COLOR
+        ctx.strokeStyle = lineColor
+        ctx.lineWidth = (full ? (clearShot ? 2.2 : 1.6) : 1.4) / this.camera.zoom
+
+        if (!reachable) {
+          ctx.setLineDash(dash)
+          segment(end.x, end.y, tp.x, tp.y)
+        } else if (clearShot) {
+          ctx.setLineDash([])
+          segment(end.x, end.y, tp.x, tp.y)
+        } else {
+          // Positionally reachable but blocked: solid red up to the first
+          // blocker, dashed red from there to the victim.
+          const dx = tc.x - endCell.x
+          const dy = tc.y - endCell.y
+          const straight = dx === 0 || dy === 0 || Math.abs(dx) === Math.abs(dy)
+          const steps = Math.max(Math.abs(dx), Math.abs(dy))
+          const sx = Math.sign(dx)
+          const sy = Math.sign(dy)
+          let blocker: { x: number; y: number } | null = null
+          if (straight && steps > 1) {
+            for (let k = 1; k < steps; k++) {
+              const x = endCell.x + sx * k
+              const y = endCell.y + sy * k
+              if (occupied(x, y) || board.blocksVision(x, y)) {
+                blocker = { x, y }
+                break
+              }
+            }
+          }
+          if (blocker) {
+            const bp = board.cellCenter(blocker.x, blocker.y)
+            ctx.setLineDash([])
+            segment(end.x, end.y, bp.x, bp.y)
+            ctx.setLineDash(dash)
+            segment(bp.x, bp.y, tp.x, tp.y)
+          } else {
+            ctx.setLineDash(dash)
+            segment(end.x, end.y, tp.x, tp.y)
+          }
+        }
+        ctx.setLineDash([])
+
+        const ang = Math.atan2(tp.y - end.y, tp.x - end.x)
         const ah = t * 0.2
-        ctx.fillStyle = TRACK_COLOR
+        ctx.fillStyle = lineColor
         ctx.beginPath()
         ctx.moveTo(tp.x, tp.y)
         ctx.lineTo(tp.x - Math.cos(ang - 0.4) * ah, tp.y - Math.sin(ang - 0.4) * ah)
         ctx.lineTo(tp.x - Math.cos(ang + 0.4) * ah, tp.y - Math.sin(ang + 0.4) * ah)
         ctx.closePath()
         ctx.fill()
+        ctx.strokeStyle = TRACK_COLOR
+        ctx.lineWidth = (full ? 2.2 : 1.5) / this.camera.zoom
         ctx.beginPath()
         ctx.arc(tp.x, tp.y, t * 0.24, 0, Math.PI * 2)
         ctx.stroke()
@@ -251,10 +316,15 @@ export class Renderer {
       const partial = motion?.blocked || !(order?.kind === 'goto' && order.dest && order.dest.x === goal.x && order.dest.y === goal.y)
       ctx.strokeStyle = partial ? '#ffb347' : '#ffd166'
       ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
-      if (!motion || motion.path.length === 0) {
+      // Connect the route to the objective whenever the path does not already
+      // end there (empty path, or a best-effort partial route).
+      const last = motion && motion.path.length > 0 ? motion.path[motion.path.length - 1] : null
+      const reachesGoal = last !== null && last.x === goal.x && last.y === goal.y
+      if (!reachesGoal) {
+        const from = last ? board.cellCenter(last.x, last.y) : pos
         ctx.setLineDash([3 / this.camera.zoom, 5 / this.camera.zoom])
         ctx.beginPath()
-        ctx.moveTo(pos.x, pos.y)
+        ctx.moveTo(from.x, from.y)
         ctx.lineTo(center.x, center.y)
         ctx.stroke()
       }

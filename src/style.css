@@ -128,6 +128,11 @@ input {
   padding-left: 6px;
 }
 
+.order-modes .key {
+  opacity: 0.6;
+  font-size: 0.85em;
+}
+
 .spacer {
   flex: 1;
 }
@@ -237,8 +242,30 @@ input {
   border: 2px solid rgba(255, 90, 70, 0.9);
 }
 
-.sw-path {
-  border: 1px dashed #ffd166;
+.ln {
+  display: inline-block;
+  width: 22px;
+  height: 0;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-top-width: 2px;
+  border-top-style: solid;
+}
+
+.ln-route {
+  border-top: 2px dashed #ffd166;
+}
+
+.ln-shoot {
+  border-top: 2px solid #ff2d20;
+}
+
+.ln-blocked {
+  border-top: 2px dashed #ff2d20;
+}
+
+.ln-unreachable {
+  border-top: 2px dashed #a0a6ac;
 }
 
 .sw-bar {

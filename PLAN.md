@@ -74,14 +74,26 @@ on the piece and set with the toolbar buttons or `1`/`m` (Move) and `2`/`a`
   advance), never as a target, and a move order clears any stale target.
 - Re-issuing an order just keeps/refreshes it (no toggle); `c` or `Backspace`
   clears orders on the selection.
-- The attack's route is planned immediately and drawn as a **red dashed path** to
-  a firing position, with a lock reticle on the victim. There is no extra direct
-  source→victim line: the route is the display, and it is only drawn when a real
-  route exists (never a misleading straight line through blockers).
+- The attack's route is always shown and **theoretical**: it assumes other pieces
+  will move, so only walls and the target's own square are avoided and the route
+  stays visible even when the piece is boxed in. It ends on a real square — a
+  firing cell when one exists, otherwise the closest empty cell reachable if the
+  board were clear. The route uses the gold **route** style so it reads apart
+  from the firing line.
+  From the end of that route a **firing line** runs to the victim, judged against
+  the **current** board: **solid red** when the shot is clear; when it is
+  positionally reachable but blocked, **solid red up to the blocker and dashed
+  red beyond it**; and **dashed grey** when the target is positionally out of
+  reach (e.g. a bishop on the other colour). A lock reticle sits on the victim,
+  and the legend groups these under **firing lines**.
+- A **goto** order also shows a best-effort route rather than a bare straight
+  line, falling back to a friendly-passable plan when the piece is boxed in, and
+  always draws a connector from the end of that route to the objective so a
+  partial route never dead-ends in mid-air.
 - Issuing an attack does not change the persistent stance: the piece stays in
-  Attack while the order runs and its badge shows a red **A**. When the target
-  dies the order clears and the piece returns to **no stance** (badge
-  disappears), so it stands down instead of wandering.
+  Attack while the order runs, and when the target dies the order clears but the
+  piece **stays in Attack** — so a follow-up right-click attacks again and it
+  keeps engaging nearby enemies until the player changes the stance.
 - Only pieces whose team is under human control can be commanded: your own team
   in Human-vs-AI, **both** teams in Human-vs-Human, nobody in AI-vs-AI. Enemy
   pieces remain selectable for inspection.

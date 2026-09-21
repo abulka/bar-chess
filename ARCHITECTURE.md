@@ -92,7 +92,7 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Render` | `{ glyph, tint, size }` | unicode glyph + team tint |
 | `Health` | `{ cur, max }` | |
 | `Stance` | `{ mode }` | persistent policy: `none` / `move` / `attack` (`none` stands ground and fires in range, with no badge) |
-| `Order` | `{ kind, dest, target }` | one-shot: `none` / `goto` / `attack` |
+| `Order` | `{ kind, dest, target, reachable }` | one-shot: `none` / `goto` / `attack`; `reachable` marks an attack target that is positionally attainable |
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping |
 | `Weapon` | `{ left }` | seconds until next shot |
 | `Motion` | `{ goal, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn }` | grid movement + render interpolation; `reserved` is the cell being entered |
@@ -235,8 +235,8 @@ cell/reservation during movement validation and path planning.
   nearest enemy already in firing geometry; `attack` auto-acquires the nearest
   enemy within `weaponVision`, biased toward damaged ones; `move` only targets
   its `lastAttacker` while `underFire`. AI-controlled teams always behave as
-  `attack`. When an attack order ends (target gone) the piece's stance resets to
-  `none`.
+  `attack`. When an attack order ends (target gone) the order clears but the
+  stance is kept, so the piece stays in Attack.
 - **ai** — turns stance/order into `Motion.goal`: an `attack` order pursues the
   target (or stops to fire when in geometry); a `goto` order advances toward the
   objective (best effort); autonomous `attack` pursues in a leash, flees below
@@ -322,7 +322,8 @@ large displays. `zoomAt` is cursor-anchored; wheel zoom is exponential on
 and copies `game.snapshot()` into a `shallowRef` every
 `SNAPSHOT_INTERVAL_MS = 120`. The simulation never depends on Vue reactivity.
 Control hints + stance legend + hover readout live in always-visible side rails
-(left/right), independent of the HUD toggle, so they never cover the board.
+(left/right), independent of the HUD toggle, so they never cover the board. The
+HUD starts hidden; `h` toggles it.
 
 `GameSnapshot` fields (`src/game/game.ts`): `running paused tick fps tps speed
 boardId boardSize boardSizes teams timings events eventCount shots kills
@@ -376,11 +377,17 @@ step, `r` replay, `c`/`Backspace` clear orders, `o` my orders, `e` enemy plans,
 attack on an enemy only in Attack stance; re-issuing the same order keeps it, and
 only pieces under human control can be commanded. An attack does not change the
 persistent stance; its badge shows a red **A** while the order is active. The
-attack route is a red dashed path to a firing position with a lock reticle (never
-a straight line through blockers). When the target dies the order clears, stance
-resets to `none`, and `planAttack` routes immediately (visible while paused)
-against a fresh occupancy map. A right-click never changes the selection. `space`
-is ignored while a turn/replay is running; `b` rewinds the last turn.
+attack navigation is theoretical: a gold dashed route planned as if the board
+were clear (only walls and the target's square avoided), ending on a genuine
+firing cell or the closest empty reachable cell. The firing line from there to
+the victim is judged against the current board: solid red when the shot is clear;
+solid red up to the blocker and dashed red beyond it when reachable but blocked;
+dashed grey when positionally out of reach. A lock reticle sits on the victim and
+the legend groups these under "firing lines". When the target dies the order
+clears but the stance is kept (the piece stays in Attack), and `planAttack`
+routes immediately (visible while paused) against a fresh occupancy map. A
+right-click never changes the selection. `space` is ignored while a turn/replay
+is running; `b` rewinds the last turn.
 
 Team colour is Orange vs Blue; **red is reserved for attack indicators**: the
 tracking chain, the Attack stance badge, and the ring drawn around a piece that is

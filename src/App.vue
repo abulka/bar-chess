@@ -232,8 +232,14 @@ onBeforeUnmount(() => {
         <ul class="legend">
           <li><span class="sw sw-move"></span> move cells</li>
           <li><span class="sw sw-attack"></span> attack cells</li>
-          <li><span class="sw sw-path"></span> path / objective</li>
+          <li><span class="ln ln-route"></span> route / objective</li>
           <li><span class="sw sw-bar"></span> health · <span class="sw sw-reload"></span> reload (red)</li>
+        </ul>
+        <div class="rail-title">firing lines</div>
+        <ul class="legend">
+          <li><span class="ln ln-shoot"></span> clear shot</li>
+          <li><span class="ln ln-blocked"></span> blocked</li>
+          <li><span class="ln ln-unreachable"></span> out of reach</li>
         </ul>
         <button class="ctl copy-btn" @click="copyJson">{{ copied ? 'Copied!' : 'Copy position JSON' }}</button>
       </aside>

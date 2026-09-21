@@ -22,9 +22,9 @@ const emit = defineEmits<{
 }>()
 
 const speeds = [0.5, 1, 2, 4]
-const stances: Array<{ id: StanceMode; label: string; title: string }> = [
-  { id: 'move', label: 'Move', title: 'Move stance (1/m): travel, only return fire' },
-  { id: 'attack', label: 'Attack', title: 'Attack stance (2/a): engage nearby, flee when low' },
+const stances: Array<{ id: StanceMode; label: string; keys: string; title: string }> = [
+  { id: 'move', label: 'Move', keys: '1/m', title: 'Move stance: travel, only return fire' },
+  { id: 'attack', label: 'Attack', keys: '2/a', title: 'Attack stance: engage nearby, flee when low' },
 ]
 const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
   { key: 'myOrders', label: 'my orders (o)' },
@@ -59,6 +59,8 @@ function onOverlayChange(key: keyof OverlayFlags, event: Event): void {
 <template>
   <header class="toolbar">
     <div class="brand">Bar Chess</div>
+
+    <button class="ctl" @click="emit('reset')">Reset</button>
 
     <select
       class="ctl"
@@ -116,11 +118,9 @@ function onOverlayChange(key: keyof OverlayFlags, event: Event): void {
         :title="m.title"
         @click="emit('set-stance', m.id)"
       >
-        {{ m.label }}
+        {{ m.label }} <span class="key">{{ m.keys }}</span>
       </button>
     </div>
-
-    <button class="ctl" @click="emit('reset')">Reset</button>
 
     <div class="spacer"></div>
 
