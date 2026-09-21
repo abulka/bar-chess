@@ -2,6 +2,7 @@ import type { Board } from './board'
 import { moveDestinations } from './geometry'
 import type { OccupiedFn } from './geometry'
 import type { Geometry, TeamId, Vec2 } from './types'
+import { resolveGeometry } from './types'
 
 const NEVER: OccupiedFn = () => false
 
@@ -63,6 +64,67 @@ export interface PathResult {
   cells: Vec2[]
   found: boolean
   expanded: number
+}
+
+/**
+ * Every cell a piece can ever step onto, ignoring other pieces (walls and
+ * impassable terrain still block). This is the reachability `findPath` uses with
+ * no occupancy, computed in a single flood fill instead of one A* per target —
+ * which matters when a long-range attacker probes many approach cells at once.
+ */
+export function reachableCells(
+  board: Board,
+  from: Vec2,
+  geom: Geometry,
+  team: TeamId,
+): Uint8Array {
+  const w = board.width
+  const h = board.height
+  const seen = new Uint8Array(w * h)
+  if (!board.inBounds(from.x, from.y)) return seen
+  const g = resolveGeometry(geom, team)
+  const start = from.y * w + from.x
+  seen[start] = 1
+  const queue: number[] = [start]
+
+  const visit = (x: number, y: number): boolean => {
+    const idx = y * w + x
+    if (seen[idx]) return false
+    seen[idx] = 1
+    queue.push(idx)
+    return true
+  }
+
+  for (let qi = 0; qi < queue.length; qi++) {
+    const current = queue[qi]
+    const cx = current % w
+    const cy = (current - cx) / w
+
+    if (g.kind === 'slide') {
+      for (const [dx, dy] of g.dirs) {
+        for (let k = 1; k <= g.range; k++) {
+          const x = cx + dx * k
+          const y = cy + dy * k
+          if (!board.passable(x, y)) break
+          if (!visit(x, y)) continue
+        }
+      }
+      continue
+    }
+
+    if (g.kind === 'leap') {
+      for (const [dx, dy] of g.offsets) {
+        const x = cx + dx
+        const y = cy + dy
+        if (board.passable(x, y)) visit(x, y)
+      }
+      continue
+    }
+
+    const y = cy + g.dy * g.forward
+    if (board.passable(cx, y)) visit(cx, y)
+  }
+  return seen
 }
 
 /**
