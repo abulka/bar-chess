@@ -107,7 +107,11 @@ onBeforeUnmount(() => {
       <div class="center">
         <BoardView ref="boardView" :game="game" :order-mode="orderMode" @changed="refresh" />
         <div class="board-hint">
-          left-click select · shift-click multi-select · right-click order · drag pan · wheel zoom
+          select (shift-click to add) · right-click to order
+          <b :style="{ color: orderMode === 'move' ? '#5ab0ff' : orderMode === 'fight' ? '#ff6b5a' : '#ffd166' }">
+            {{ orderMode.toUpperCase() }}
+          </b>
+          · keys m/f/o · drag pan · wheel zoom · h HUD
         </div>
       </div>
       <ReinforcementBar

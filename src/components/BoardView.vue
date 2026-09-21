@@ -84,7 +84,9 @@ function onPointerUp(event: PointerEvent): void {
 function onWheel(event: WheelEvent): void {
   event.preventDefault()
   const p = pointerPos(event)
-  renderer?.camera.zoomAt(p.x, p.y, event.deltaY < 0 ? 1.12 : 1 / 1.12)
+  const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY
+  const factor = Math.min(1.4, Math.max(0.7, Math.exp(-delta * 0.0008)))
+  renderer?.camera.zoomAt(p.x, p.y, factor)
   emit('changed')
 }
 

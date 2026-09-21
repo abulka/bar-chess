@@ -5,7 +5,8 @@ import { createPipeline } from '../ecs/systems'
 import { World } from '../ecs/world'
 import type { Entity } from '../ecs/world'
 import type { Commands, SimContext, TeamRuntime } from '../ecs/types'
-import { Cell, Fx, Intent, Motion, PieceType, Position, Projectile } from '../ecs/components'
+import { Cell, Fx, Intent, Motion, PieceType, Position, Projectile, Team } from '../ecs/components'
+import type { MotionData } from '../ecs/components'
 import { Board } from './board'
 import type { BoardSize, Placement } from './boards'
 import { createBoardData, initialArmy } from './boards'
@@ -13,6 +14,7 @@ import { FIXED_DT, MAX_STEPS_PER_FRAME, PATH_BUDGET_PER_TICK, TEAM_COLORS, TEAM_
 import { createPiece } from './factory'
 import type { IntentMode, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES } from './pieces'
+import { findPath } from './pathfind'
 import { Rng } from './rng'
 
 export interface PieceSnapshot {
@@ -295,18 +297,47 @@ export class Game {
     for (const e of this.selected) {
       if (!this.world.isAlive(e)) continue
       const intent = this.world.get(e, Intent)
-      if (!intent) continue
-      intent.mode = mode
-      intent.dest = mode === 'move' ? dest : null
-      intent.player = true
       const motion = this.world.get(e, Motion)
-      if (motion && mode !== 'move') motion.goal = null
+      if (!intent || !motion) continue
+      intent.mode = mode
+      intent.dest = mode === 'hold' ? null : dest
+      intent.player = true
+
+      if (mode === 'move' && dest) {
+        // Plan immediately so the route is visible even while paused.
+        motion.goal = dest
+        this.planNow(e, motion, dest)
+      } else if (mode === 'fight' && dest) {
+        // Fight treats the destination as a rally point until a target appears.
+        motion.goal = dest
+        this.planNow(e, motion, dest)
+      } else {
+        motion.goal = null
+        motion.path = []
+        motion.arrived = true
+      }
     }
+    const n = this.selected.length
     if (mode === 'move' && dest) {
-      this.bus.emit('info', `orders: ${this.selected.length} piece(s) move to (${dest.x},${dest.y})`)
+      this.bus.emit('info', `orders: ${n} piece(s) move to (${dest.x},${dest.y})`)
+    } else if (mode === 'hold') {
+      this.bus.emit('info', `orders: ${n} piece(s) hold`)
     } else {
-      this.bus.emit('info', `orders: ${this.selected.length} piece(s) ${mode}`)
+      this.bus.emit('info', `orders: ${n} piece(s) ${mode}`)
     }
+  }
+
+  private planNow(e: Entity, motion: MotionData, dest: Vec2): void {
+    const cell = this.world.get(e, Cell)
+    const kind = this.world.get(e, PieceType)?.kind
+    const team = this.world.get(e, Team)
+    if (!cell || !kind || !team) return
+    const def = PIECES[kind]
+    if (!def) return
+    const result = findPath(this.board, cell, dest, def.move, team)
+    motion.path = result.cells
+    motion.replanAt = this.tick + 15
+    motion.blocked = !result.found
   }
 
   paint(x: number, y: number, terrain: number): void {

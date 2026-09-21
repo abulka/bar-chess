@@ -14,6 +14,8 @@ export class Renderer {
   private terrain: HTMLCanvasElement | null = null
   private terrainKey = ''
   private canvas: HTMLCanvasElement
+  private worldW = 0
+  private worldH = 0
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas
@@ -26,10 +28,13 @@ export class Renderer {
     this.canvas.height = Math.max(1, Math.floor(rect.height * dpr))
     this.camera.viewportWidth = rect.width
     this.camera.viewportHeight = rect.height
+    if (this.worldW > 0) this.camera.updateLimits(this.worldW, this.worldH)
   }
 
   fit(game: Game): void {
-    this.camera.fit(game.board.pixelWidth, game.board.pixelHeight)
+    this.worldW = game.board.pixelWidth
+    this.worldH = game.board.pixelHeight
+    this.camera.fit(this.worldW, this.worldH)
   }
 
   draw(game: Game): void {
@@ -40,6 +45,8 @@ export class Renderer {
     const vw = this.camera.viewportWidth
     const vh = this.camera.viewportHeight
     const board = game.board
+    this.worldW = board.pixelWidth
+    this.worldH = board.pixelHeight
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.fillStyle = '#0b0f16'
@@ -185,6 +192,31 @@ export class Renderer {
           ctx.stroke()
           ctx.setLineDash([])
         }
+      }
+
+      const goal = motion?.goal ?? null
+      if (goal) {
+        const center = board.cellCenter(goal.x, goal.y)
+        const pos = game.world.get(e, Position)
+        ctx.strokeStyle = motion?.blocked ? '#ff7b72' : '#ffd166'
+        ctx.lineWidth = 2 / this.camera.zoom
+        if (pos && (!motion || motion.path.length === 0)) {
+          ctx.setLineDash([3 / this.camera.zoom, 5 / this.camera.zoom])
+          ctx.beginPath()
+          ctx.moveTo(pos.x, pos.y)
+          ctx.lineTo(center.x, center.y)
+          ctx.stroke()
+          ctx.setLineDash([])
+        }
+        ctx.beginPath()
+        ctx.arc(center.x, center.y, t * 0.26, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.moveTo(center.x - t * 0.16, center.y)
+        ctx.lineTo(center.x + t * 0.16, center.y)
+        ctx.moveTo(center.x, center.y - t * 0.16)
+        ctx.lineTo(center.x, center.y + t * 0.16)
+        ctx.stroke()
       }
     }
   }

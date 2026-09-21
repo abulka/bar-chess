@@ -37,9 +37,13 @@ const system: System = {
 
       // fight: close on the target until it enters the firing geometry, then hold
       if (target.entity === null || !ctx.world.isAlive(target.entity)) {
-        const enemy = ctx.world.require(e, Team) === 'red' ? 'blue' : 'red'
-        const lanes = ctx.board.data.lanes[enemy]
-        motion.goal = lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
+        if (intent.dest) {
+          motion.goal = intent.dest
+        } else {
+          const enemy = ctx.world.require(e, Team) === 'red' ? 'blue' : 'red'
+          const lanes = ctx.board.data.lanes[enemy]
+          motion.goal = lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
+        }
         continue
       }
       const team = ctx.world.require(e, Team)
