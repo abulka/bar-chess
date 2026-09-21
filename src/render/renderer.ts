@@ -29,6 +29,7 @@ const STANCE_COLORS: Record<string, string> = {
 }
 const TRACK_COLOR = '#ff2d20'
 const UNREACHABLE_COLOR = '#a0a6ac'
+const REGROUP_COLOR = '#e3b341'
 
 export class Renderer {
   camera = new Camera()
@@ -204,6 +205,22 @@ export class Renderer {
       }
       ctx.stroke()
       ctx.setLineDash([])
+    }
+
+    // Suspended attack: an amber dashed chain to the parked target marks the
+    // regroup, so it is clear the piece will re-engage once it is safe.
+    if (order?.kind === 'goto' && order.resumeTarget !== null && game.world.isAlive(order.resumeTarget)) {
+      const rp = game.world.get(order.resumeTarget, Position)
+      if (rp) {
+        ctx.strokeStyle = full ? REGROUP_COLOR : 'rgba(227,179,65,0.6)'
+        ctx.lineWidth = (full ? 1.8 : 1.2) / this.camera.zoom
+        ctx.setLineDash([3 / this.camera.zoom, 5 / this.camera.zoom])
+        ctx.beginPath()
+        ctx.moveTo(pos.x, pos.y)
+        ctx.lineTo(rp.x, rp.y)
+        ctx.stroke()
+        ctx.setLineDash([])
+      }
     }
 
     // Attack order: a gold dashed movement route to the firing position, then a
@@ -519,9 +536,11 @@ export class Renderer {
     // Target rings follow the same scope as orders/overlays: only enemies being
     // tracked by a scoped piece's attack order get a ring.
     const targeted = new Set<Entity>()
+    const regrouping = new Set<Entity>()
     for (const { e } of scoped) {
       const od = game.world.get(e, Order)
       if (od?.kind === 'attack' && od.target !== null) targeted.add(od.target)
+      if (od?.kind === 'goto' && od.resumeTarget !== null) regrouping.add(od.resumeTarget)
     }
 
     for (const e of sorted) {
@@ -542,6 +561,14 @@ export class Renderer {
         ctx.beginPath()
         ctx.arc(pos.x, pos.y, size * 0.62, 0, Math.PI * 2)
         ctx.stroke()
+      } else if (regrouping.has(e)) {
+        ctx.strokeStyle = REGROUP_COLOR
+        ctx.lineWidth = 2.2 / this.camera.zoom
+        ctx.setLineDash([3 / this.camera.zoom, 3 / this.camera.zoom])
+        ctx.beginPath()
+        ctx.arc(pos.x, pos.y, size * 0.62, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.setLineDash([])
       }
 
       ctx.fillStyle = render.tint

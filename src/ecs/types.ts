@@ -46,6 +46,8 @@ export interface SimContext {
   board: Board
   rng: Rng
   tick: number
+  /** monotonic turn index; increments each time a turn begins */
+  turn: number
   dt: number
   cmds: Commands
   teams: Record<TeamId, TeamRuntime>

@@ -92,6 +92,7 @@ interface TurnState {
   world: WorldSnapshot
   rng: number
   tick: number
+  turn: number
   teams: Record<TeamId, TeamRuntime>
   winner: TeamId | null
 }
@@ -169,6 +170,8 @@ export class Game {
   occupancy = new Map<number, Entity>()
 
   tick = 0
+  /** Monotonic turn index, incremented when each turn begins (drives regrouping). */
+  turn = 0
   speed = 1
   running = false
   paused = false
@@ -256,6 +259,7 @@ export class Game {
       board: this.board,
       rng: this.rng,
       tick: this.tick,
+      turn: this.turn,
       dt: FIXED_DT,
       cmds: this.cmds,
       teams: this.teams,
@@ -319,6 +323,7 @@ export class Game {
     if (this.turnActive || this.replaying) return
     // Mutate first, then snapshot: replay must start from the exact turn-start
     // state (cooldowns cleared, movedThisTurn set) or it diverges.
+    this.turn++
     this.turnTicks = 0
     for (const e of this.world.query(Motion)) {
       const motion = this.world.get(e, Motion)
@@ -440,6 +445,7 @@ export class Game {
       world: this.world.capture(),
       rng: this.rng.getState(),
       tick: this.tick,
+      turn: this.turn,
       teams: structuredClone(this.teams),
       winner: this.winner,
     }
@@ -449,6 +455,7 @@ export class Game {
     this.world.restore(state.world)
     this.rng.setState(state.rng)
     this.tick = state.tick
+    this.turn = state.turn
     this.teams = structuredClone(state.teams)
     this.winner = state.winner
     this.occupancy.clear()
@@ -493,6 +500,7 @@ export class Game {
 
   private step(): void {
     this.ctx.tick = this.tick
+    this.ctx.turn = this.turn
     this.ctx.verbosePhases = this.pipeline.verbose
     // A replay re-runs a recorded turn, so the one-move-per-turn gate must apply.
     this.ctx.turnActive = this.turnActive || this.replaying
@@ -536,6 +544,7 @@ export class Game {
     this.board = new Board(createBoardData(size))
     this.occupancy.clear()
     this.tick = 0
+    this.turn = 0
     this.rng.reset()
     this.selected = []
     this.winner = null
@@ -659,6 +668,8 @@ export class Game {
         order.kind = 'attack'
         order.target = occupant
         order.dest = null
+        order.resumeTarget = null
+        order.resumeTurn = -1
         motion.goal = null
         motion.path = []
         motion.arrived = true
@@ -668,12 +679,24 @@ export class Game {
         // Plan the route to a firing position now so it is visible while paused.
         order.reachable = this.planAttack(e, motion, occupant)
       } else {
+        // A move issued on an attacking piece suspends the attack: park the
+        // target so it resumes after the regroup window (see ai system).
+        const parked =
+          order.kind === 'attack' &&
+          order.target !== null &&
+          this.world.isAlive(order.target) &&
+          this.world.has(order.target, Cell)
+            ? order.target
+            : order.resumeTarget
         order.kind = 'goto'
         order.dest = cell
         order.target = null
-        // A plain move must not leave a stale combat target behind.
+        order.resumeTarget = parked
+        order.resumeTurn = -1
+        // A plain move must not leave a stale combat target behind; a suspended
+        // attack keeps lastAttacker/underFire so it can still kite while retreating.
         const t = this.world.get(e, Target)
-        if (t) {
+        if (t && parked === null) {
           t.entity = null
           t.lastAttacker = null
         }
@@ -703,6 +726,8 @@ export class Game {
         order.kind = 'none'
         order.dest = null
         order.target = null
+        order.resumeTarget = null
+        order.resumeTurn = -1
       }
       if (motion) {
         motion.goal = null
@@ -770,7 +795,14 @@ export class Game {
         hp: hp ? { cur: hp.cur, max: hp.max } : null,
         stance: stance?.mode ?? null,
         order: order
-          ? { kind: order.kind, dest: order.dest, target: order.target, reachable: order.reachable }
+          ? {
+              kind: order.kind,
+              dest: order.dest,
+              target: order.target,
+              reachable: order.reachable,
+              resumeTarget: order.resumeTarget,
+              resumeTurn: order.resumeTurn,
+            }
           : null,
         target: target ? { entity: target.entity, lastAttacker: target.lastAttacker } : null,
         motion: motion

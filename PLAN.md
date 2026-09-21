@@ -78,6 +78,13 @@ attacks can be issued over many pieces and targets.
   stale target.
 - Re-issuing an order just keeps/refreshes it (no toggle); `c` or `Backspace`
   clears orders on the selection.
+- **Pulling back mid-attack**: a move issued on a piece with an active attack
+  order *suspends* the attack instead of discarding it — the parked enemy is shown
+  with an amber dashed chain/ring. The piece travels to the objective, then
+  **regroups for two turns**: it holds position, or kites one step back while under
+  fire (raising distance while keeping the enemy in range), and only re-engages
+  once the window has elapsed *and* it is no longer under fire. A new order or `c`
+  cancels the suspension.
 - The attack's route is always shown and **theoretical**: it assumes other pieces
   will move, so only walls and the target's own square are avoided and the route
   stays visible even when the piece is boxed in. It ends on a real square — a

@@ -39,6 +39,10 @@ export interface OrderData {
   target: Entity | null
   /** For an attack order: whether the target is positionally reachable at all. */
   reachable: boolean
+  /** Attack target parked while a goto suspends the attack; resumed on arrival. */
+  resumeTarget: Entity | null
+  /** Turn index at which a suspension may re-engage; -1 while unarmed. */
+  resumeTurn: number
 }
 
 export interface TargetData {

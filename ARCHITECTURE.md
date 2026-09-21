@@ -92,7 +92,7 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Render` | `{ glyph, tint, size }` | unicode glyph + team tint |
 | `Health` | `{ cur, max }` | |
 | `Stance` | `{ mode }` | persistent policy: `none` / `move` / `attack` (`none` stands ground and fires in range, with no badge) |
-| `Order` | `{ kind, dest, target, reachable }` | one-shot: `none` / `goto` / `attack`; `reachable` marks an attack target that is positionally attainable |
+| `Order` | `{ kind, dest, target, reachable, resumeTarget, resumeTurn }` | one-shot: `none` / `goto` / `attack`; `reachable` marks an attack target that is positionally attainable; `resumeTarget`/`resumeTurn` park an attack while a goto suspends it |
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping |
 | `Weapon` | `{ left }` | seconds until next shot |
 | `Motion` | `{ goal, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn }` | grid movement + render interpolation; `reserved` is the cell being entered |
@@ -150,21 +150,22 @@ requestAnimationFrame(frame):
 ### Team control & game modes
 
 `TeamRuntime.controller` is `'human'` or `'ai'`, set from `gameMode`
-(`human-vs-ai`, `ai-vs-ai`, `human-vs-human`) and `playerTeam`. The `ai` system
-only auto-manages AI teams (rally/engage). Human pieces start with no stance
+(`human-vs-ai`, `ai-vs-ai`, `human-vs-human`) and `playerTeam`. The `orders`
+system turns stance/orders into movement for **every** piece; for AI teams it
+also auto-manages behaviour (rally/engage). Human pieces start with no stance
 (`none`, no badge) and act solely on player orders, while still
 firing autonomously via combat. A piece is commandable only when its team's
 controller is `human`. The toolbar shows the mode and a `You: Blue · Red ai`
 badge.
 
 `SimContext` (`src/ecs/types.ts`) is the shared mutable context passed to every
-system: `world`, `bus`, `board`, `rng`, `tick`, `dt`, `cmds`, `teams`,
+system: `world`, `bus`, `board`, `rng`, `tick`, `turn`, `dt`, `cmds`, `teams`,
 `occupancy`, `pathBudget`, `verbosePhases`, `turnActive`.
 
 System order (`createPipeline()` in `src/ecs/systems/index.ts`):
 
 ```
-spawn → targeting → ai → pathfinding → movement → combat
+spawn → targeting → orders → pathfinding → movement → combat
       → projectile → damage → death → cleanup
 ```
 
@@ -237,23 +238,38 @@ cell/reservation during movement validation and path planning.
   its `lastAttacker` while `underFire`. AI-controlled teams always behave as
   `attack`. When an attack order ends (target gone) the order clears but the
   stance is kept, so the piece stays in Attack.
-- **ai** — turns stance/order into `Motion.goal`: an `attack` order pursues the
-  target (or stops to fire when in geometry); a `goto` order advances toward the
-  objective (best effort); autonomous `attack` pursues in a leash, flees below
-  30% HP, and rallies only for AI teams; anything other than `attack` clears the
-  goal. Pursuit targets a *firing position* from `bestFiringCell` (the nearest
-  reachable cell from which the enemy is inside the weapon geometry) rather than
-  the occupied enemy cell, so pieces do not pile into an unreachable square.
+- **orders** — turns stance/order into `Motion.goal` for every piece (human or
+  AI): an `attack` order pursues the target (or stops to fire when in geometry);
+  a `goto` order advances toward the objective (best effort); autonomous `attack`
+  pursues in a leash, flees below 30% HP, and rallies only for AI teams; anything
+  other than `attack` clears the goal. Pursuit picks a goal with the same chain as
+  `Game.planAttack` (`previewFiringCell` → `closestEmptyCell` → target) so the
+  executed route cannot diverge from the preview; a firing position beats piling
+  onto the occupied target, and a positionally unreachable target (e.g. a bishop
+  on the other colour) still routes to the closest reachable square instead of a
+  straight line to the target.
+  A `goto` that carries a `resumeTarget` is a suspended attack: on arrival (or
+  once stalled) it arms `resumeTurn = ctx.turn + 2` and **regroups** — holding, or
+  kiting one step back while under fire (`kiteCell`, which raises distance while
+  keeping the threat in firing geometry). It resumes the attack once the window
+  has elapsed *and* it is no longer under fire, or clears the order if the parked
+  target is gone. `ctx.turn` is a monotonic turn index captured in `TurnState` so
+  rewind/replay stay deterministic.
 - **pathfinding** — budgeted A* (`PATH_BUDGET_PER_TICK`) over the piece's
   movement geometry, with other pieces passed in as blockers (excluding the
-  piece itself). Unreachable goals fall back to the nearest reachable cell.
+  piece itself). Unreachable goals fall back to the nearest reachable cell. An
+  **attack order** is planned *theoretically*: only the target's own square is
+  avoided, so the route assumes other pieces will move and stays visible even
+  when the piece is boxed in (matching `Game.planAttack`).
 - **movement** — consumes `Motion`. `Cell` stays at the **origin** and
   `Motion.reserved` claims the destination while the piece animates into it;
   the origin is only released on arrival. Before each step it re-validates that
   the next route cell is a legal one-move destination for the piece's geometry
   given live occupancy, so slides stop at the first piece/wall and only leaps
-  pass over blockers. Two pieces can never share a cell, and there is no visual
-  cross-through. During a turn, a piece is skipped once `movedThisTurn` is set
+  pass over blockers. A blocked attack-order piece keeps its theoretical route
+  and waits (rather than clearing it and rerouting around friendlies), so the
+  planned line stays on screen. Two pieces can never share a cell, and there is
+  no visual cross-through. During a turn, a piece is skipped once `movedThisTurn` is set
   (one move per turn) **and only one piece may be `moving` at a time**, so turns
   (and replays) read as a sequence of individual moves. Travel time scales with
   the slide length. An AI team whose opponent is human is also capped by the
@@ -430,7 +446,7 @@ src/
       index.ts                 createPipeline()
       spawn.ts                 entry-lane deploy
       targeting.ts             occupancy rebuild + acquisition
-      ai.ts                    Stance/Order -> Motion.goal
+      orders.ts                Stance/Order -> Motion.goal
       pathfinding.ts           budgeted geometry A*
       movement.ts              cell claim + interpolated motion
       combat.ts                weapon cooldown + fire

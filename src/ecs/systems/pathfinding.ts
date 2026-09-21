@@ -1,7 +1,7 @@
 import { occupiedExcept } from '../../game/occupancy'
 import { findPath } from '../../game/pathfind'
 import { PIECES } from '../../game/pieces'
-import { Cell, Motion, PieceType, Team } from '../components'
+import { Cell, Motion, Order, PieceType, Team } from '../components'
 import type { System } from '../pipeline'
 
 const system: System = {
@@ -36,7 +36,16 @@ const system: System = {
 
       budget--
       const team = ctx.world.require(e, Team)
-      const occupied = occupiedExcept(ctx.board, ctx.occupancy, e)
+      // An attack order's route is theoretical (PLAN): other pieces are assumed
+      // to move, so only the target's own square is avoided. This keeps the
+      // planned diagonal route visible even while the piece is boxed in.
+      const order = ctx.world.get(e, Order)
+      const targetEnt = order?.kind === 'attack' ? order.target : null
+      const targetCell = targetEnt !== null && targetEnt !== undefined ? ctx.world.get(targetEnt, Cell) : undefined
+      const occupied =
+        targetCell !== undefined
+          ? (x: number, y: number) => x === targetCell.x && y === targetCell.y
+          : occupiedExcept(ctx.board, ctx.occupancy, e)
       const result = findPath(ctx.board, cell, goal, def.move, team, occupied)
       motion.path = result.cells
       motion.replanAt = ctx.tick + (result.found ? 15 : 10)

@@ -102,6 +102,8 @@ const system: System = {
         }
         order.kind = 'none'
         order.target = null
+        order.resumeTarget = null
+        order.resumeTurn = -1
         target.entity = null
         // The order is done, but the stance is kept (the player can change it).
         continue
