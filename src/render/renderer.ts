@@ -474,7 +474,7 @@ export class Renderer {
 
       // Two stacked bars: health (team-tinted) and weapon reload (cyan), so it
       // is always clear both how hurt a piece is and whether it can fire.
-      const barY = pos.y - size * 0.62
+      const barY = pos.y - size * 0.6
       if (game.overlays.health) {
         this.drawHealthBar(ctx, pos.x, barY, size, health.cur / health.max, render.tint)
       }
@@ -483,7 +483,7 @@ export class Renderer {
       const def = kind ? PIECES[kind] : undefined
       if (weapon && def) {
         const cd = WEAPONS[def.weapon].cooldown
-        if (cd > 0) this.drawReloadBar(ctx, pos.x, barY + size * 0.12, size, 1 - weapon.left / cd)
+        if (cd > 0) this.drawReloadBar(ctx, pos.x, barY + size * 0.08, size, 1 - weapon.left / cd)
       }
 
       const team = game.world.get(e, Team)
@@ -520,17 +520,20 @@ export class Renderer {
     width: number,
     ratio: number,
   ): void {
-    const w = width * 0.8
-    const h = Math.max(2, width * 0.06)
+    const w = width * 0.56
+    const h = Math.max(1.5, width * 0.04)
     const left = x - w / 2
     const r = Math.max(0, Math.min(1, ratio))
-    ctx.fillStyle = 'rgba(0,0,0,0.65)'
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'
     ctx.fillRect(left, y, w, h)
-    ctx.fillStyle = r >= 1 ? '#7ad7ff' : '#3aa0d0'
+    ctx.fillStyle = r >= 1 ? '#e0503a' : '#7a2418'
     ctx.fillRect(left, y, w * r, h)
-    ctx.strokeStyle = 'rgba(122,215,255,0.5)'
+    // Dashed red outline keeps the reload bar visually distinct from health.
+    ctx.strokeStyle = '#ff6b4a'
     ctx.lineWidth = 1 / this.camera.zoom
+    ctx.setLineDash([2 / this.camera.zoom, 2 / this.camera.zoom])
     ctx.strokeRect(left, y, w, h)
+    ctx.setLineDash([])
   }
 
   private drawHealthBar(
@@ -541,10 +544,10 @@ export class Renderer {
     ratio: number,
     tint: string,
   ): void {
-    const w = width * 0.8
-    const h = Math.max(2, width * 0.08)
+    const w = width * 0.56
+    const h = Math.max(1.5, width * 0.045)
     const left = x - w / 2
-    ctx.fillStyle = 'rgba(0,0,0,0.65)'
+    ctx.fillStyle = 'rgba(0,0,0,0.6)'
     ctx.fillRect(left, y, w, h)
     const r = Math.max(0, Math.min(1, ratio))
     ctx.fillStyle = r > 0.5 ? '#5ad469' : r > 0.25 ? '#e3b341' : '#e8503a'
@@ -555,30 +558,66 @@ export class Renderer {
   }
 
   private drawProjectiles(ctx: CanvasRenderingContext2D, game: Game): void {
+    const t = game.board.tile
     for (const e of game.world.query(Projectile, Position)) {
       const pos = game.world.require(e, Position)
       const proj = game.world.require(e, Projectile)
+      const r = proj.size * t
+      const elapsed = proj.maxTtl - proj.ttl
 
-      if (proj.waypoints.length > 0) {
-        ctx.strokeStyle = `${proj.color}55`
-        ctx.lineWidth = 1.5 / this.camera.zoom
+      // Heading: toward the current waypoint, or toward the homing target.
+      let heading = 0
+      const wp = proj.waypoints[proj.waypointIndex]
+      if (wp) {
+        heading = Math.atan2(wp.y - pos.y, wp.x - pos.x)
+      } else if (proj.target !== null) {
+        const tp = game.world.get(proj.target, Position)
+        if (tp) heading = Math.atan2(tp.y - pos.y, tp.x - pos.x)
+      }
+
+      if (proj.trajectory === 'jump' && proj.waypoints.length > 0) {
+        ctx.strokeStyle = `${proj.color}44`
+        ctx.lineWidth = 1 / this.camera.zoom
+        ctx.setLineDash([4 / this.camera.zoom, 5 / this.camera.zoom])
         ctx.beginPath()
         ctx.moveTo(pos.x, pos.y)
         for (let i = proj.waypointIndex; i < proj.waypoints.length; i++) {
           ctx.lineTo(proj.waypoints[i].x, proj.waypoints[i].y)
         }
         ctx.stroke()
+        ctx.setLineDash([])
       }
 
       ctx.fillStyle = proj.color
-      ctx.beginPath()
-      ctx.arc(pos.x, pos.y, proj.radius * game.board.tile, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.globalAlpha = 0.25
-      ctx.beginPath()
-      ctx.arc(pos.x, pos.y, proj.radius * game.board.tile * 3, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.globalAlpha = 1
+      if (proj.shape === 'lance') {
+        ctx.strokeStyle = proj.color
+        ctx.lineWidth = r
+        ctx.lineCap = 'round'
+        ctx.beginPath()
+        ctx.moveTo(pos.x - Math.cos(heading) * r * 2.5, pos.y - Math.sin(heading) * r * 2.5)
+        ctx.lineTo(pos.x + Math.cos(heading) * r * 2, pos.y + Math.sin(heading) * r * 2)
+        ctx.stroke()
+        ctx.lineCap = 'butt'
+      } else if (proj.shape === 'bomb') {
+        ctx.save()
+        ctx.translate(pos.x, pos.y)
+        ctx.rotate(proj.spin ? elapsed * 9 : heading)
+        ctx.fillRect(-r, -r, r * 2, r * 2)
+        ctx.restore()
+      } else {
+        ctx.beginPath()
+        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2)
+        ctx.fill()
+        if (proj.shape === 'shell') {
+          ctx.globalAlpha = 0.35
+          ctx.strokeStyle = proj.color
+          ctx.lineWidth = 1 / this.camera.zoom
+          ctx.beginPath()
+          ctx.arc(pos.x, pos.y, r * 1.7, 0, Math.PI * 2)
+          ctx.stroke()
+          ctx.globalAlpha = 1
+        }
+      }
     }
   }
 

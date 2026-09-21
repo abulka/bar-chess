@@ -57,6 +57,16 @@ const system: System = {
       }
 
       if (ctx.turnActive && (motion.movedThisTurn || anyMoving)) continue
+      // AI move budget: an AI team facing a human may not out-move them. Its
+      // cumulative moves are capped by the human's, unused budget carries over.
+      // In AI-vs-AI both sides are free.
+      if (ctx.turnActive && ctx.teams[team].controller === 'ai') {
+        const other = team === 'red' ? 'blue' : 'red'
+        if (ctx.teams[other].controller === 'human') {
+          const allowance = Math.max(0, ctx.teams[other].movesMade - ctx.teams[team].movesMade)
+          if (ctx.teams[team].movesThisTurn >= allowance) continue
+        }
+      }
       if (motion.cooldown > 0) continue
       if (motion.path.length === 0) {
         motion.arrived = true
@@ -90,6 +100,8 @@ const system: System = {
       motion.arrived = false
       motion.blocked = false
       motion.movedThisTurn = true
+      ctx.teams[team].movesThisTurn++
+      ctx.teams[team].movesMade++
       motion.reserved = { x: next.x, y: next.y }
       motion.steps++
       occupancy.set(cellIndex(board, next.x, next.y), e)

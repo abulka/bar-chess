@@ -66,9 +66,9 @@ piece and set with the toolbar buttons or `1` / `2`(`a`) / `3`:
   forward up its own file.
 - **Right-click an enemy piece** → *attack*: become glued to that enemy, follow
   it, and fire when possible. Shown as a **red** tracking chain + a **red ring**
-  around the targeted enemy. This applies to a piece in a **Fight/Hold** stance;
-  a **Move**-stance piece treats an occupied square as a plain move (best-effort
-  advance), never as an attack, and a move order clears any stale target.
+  around the targeted enemy. **Only the Fight stance** attacks; a Move/Hold piece
+  treats an occupied square as a plain move (best-effort advance), never as a
+  target, and a move order clears any stale target.
 - Repeating an order toggles it off; `c` or `4` clears orders on the selection.
 - Tracking rings/chains follow the overlay scope: visible for the selection and,
   when on, `my orders` (`o`) / `enemy plans` (`e`) — never floating permanently.
@@ -100,6 +100,11 @@ The battle **starts paused**. Give orders, then take a turn:
 A "move" is one application of the piece's movement geometry, so a pawn advances
 one square while a rook may slide several cells along a rank/file — one move.
 
+**AI move budget.** An AI team facing a human may never out-move them: its
+cumulative moves are capped by the human's, and unused budget carries over. Order
+one pawn and the AI may move one piece; order two and it may move two (possibly
+across turns). It may skip moves but never exceed yours. AI-vs-AI is unrestricted.
+
 ## Game modes
 
 `human-vs-ai` (default), `ai-vs-ai`, `human-vs-human`, chosen in the toolbar.
@@ -119,8 +124,10 @@ Scope: the **selection** always shows full detail; `my orders` (`o`) and
   circle for queen/king, forward half-disc for pawn, 8 dots for knight. **Off by
   default** (enable with the `range` toggle) so targeting circles don't clutter
   the board.
-- **Health + reload bars**: every piece shows a health bar and a cyan weapon
-  reload bar, so it is clear both how hurt it is and whether it can fire.
+- **Health + reload bars**: every piece shows a thin health bar and a **red
+  dashed** weapon reload bar, so it is clear both how hurt it is and whether it
+  can fire. Projectiles are small and distinct per piece (dot / shell / lance /
+  tumbling bomb) and travel and rotate in flight.
 - Pawns fire the **two forward diagonals** (chess capture). A piece directly
   ahead blocks a pawn, exactly as in chess, and is not a target.
 - **Path** — dashed gold route; **destination** crosshair (red if blocked);
@@ -129,9 +136,9 @@ Scope: the **selection** always shows full detail; `my orders` (`o`) and
 Army scope shows paths/goals/targets; reach, attack and range are reserved for
 selected pieces to keep the board readable.
 
-Mouse: **drag** to box-select (ctrl/cmd-click adds), **shift-drag** or
-middle-drag to pan, **wheel** to zoom, **right-click** to order (goto on an
-empty square, attack on an enemy). Hover shows a per-piece order preview (faint
+Mouse: **drag** to box-select (any cell the box touches; shift-click adds),
+**shift-drag** or middle-drag to pan, **wheel** to zoom, **right-click** to
+order (goto on an empty square, attack on an enemy while in Fight stance). Hover shows a per-piece order preview (faint
 ghosts) and the square name. The board is labelled with chess coordinates, and
 the control hints + stance legend live in always-visible side rails (even with
 the HUD hidden). A **Copy position JSON** button captures the full situation.

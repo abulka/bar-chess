@@ -1,4 +1,4 @@
-import type { Geometry, Trajectory } from './types'
+import type { Geometry, ProjectileShape, Trajectory } from './types'
 import { ALL_DIRS, DIAG_DIRS, KNIGHT_OFFSETS, ORTHO_DIRS } from './types'
 
 const SLIDE_RANGE = 24
@@ -11,6 +11,10 @@ export interface ProjectileDef {
   ttl: number
   radius: number
   splash: number
+  /** rendered size in tiles */
+  size: number
+  shape: ProjectileShape
+  spin: boolean
   color: string
 }
 
@@ -40,19 +44,22 @@ export interface PieceDef {
 }
 
 export const PROJECTILES: Record<string, ProjectileDef> = {
-  bolt: { key: 'bolt', trajectory: 'line', speed: 5, ttl: 4, radius: 0.12, splash: 0, color: '#ffd166' },
-  shell: { key: 'shell', trajectory: 'line', speed: 3.2, ttl: 5, radius: 0.2, splash: 0.75, color: '#ff9a3d' },
-  lance: { key: 'lance', trajectory: 'line', speed: 8.5, ttl: 3, radius: 0.1, splash: 0, color: '#bfe3ff' },
+  bolt: { key: 'bolt', trajectory: 'line', speed: 5, ttl: 4, radius: 0.1, splash: 0, size: 0.07, shape: 'dot', spin: false, color: '#ffd166' },
+  shell: { key: 'shell', trajectory: 'line', speed: 3.2, ttl: 5, radius: 0.16, splash: 0.75, size: 0.1, shape: 'shell', spin: false, color: '#ff8f2d' },
+  lance: { key: 'lance', trajectory: 'line', speed: 8.5, ttl: 3, radius: 0.08, splash: 0, size: 0.05, shape: 'lance', spin: false, color: '#9fe0ff' },
   knightShell: {
     key: 'knightShell',
     trajectory: 'jump',
-    speed: 6.5,
+    speed: 4.5,
     ttl: 4,
-    radius: 0.2,
+    radius: 0.16,
     splash: 0.5,
-    color: '#d7a8ff',
+    size: 0.12,
+    shape: 'bomb',
+    spin: true,
+    color: '#c9a6ff',
   },
-  beam: { key: 'beam', trajectory: 'beam', speed: 70, ttl: 1, radius: 0.08, splash: 0, color: '#9be7ff' },
+  beam: { key: 'beam', trajectory: 'beam', speed: 70, ttl: 1, radius: 0.06, splash: 0, size: 0.05, shape: 'lance', spin: false, color: '#9be7ff' },
 }
 
 export const WEAPONS: Record<string, WeaponDef> = {

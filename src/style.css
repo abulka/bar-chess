@@ -209,6 +209,14 @@ input {
   border: 1px dashed #ffd166;
 }
 
+.sw-bar {
+  background: #5ad469;
+}
+
+.sw-reload {
+  border: 2px dashed #ff6b4a;
+}
+
 .hover-readout {
   color: var(--text);
   font-size: 13px;

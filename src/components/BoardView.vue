@@ -28,6 +28,7 @@ let pointerDown = false
 let selecting = false
 let moved = false
 let button = 0
+let shiftDown = false
 let startX = 0
 let startY = 0
 let lastX = 0
@@ -65,6 +66,7 @@ function onPointerDown(event: PointerEvent): void {
   lastY = p.y
   moved = false
   button = event.button
+  shiftDown = event.shiftKey
   pointerDown = true
 
   const wantsPan = event.button === 1 || event.shiftKey
@@ -104,19 +106,29 @@ function onPointerUp(event: PointerEvent): void {
   pointerDown = false
   panning.value = false
 
-  if (button === 2) return
+  if (button === 2) {
+    selecting = false
+    box.value = null
+    moved = false
+    return
+  }
 
-  if (selecting) {
+  const add = additive(event) || shiftDown
+  if (!moved) {
+    // A click (even a shift-click that was treated as a pan target) selects.
+    if (button === 0) {
+      const w = worldAt(event)
+      props.game.selectAt(w.x, w.y, add)
+      emit('changed')
+    }
+  } else if (selecting) {
     const rect = box.value
-    if (rect && (rect.w > DRAG_THRESHOLD || rect.h > DRAG_THRESHOLD)) {
+    if (rect) {
       const a = renderer!.camera.screenToWorld(rect.x, rect.y)
       const b = renderer!.camera.screenToWorld(rect.x + rect.w, rect.y + rect.h)
-      props.game.selectRect(a.x, a.y, b.x, b.y, additive(event))
-    } else {
-      const w = worldAt(event)
-      props.game.selectAt(w.x, w.y, additive(event) || event.shiftKey)
+      props.game.selectRect(a.x, a.y, b.x, b.y, add)
+      emit('changed')
     }
-    emit('changed')
   }
   selecting = false
   box.value = null

@@ -133,7 +133,17 @@ function createTeamRuntime(controller: TeamController): TeamRuntime {
     cooldown[def.key] = 0
     alive[def.key] = 0
   }
-  return { controller, cooldown, alive, kills: 0, losses: 0, supply: 0, deployed: 0 }
+  return {
+    controller,
+    cooldown,
+    alive,
+    kills: 0,
+    losses: 0,
+    supply: 0,
+    deployed: 0,
+    movesMade: 0,
+    movesThisTurn: 0,
+  }
 }
 
 function controllersFor(mode: GameMode, playerTeam: TeamId): Record<TeamId, TeamController> {
@@ -303,6 +313,8 @@ export class Game {
       motion.cooldown = 0
       motion.movedThisTurn = motion.moving
     }
+    this.teams.red.movesThisTurn = 0
+    this.teams.blue.movesThisTurn = 0
     this.turnSnapshot = this.captureTurn()
     this.canReplay = false
     this.turnActive = true
@@ -528,10 +540,14 @@ export class Game {
     const maxX = Math.max(ax, bx)
     const minY = Math.min(ay, by)
     const maxY = Math.max(ay, by)
+    const t = this.board.tile
     const chosen: Entity[] = []
+    // Any cell the selection rectangle touches is selected (not just centers).
     for (const e of this.world.query(Position, Cell)) {
-      const pos = this.world.require(e, Position)
-      if (pos.x >= minX && pos.x <= maxX && pos.y >= minY && pos.y <= maxY) chosen.push(e)
+      const c = this.world.require(e, Cell)
+      const x0 = c.x * t
+      const y0 = c.y * t
+      if (x0 + t >= minX && x0 <= maxX && y0 + t >= minY && y0 <= maxY) chosen.push(e)
     }
     if (additive) {
       for (const e of chosen) if (!this.selected.includes(e)) this.selected.push(e)
@@ -581,10 +597,10 @@ export class Game {
       const occupantTeam = occupant !== undefined && occupant !== e ? this.world.get(occupant, Team) : undefined
       const enemyOccupied =
         occupant !== undefined && occupant !== e && occupantTeam !== undefined && occupantTeam !== team
-      // A right-click is an attack only for a piece in a fighting stance on an
-      // enemy; a Move-stance piece treats an occupied square as a move order.
+      // Only Fight stance attacks on right-click; Move/Hold treat an occupied
+      // square as a plain move order (no target).
       const stanceMode = this.world.get(e, Stance)?.mode ?? 'hold'
-      const attacking = enemyOccupied && stanceMode !== 'move'
+      const attacking = enemyOccupied && stanceMode === 'fight'
       // Repeating the same order toggles it off.
       const sameOrder =
         (attacking && order.kind === 'attack' && order.target === occupant) ||

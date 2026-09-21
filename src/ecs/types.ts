@@ -34,6 +34,10 @@ export interface TeamRuntime {
   losses: number
   supply: number
   deployed: number
+  /** cumulative moves made (drives the AI move budget) */
+  movesMade: number
+  /** moves made during the current turn */
+  movesThisTurn: number
 }
 
 export interface SimContext {

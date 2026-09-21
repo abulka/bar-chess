@@ -1,4 +1,4 @@
-import type { OrderKind, StanceMode, TeamId, Trajectory, Vec2 } from '../game/types'
+import type { OrderKind, ProjectileShape, StanceMode, TeamId, Trajectory, Vec2 } from '../game/types'
 import type { Entity } from './world'
 import { defineComponent } from './world'
 
@@ -83,6 +83,9 @@ export interface ProjectileData {
   trajectory: Trajectory
   splash: number
   radius: number
+  size: number
+  shape: ProjectileShape
+  spin: boolean
   color: string
   target: Entity | null
   owner: Entity | null

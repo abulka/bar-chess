@@ -154,7 +154,7 @@ onBeforeUnmount(() => {
       <aside class="rail left">
         <div class="rail-title">controls</div>
         <ul class="hints">
-          <li><b>drag</b> select box</li>
+          <li><b>drag</b> select box · <b>shift-click</b> add</li>
           <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
           <li><b>right-click</b> empty → move (repeat toggles off)</li>
           <li><b>right-click</b> enemy → attack / track</li>
@@ -204,6 +204,7 @@ onBeforeUnmount(() => {
           <li><span class="sw sw-move"></span> move cells</li>
           <li><span class="sw sw-attack"></span> attack cells</li>
           <li><span class="sw sw-path"></span> path / objective</li>
+          <li><span class="sw sw-bar"></span> health · <span class="sw sw-reload"></span> reload (red)</li>
         </ul>
         <button class="ctl copy-btn" @click="copyJson">{{ copied ? 'Copied!' : 'Copy position JSON' }}</button>
       </aside>

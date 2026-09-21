@@ -96,7 +96,7 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping |
 | `Weapon` | `{ left }` | seconds until next shot |
 | `Motion` | `{ goal, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn }` | grid movement + render interpolation; `reserved` is the cell being entered |
-| `Projectile` | `{ team, damage, ttl, trajectory, splash, radius, color, target, owner, waypoints, waypointIndex }` | |
+| `Projectile` | `{ team, damage, ttl, trajectory, splash, radius, size, shape, spin, color, target, owner, waypoints, waypointIndex }` | |
 | `Fx` | `{ ttl, maxTtl, radius, color }` | render-only impact/explosion |
 | `Dead` | `true` | marker processed by the death system |
 
@@ -135,11 +135,11 @@ requestAnimationFrame(frame):
   `MIN_TURN_TICKS = 30` ticks (~1s) have elapsed, so reloads and fire advance
   even when nobody moves. `TURN_MAX_TICKS = 240` is the ceiling, after which
   `snapMoves()` lands stragglers. `finishTurn()` then pauses and stores the start
-  snapshot + tick count. `replayTurn()` plays the recorded ticks at 0.5× speed.
-- `replayTurn()` restores that snapshot and re-runs the recorded number of ticks
-  at ~0.2× speed (so the moves read one by one), returning to the exact same end
-  state. `World.capture()/restore()` does a deep `structuredClone` of every
-  component store; `Rng.getState()/setState()` restores the PRNG. During replay
+  snapshot + tick count.
+- `replayTurn()` restores that snapshot and re-runs the recorded ticks at 0.5×
+  speed (moves read one by one), returning to the exact same end state.
+  `World.capture()/restore()` does a deep `structuredClone` of every component
+  store; `Rng.getState()/setState()` restores the PRNG. During replay
   `ctx.turnActive` is forced true so the one-move-per-turn gate matches the
   original turn — otherwise the replay would diverge.
 - `togglePause()` cancels an active turn; `stepOnce()` cancels turn/replay.
@@ -154,7 +154,7 @@ The toolbar shows the mode and a `You: Blue · Red ai` badge.
 
 `SimContext` (`src/ecs/types.ts`) is the shared mutable context passed to every
 system: `world`, `bus`, `board`, `rng`, `tick`, `dt`, `cmds`, `teams`,
-`occupancy`, `pathBudget`, `verbosePhases`.
+`occupancy`, `pathBudget`, `verbosePhases`, `turnActive`.
 
 System order (`createPipeline()` in `src/ecs/systems/index.ts`):
 
@@ -250,7 +250,8 @@ cell/reservation during movement validation and path planning.
   cross-through. During a turn, a piece is skipped once `movedThisTurn` is set
   (one move per turn) **and only one piece may be `moving` at a time**, so turns
   (and replays) read as a sequence of individual moves. Travel time scales with
-  the slide length.
+  the slide length. An AI team whose opponent is human is also capped by the
+  opponent's cumulative `movesMade`, so it cannot out-move the player.
 - **combat** — ticks `Weapon.left`; when ready, fires at `Target.entity` if it is
   inside `fireCells`. Because targeting decides whether a target exists at all,
   combat inherits the stance/order fire policy automatically.
@@ -270,7 +271,9 @@ cell/reservation during movement validation and path planning.
 `buildTime`, `supply`, `cap`, `size`, `radius`. `WeaponDef` carries `geometry`,
 `damage`, `cooldown`, `projectile`. `ProjectileDef` carries `trajectory`
 (`line` / `homing` / `arc` / `jump` / `beam`), `speed`, `ttl`, `radius`,
-`splash`, `color`.
+`splash`, `color`, plus presentation fields `size`, `shape` (`dot` / `shell` /
+`lance` / `bomb`) and `spin`. Each piece fires a distinct, small projectile at its
+weapon rate; the knight's bomb is slow and tumbles (rotates) in flight.
 
 Shipped chess set: pawn, knight, bishop, rook, queen, king. `weaponVision`
 derives target-acquisition radius from the weapon geometry. The pawn fires the
@@ -285,11 +288,11 @@ The renderer is a read-only view. `Game.onFrame` is set by `BoardView.vue` to
 call `renderer.draw(game)` each animation frame.
 
 Draw order: clear → baked terrain (`terrain.ts`, keyed by
-`boardId:WxH:terrainVersion:grid`) → camera transform → spawn zones → whole-board
-overlays (intentions / ranges / targets) → selected-piece overlays (move cells,
-firing cells, dashed path, destination marker) → pieces (shadow, tinted glyph,
-health bar, selection ring) → target lines → projectiles (dot, glow, remaining
-waypoint polyline) → FX rings → border.
+`boardId:WxH:terrainVersion:grid`) → camera transform → spawn zones → scoped
+overlays (move/attack cells, range arcs, paths, destinations, red tracking
+chains) → hover ghosts → pieces (shadow, glyph, health + reload bars, stance
+badge, selection/target rings) → projectiles (shape-specific: dot/shell/lance/
+tumbling bomb) → FX rings → hover cursor → border → chess coordinates.
 
 ### `Camera` — `src/render/camera.ts`
 
@@ -309,8 +312,8 @@ large displays. `zoomAt` is cursor-anchored; wheel zoom is exponential on
 `App.vue` constructs one `Game` (which starts **paused**), starts the frame loop,
 and copies `game.snapshot()` into a `shallowRef` every
 `SNAPSHOT_INTERVAL_MS = 120`. The simulation never depends on Vue reactivity.
-Control hints render as a vertical list in a strip below the board (`.hints`),
-not over the canvas.
+Control hints + stance legend + hover readout live in always-visible side rails
+(left/right), independent of the HUD toggle, so they never cover the board.
 
 `GameSnapshot` fields (`src/game/game.ts`): `running paused tick fps tps speed
 boardId boardSize boardSizes teams timings events eventCount shots kills
@@ -320,7 +323,7 @@ turnActive canReplay replaying terrainVersion`.
 | Component | Responsibility |
 | --------- | -------------- |
 | `Toolbar.vue` | board size, turn/pause/step/replay, speed, order mode, overlay toggles, HUD toggle, reset |
-| `BoardView.vue` | canvas + Renderer; drag box-select (ctrl/cmd-click adds), shift/middle-drag pan, wheel zoom, right-click order; draws the selection rectangle |
+| `BoardView.vue` | canvas + Renderer; drag box-select (any touched cell; shift-click adds), shift/middle-drag pan, wheel zoom, right-click order; draws the selection rectangle |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
 | `StatsBar.vue` | tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Inspector for the selection |
@@ -347,8 +350,11 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
 range arcs are drawn for selected pieces only, army scopes show paths/goals/targets.
 
 Stance is chosen with the toolbar buttons or `1`/`2`/`3`; right-click issues an
-order (goto on empty, attack on an enemy). Hovering computes a per-selected-piece
-order preview (`Game.setHover`, drawn as faint ghosts) and a cell readout.
+order (goto on any square, or an attack on an enemy only while the piece is in
+Fight stance). Drag box-selection selects any piece whose cell the box touches
+(`Game.selectRect`), shift-click adds, shift/middle-drag pans. Hovering computes
+a per-selected-piece order preview (`Game.setHover`, drawn as faint ghosts) and a
+cell readout.
 Chess coordinates (`coordName`) label the board margins. The right rail has a
 **Copy position JSON** button (`Game.toDebugJson`) for debugging snapshots.
 
@@ -361,8 +367,8 @@ Team colour is Orange vs Blue; **red is reserved for attack indicators**: the
 tracking chain, the Fight stance badge, and the ring drawn around a piece that is
 the target of an attack order. Pieces no longer draw a default ring. Target
 rings/chains are computed from **scoped** pieces only (selection + `my orders` /
-`enemy plans`), so they never float permanently. Every piece draws a health bar
-and a cyan reload bar.
+`enemy plans`), so they never float permanently. Every piece draws a thin health
+bar and a **red dashed** reload bar (kept small so it does not dominate).
 
 ---
 
@@ -394,7 +400,7 @@ src/
       index.ts                 createPipeline()
       spawn.ts                 entry-lane deploy
       targeting.ts             occupancy rebuild + acquisition
-      ai.ts                    Intent -> Motion.goal
+      ai.ts                    Stance/Order -> Motion.goal
       pathfinding.ts           budgeted geometry A*
       movement.ts              cell claim + interpolated motion
       combat.ts                weapon cooldown + fire

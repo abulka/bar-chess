@@ -11,6 +11,8 @@ export type OrderKind = 'none' | 'goto' | 'attack'
 
 export type Trajectory = 'line' | 'homing' | 'arc' | 'jump' | 'beam'
 
+export type ProjectileShape = 'dot' | 'shell' | 'lance' | 'bomb'
+
 export type Dir = readonly [number, number]
 
 /**
