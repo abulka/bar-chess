@@ -133,6 +133,8 @@ export interface GameSnapshot {
   hoverKind: 'empty' | 'friendly' | 'enemy' | 'blocked' | null
   turnActive: boolean
   canReplay: boolean
+  canUndo: boolean
+  canRedo: boolean
   replaying: boolean
   turnProgress: number
   replayProgress: number
@@ -218,6 +220,12 @@ export class Game {
   private lastTurn: { snapshot: TurnState; ticks: number } | null = null
   private replaying = false
   private replayTicks = 0
+  // Turn-boundary states for undo/redo. `history[cursor]` is the state the game
+  // is currently showing; `history.length - 1 === cursor` means "at the latest".
+  private history: TurnState[] = []
+  private cursor = 0
+  /** Cap on retained turn states so long AI-vs-AI runs cannot grow unbounded. */
+  private static readonly HISTORY_LIMIT = 100
   // Turns are serialized (one move at a time), so the cap is generous; the turn
   // normally ends as soon as every piece has moved or is blocked.
   private static readonly TURN_MAX_TICKS = 240
@@ -245,6 +253,8 @@ export class Game {
     this.board = new Board(createBoardData(size))
     this.ctx = this.buildContext()
     this.placeArmy(initialArmy(size))
+    this.history = [this.captureTurn()]
+    this.cursor = 0
     this.paused = true
     this.bus.emit('map', `loaded ${this.board.data.name}`)
     this.bus.emit('info', 'paused \u2014 give orders, then press space for a turn')
@@ -359,21 +369,35 @@ export class Game {
     this.bus.emit('info', 'turn started')
   }
 
-  /** Undo the most recent completed turn (restore its start snapshot). */
-  rewindTurn(): void {
-    if (this.turnActive || this.replaying || !this.lastTurn) return
-    this.restoreTurn(this.lastTurn.snapshot)
+  /** Step back one completed turn in the history. */
+  undoTurn(): void {
+    if (this.turnActive || this.replaying || this.cursor <= 0) return
+    this.restoreTurn(this.history[--this.cursor])
     this.selected = []
-    this.lastTurn = null
-    this.canReplay = false
     this.turnProgress = 0
     this.replayProgress = 0
     this.paused = true
-    this.bus.emit('info', 'rewound last turn')
+    this.canReplay = this.cursor === this.history.length - 1 && this.lastTurn !== null
+    this.bus.emit('info', `undo (turn ${this.cursor}/${this.history.length - 1})`)
+  }
+
+  /** Step forward to a turn previously undone. */
+  redoTurn(): void {
+    if (this.turnActive || this.replaying || this.cursor >= this.history.length - 1) return
+    this.restoreTurn(this.history[++this.cursor])
+    this.selected = []
+    this.turnProgress = 0
+    this.replayProgress = 0
+    this.paused = true
+    this.canReplay = this.cursor === this.history.length - 1 && this.lastTurn !== null
+    this.bus.emit('info', `redo (turn ${this.cursor}/${this.history.length - 1})`)
   }
 
   replayTurn(): void {
     if (!this.lastTurn || this.replaying || this.turnActive) return
+    // Replay only makes sense from the latest state: rewinding first would let
+    // the replayed turn land ahead of the cursor and desync the history.
+    if (this.cursor !== this.history.length - 1) return
     this.restoreTurn(this.lastTurn.snapshot)
     this.selected = []
     this.replaying = true
@@ -450,8 +474,13 @@ export class Game {
     this.paused = true
     if (this.turnSnapshot) {
       this.lastTurn = { snapshot: this.turnSnapshot, ticks: this.turnTicks }
-      this.canReplay = true
       this.turnSnapshot = null
+      // A completed turn is a new history boundary; anything undone is replaced.
+      this.history.length = this.cursor + 1
+      this.history.push(this.captureTurn())
+      if (this.history.length > Game.HISTORY_LIMIT) this.history.shift()
+      this.cursor = this.history.length - 1
+      this.canReplay = true
     }
     this.bus.emit('info', `turn ended after ${this.turnTicks} ticks`)
   }
@@ -606,6 +635,8 @@ export class Game {
     this.paused = true
     this.ctx = this.buildContext()
     this.placeArmy(initialArmy(size))
+    this.history = [this.captureTurn()]
+    this.cursor = 0
     this.terrainVersion++
     this.bus.emit('map', `loaded ${this.board.data.name}`)
   }
@@ -1018,6 +1049,8 @@ export class Game {
 
     this.terrainVersion++
     this.ctx = this.buildContext()
+    this.history = [this.captureTurn()]
+    this.cursor = 0
 
     this.bus.emit('map', `loaded position ${this.board.data.name}`)
     this.bus.emit('info', `position loaded (tick ${this.tick})`)
@@ -1168,6 +1201,8 @@ export class Game {
       hoverKind: this.hoverKind(),
       turnActive: this.turnActive,
       canReplay: this.canReplay,
+      canUndo: this.cursor > 0 && !this.turnActive && !this.replaying,
+      canRedo: this.cursor < this.history.length - 1 && !this.turnActive && !this.replaying,
       replaying: this.replaying,
       turnProgress: this.turnProgress,
       replayProgress: this.replayProgress,

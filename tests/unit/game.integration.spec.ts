@@ -95,6 +95,45 @@ describe('Game integration', () => {
     expect(JSON.stringify(game.toDebugJson())).toBe(end)
   })
 
+  it('undo and redo walk the turn history step by step', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    const start = JSON.stringify(game.toDebugJson())
+    runTurn(game)
+    const after1 = JSON.stringify(game.toDebugJson())
+    runTurn(game)
+    const after2 = JSON.stringify(game.toDebugJson())
+
+    expect(game.snapshot().canUndo).toBe(true)
+    expect(game.snapshot().canRedo).toBe(false)
+
+    game.undoTurn()
+    expect(JSON.stringify(game.toDebugJson())).toBe(after1)
+    expect(game.snapshot().canRedo).toBe(true)
+
+    game.undoTurn()
+    expect(JSON.stringify(game.toDebugJson())).toBe(start)
+    expect(game.snapshot().canUndo).toBe(false)
+
+    game.redoTurn()
+    expect(JSON.stringify(game.toDebugJson())).toBe(after1)
+    game.redoTurn()
+    expect(JSON.stringify(game.toDebugJson())).toBe(after2)
+    expect(game.snapshot().canRedo).toBe(false)
+  })
+
+  it('a new turn after undo discards the redo branch', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    runTurn(game)
+    runTurn(game)
+    game.undoTurn()
+    game.undoTurn()
+    expect(game.snapshot().canRedo).toBe(true)
+
+    runTurn(game)
+    expect(game.snapshot().canRedo).toBe(false)
+    expect(game.snapshot().canUndo).toBe(true)
+  })
+
   it('orderAttack helper marks a clear shot as reachable', () => {
     const game = new Game(8)
     const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })

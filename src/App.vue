@@ -101,6 +101,16 @@ function onReplay(): void {
   refresh()
 }
 
+function onUndo(): void {
+  game.undoTurn()
+  refresh()
+}
+
+function onRedo(): void {
+  game.redoTurn()
+  refresh()
+}
+
 async function copyText(text: string, kind: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text)
@@ -207,11 +217,14 @@ function onKey(event: KeyboardEvent): void {
   } else if (event.key === 's') {
     game.stepOnce()
     refresh()
-  } else if (event.key === 'r') {
-    onReplay()
-  } else if (event.key === 'b') {
-    game.rewindTurn()
+  } else if (event.key === 'u') {
+    game.undoTurn()
     refresh()
+  } else if (event.key === 'r') {
+    game.redoTurn()
+    refresh()
+  } else if (event.key === 'y') {
+    onReplay()
   } else if (event.key === 'c' || event.key === 'Backspace') {
     event.preventDefault()
     game.clearOrders()
@@ -254,6 +267,8 @@ onBeforeUnmount(() => {
       @toggle-pause="game.togglePause(); refresh()"
       @step="game.stepOnce(); refresh()"
       @turn="onTurn"
+      @undo="onUndo"
+      @redo="onRedo"
       @replay="onReplay"
       @set-speed="onSetSpeed"
       @set-stance="onSetStance"
@@ -265,7 +280,7 @@ onBeforeUnmount(() => {
     <div
       class="turnbar"
       :class="{ active: snapshot.turnActive, replay: snapshot.replaying }"
-      :title="snapshot.turnActive ? 'turn in progress (space)' : 'press space for a turn, r to replay'"
+      :title="snapshot.turnActive ? 'turn in progress (space)' : 'press space for a turn, u/r to undo/redo, y to replay'"
     >
       <div
         class="turnbar-fill"
@@ -295,7 +310,7 @@ onBeforeUnmount(() => {
           <li><b>right-click</b> enemy → attack (Attack stance)</li>
           <li><b>1</b>/<b>m</b> Move · <b>2</b>/<b>a</b> Attack stance</li>
           <li><b>space</b> turn · <b>p</b> pause · <b>s</b> step</li>
-          <li><b>r</b> replay · <b>b</b> rewind · <b>c</b>/<b>Backspace</b> clear orders</li>
+          <li><b>u</b> undo · <b>r</b> redo · <b>y</b> replay · <b>c</b>/<b>Backspace</b> clear orders</li>
           <li><b>o</b> my orders · <b>e</b> enemy · <b>h</b> HUD</li>
         </ul>
       </aside>

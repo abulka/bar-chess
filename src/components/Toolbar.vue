@@ -14,6 +14,8 @@ const emit = defineEmits<{
   (e: 'toggle-pause'): void
   (e: 'step'): void
   (e: 'turn'): void
+  (e: 'undo'): void
+  (e: 'redo'): void
   (e: 'replay'): void
   (e: 'set-speed', speed: number): void
   (e: 'set-stance', mode: StanceMode): void
@@ -96,6 +98,8 @@ function onOverlayChange(key: keyof OverlayFlags, event: Event): void {
     </button>
     <button class="ctl" @click="emit('toggle-pause')">{{ props.snapshot.paused ? '▶ Play' : '⏸ Pause' }}</button>
     <button class="ctl" @click="emit('step')">⏭ Step</button>
+    <button class="ctl" :disabled="!props.snapshot.canUndo" @click="emit('undo')">↶ Undo</button>
+    <button class="ctl" :disabled="!props.snapshot.canRedo" @click="emit('redo')">↷ Redo</button>
     <button class="ctl" :disabled="!props.snapshot.canReplay" @click="emit('replay')">↺ Replay</button>
 
     <div class="speed-group">

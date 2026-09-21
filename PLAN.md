@@ -139,7 +139,10 @@ The battle **starts paused**. Give orders, then take a turn:
   cancelling the current one.
 - `p` — pause / resume. Pausing mid-turn cancels the turn.
 - `s` — single simulation step (one tick), for tracing.
-- `r` — **Replay last turn**: the world + RNG + tick are snapshotted at turn
+- `u` / `r` — **Undo / Redo** completed turns, stepping through a bounded history
+  of turn-boundary states. Taking a new turn after undoing replaces the redo
+  branch.
+- `y` — **Replay last turn**: the world + RNG + tick are snapshotted at turn
   start (after the turn's setup mutations), so replay deterministically re-plays
   the recorded ticks and returns to exactly the same end state. Because turns are
   serialized, replay shows the moves one piece at a time at ~0.5× speed.
@@ -195,8 +198,8 @@ ghosts) and the square name. The board is labelled with chess coordinates, and
 the control hints + stance legend live in always-visible side rails (even with
 the HUD hidden). A **Copy position JSON** button captures the full situation.
 
-Keyboard summary: `1/2/3` stance, `space` turn, `p` pause, `s` step, `r` replay,
-`b` rewind (undo last turn), `c`/`Backspace` clear orders, `o` my orders, `e`
+Keyboard summary: `1/2/3` stance, `space` turn, `p` pause, `s` step, `u`/`r`
+undo/redo, `y` replay, `c`/`Backspace` clear orders, `o` my orders, `e`
 enemy plans, `h` HUD, `Esc` clear selection. Turns and replays both play at 0.5×
 speed
 (one move at a time), and the wide **turn bar** under the toolbar sweeps the full

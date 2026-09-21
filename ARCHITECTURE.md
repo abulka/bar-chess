@@ -136,11 +136,14 @@ requestAnimationFrame(frame):
   even when nobody moves. A stall guard also ends the turn if no move has started
   for 45 ticks (blocked pieces can otherwise keep reporting a route forever).
   `TURN_MAX_TICKS = 240` is the final ceiling, after which `snapMoves()` lands
-  stragglers. `finishTurn()` pauses and stores the snapshot + tick count.
-- `rewindTurn()` (key `b`) restores the last completed turn's start snapshot for
-  a one-step undo. `replayTurn()` restores the same snapshot and re-runs the
-  recorded ticks at 0.5× speed (moves read one by one), returning to the exact
-  same end state. Live turns run at 0.5× too.
+  stragglers. `finishTurn()` pauses and stores the snapshot + tick count, then
+  appends the resulting state to a bounded undo/redo history.
+- `undoTurn()` (key `u`) and `redoTurn()` (key `r`) step backwards/forwards
+  through that history, restoring whole turn-boundary states; beginning a new
+  turn replaces any undone branch. `replayTurn()` (key `y`) restores the last
+  completed turn's start snapshot and re-runs the recorded ticks at 0.5× speed
+  (moves read one by one), returning to the exact same end state. Live turns run
+  at 0.5× too.
   `World.capture()/restore()` does a deep `structuredClone` of every component
   store; `Rng.getState()/setState()` restores the PRNG. During replay
   `ctx.turnActive` is forced true so the one-move-per-turn gate matches the
@@ -254,7 +257,7 @@ cell/reservation during movement validation and path planning.
   keeping the threat in firing geometry). It resumes the attack once the window
   has elapsed *and* it is no longer under fire, or clears the order if the parked
   target is gone. `ctx.turn` is a monotonic turn index captured in `TurnState` so
-  rewind/replay stay deterministic.
+  undo/redo/replay stay deterministic.
   When the active step finishes — a goto arrival, an attack target's death, or a
   goto whose destination the piece's movement geometry can *never* reach
   (`destReachable` via `reachableCells`) — `promoteNext` (`src/game/queue.ts`)
@@ -354,11 +357,12 @@ HUD starts hidden; `h` toggles it.
 `GameSnapshot` fields (`src/game/game.ts`): `running paused tick fps tps speed
 boardId boardSize boardSizes teams timings events eventCount shots kills
 warnings selected selectedLines counts winner overlays hudVisible playerTeam
-turnActive canReplay replaying turnProgress replayProgress terrainVersion`.
+turnActive canReplay canUndo canRedo replaying turnProgress replayProgress
+terrainVersion`.
 
 | Component | Responsibility |
 | --------- | -------------- |
-| `Toolbar.vue` | board size, turn/pause/step/replay, speed, order mode, overlay toggles, HUD toggle, reset |
+| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, order mode, overlay toggles, HUD toggle, reset |
 | `BoardView.vue` | canvas + Renderer; drag box-select (any touched cell; shift-click adds), shift/middle-drag pan, wheel zoom, right-click order; draws the selection rectangle |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
 | `StatsBar.vue` | tick/fps/tps/pieces/shots/kills/entities/selected/winner |
@@ -464,8 +468,8 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   the import/round-trip format.
 
 Keyboard: `1`/`m` Move and `2`/`a` Attack order mode, `space` turn, `p` pause,
-`s` step, `r` replay, `c`/`Backspace` clear orders, `o` my orders, `e` enemy
-plans, `h` HUD, `Esc` clear selection. `Game.orderAt` makes a goto on any square
+`s` step, `u`/`r` undo/redo, `y` replay, `c`/`Backspace` clear orders, `o` my
+orders, `e` enemy plans, `h` HUD, `Esc` clear selection. `Game.orderAt` makes a goto on any square
 in Move mode and an attack on an enemy in Attack mode (`Game.orderMode`);
 re-issuing the same order appends a queued step (a duplicate of the active or
 last queued step is ignored), and only pieces under human control can be
@@ -481,7 +485,7 @@ the legend groups these under "firing lines". When the target dies the order
 clears but the stance is kept (the piece stays in Attack), and `planAttack`
 routes immediately (visible while paused) against a fresh occupancy map. A
 right-click never changes the selection. `space` is ignored while a turn/replay
-is running; `b` rewinds the last turn.
+is running; `u`/`r` undo/redo completed turns.
 
 Team colour is Orange vs Blue; **red is reserved for attack indicators**: the
 tracking chain, the Attack stance badge, and the ring drawn around a piece that is

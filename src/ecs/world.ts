@@ -98,7 +98,7 @@ export class World {
     this.next = 1
   }
 
-  /** Deep copy of all component data, used for turn replay. */
+  /** Deep copy of all component data, used for replay and undo/redo. */
   capture(): WorldSnapshot {
     return {
       next: this.next,
