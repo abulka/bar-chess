@@ -93,6 +93,7 @@ export class Renderer {
     ctx.translate(-this.camera.x, -this.camera.y)
 
     if (this.terrain) ctx.drawImage(this.terrain, 0, 0)
+    this.drawBorder(ctx, game)
 
     this.drawSpawns(ctx, game)
     const scoped = this.scopedPieces(game)
@@ -106,7 +107,6 @@ export class Renderer {
     this.drawHoverCursor(ctx, game)
     ctx.restore()
 
-    this.drawBorder(ctx, game)
     this.drawCoords(ctx, game)
   }
 
@@ -164,8 +164,16 @@ export class Renderer {
     const glow = full ? 1 : 0.55
 
     // Range arcs are subtle and scale with the weapon, so only show them for
-    // selected pieces; army views rely on move/attack cells + paths.
-    if (game.overlays.rangeArcs && full) this.drawRangeArc(ctx, board, cell, def, team, glow)
+    // selected pieces; army views rely on move/attack cells + paths. Clip to
+    // the board so arcs never bleed into the surrounding margin.
+    if (game.overlays.rangeArcs && full) {
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(0, 0, board.pixelWidth, board.pixelHeight)
+      ctx.clip()
+      this.drawRangeArc(ctx, board, cell, def, team, glow)
+      ctx.restore()
+    }
 
     // Reach/attack shading is detailed, so it is reserved for selected pieces;
     // army views show paths, goals and targets instead.
@@ -493,7 +501,12 @@ export class Renderer {
     }
   }
 
-  /** Nominal weapon range: circle, pawn forward half-disc, knight 8 dots. */
+  /**
+   * Nominal weapon range: directional bands for sliders, a forward half-disc
+   * for pawns, and 8 dots for leaping knights. Sliders (rook, bishop, queen,
+   * king) only ever reach cells along their dirs, so a circle would imply
+   * unreachable cells (e.g. h3 from d1).
+   */
   private drawRangeArc(
     ctx: CanvasRenderingContext2D,
     board: Game['board'],
@@ -513,7 +526,6 @@ export class Renderer {
     ctx.setLineDash([4 / this.camera.zoom, 4 / this.camera.zoom])
 
     const range = weaponGeom.kind === 'slide' ? weaponGeom.range : 1
-    const radius = Math.min(range, Math.max(board.width, board.height)) * t
 
     if (weaponGeom.kind === 'leap') {
       for (const [dx, dy] of weaponGeom.offsets) {
@@ -542,28 +554,31 @@ export class Renderer {
     }
 
     const resolved = resolveGeometry(weaponGeom, team)
-    if (resolved.kind === 'slide' && resolved.dirs.length < 8) {
-      // Rook (ranks/files) and bishop (diagonals) get accurate directional
-      // bands rather than a circle that implies unreachable diagonals.
-      ctx.setLineDash([])
-      ctx.lineCap = 'round'
-      ctx.strokeStyle = fill
-      ctx.lineWidth = t * 0.5
-      for (const [dx, dy] of resolved.dirs) {
-        ctx.beginPath()
-        ctx.moveTo(center.x, center.y)
-        ctx.lineTo(center.x + dx * resolved.range * t, center.y + dy * resolved.range * t)
-        ctx.stroke()
-      }
-      ctx.lineCap = 'butt'
-      return
-    }
+    if (resolved.kind !== 'slide') return
 
-    ctx.beginPath()
-    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.stroke()
+    // Rook (ranks/files), bishop (diagonals) and queen/king (both) get accurate
+    // directional bands. All rays go in one path so they composite once and the
+    // shared centre does not stack into a bright blob.
     ctx.setLineDash([])
+    ctx.lineCap = 'round'
+    ctx.strokeStyle = fill
+    ctx.lineWidth = t * 0.5
+    ctx.beginPath()
+    for (const [dx, dy] of resolved.dirs) {
+      const steps = Math.min(resolved.range, this.stepsToEdge(board, cell, dx, dy))
+      if (steps <= 0) continue
+      ctx.moveTo(center.x, center.y)
+      ctx.lineTo(center.x + dx * steps * t, center.y + dy * steps * t)
+    }
+    ctx.stroke()
+    ctx.lineCap = 'butt'
+  }
+
+  /** Number of cells from `cell` along (dx, dy) before the ray leaves the board. */
+  private stepsToEdge(board: Game['board'], cell: { x: number; y: number }, dx: number, dy: number): number {
+    const maxX = dx > 0 ? board.width - 1 - cell.x : dx < 0 ? cell.x : board.width
+    const maxY = dy > 0 ? board.height - 1 - cell.y : dy < 0 ? cell.y : board.height
+    return Math.min(maxX, maxY)
   }
 
   private drawPieces(

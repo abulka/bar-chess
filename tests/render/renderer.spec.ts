@@ -52,6 +52,8 @@ class RecordingContext {
   translate(): void {}
   scale(): void {}
   rotate(): void {}
+  rect(): void {}
+  clip(): void {}
   beginPath(): void {
     this.points = []
   }
@@ -164,6 +166,56 @@ describe('Renderer firing-line overlay', () => {
     expect(route!.dash.length).toBeGreaterThan(0)
     expect(route!.points[0]).toEqual(center(4, 4))
     expect(route!.points[route!.points.length - 1]).toEqual(center(4, 5))
+  })
+})
+
+describe('Renderer range arc', () => {
+  const ARC_STYLE = 'rgba(255,255,255,0.045)'
+
+  /** End cells of the range-arc rays recorded for the current draw. */
+  function arcEnds(ctx: RecordingContext): { x: number; y: number }[] {
+    const arc = ctx.strokes.find((s) => s.style === ARC_STYLE)
+    expect(arc).toBeDefined()
+    const ends: { x: number; y: number }[] = []
+    for (let i = 1; i < arc!.points.length; i += 2) {
+      const p = arc!.points[i]
+      ends.push({ x: Math.floor(p.x / TILE), y: Math.floor(p.y / TILE) })
+    }
+    return ends
+  }
+
+  it('covers only slider lines for a queen, never knight-reachable cells', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.rangeArcs = true
+    const queen = placePiece(game, 'queen', 'blue', { x: 3, y: 7 }) // d1
+    game.selected = [queen]
+    renderer.draw(game)
+
+    // One path: file (up), rank (both ways) and the two upward diagonals = 5 rays.
+    const ends = arcEnds(ctx)
+    expect(ends).toHaveLength(5)
+    for (const c of ends) {
+      const dx = c.x - 3
+      const dy = c.y - 7
+      expect(dx === 0 || dy === 0 || Math.abs(dx) === Math.abs(dy)).toBe(true)
+    }
+    // h3 is a knight's move from d1 and must not be shaded.
+    expect(ends).not.toContainEqual({ x: 7, y: 5 })
+  })
+
+  it('shades only the eight adjacent cells for a king', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.rangeArcs = true
+    const king = placePiece(game, 'king', 'blue', { x: 4, y: 7 }) // e1
+    game.selected = [king]
+    renderer.draw(game)
+
+    const ends = arcEnds(ctx)
+    // In-board rays: up, left, right, up-left and up-right.
+    expect(ends).toHaveLength(5)
+    for (const c of ends) {
+      expect(Math.max(Math.abs(c.x - 4), Math.abs(c.y - 7))).toBe(1)
+    }
   })
 })
 

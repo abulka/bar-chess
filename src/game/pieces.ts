@@ -102,7 +102,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   },
   kingGuard: {
     key: 'kingGuard',
-    geometry: { kind: 'slide', dirs: ALL_DIRS, range: 2 },
+    geometry: { kind: 'slide', dirs: ALL_DIRS, range: 1 },
     damage: 14,
     cooldown: 1.1,
     projectile: 'bolt',

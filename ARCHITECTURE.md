@@ -374,8 +374,8 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   (geometry + line of sight). Outlined rather than filled so red remains visible
   where it coincides with blue (rooks/bishops/queens).
 - **Range arc** — nominal weapon reach for the selected piece: directional bands
-  for rook (files/ranks) and bishop (diagonals), a circle for queen/king, a
-  forward half-disc for the pawn, and 8 dots for the knight.
+  along each firing line (rook files/ranks, bishop diagonals, queen/king all
+  eight), a forward half-disc for the pawn, and 8 dots for the knight.
 - **Path** — dashed gold route; **destination** crosshair (red when blocked);
   **target** thin line + reticle.
 - Army scope shows paths, destinations and targets; reach/attack shading and

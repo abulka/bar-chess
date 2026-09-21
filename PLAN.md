@@ -167,10 +167,10 @@ Scope: the **selection** always shows full detail; `my orders` (`o`) and
 - **Move cells** — blue filled squares (legal one-square moves).
 - **Attack cells** — red outlined squares (what the weapon can hit now; outlined
   so it stays visible where it overlaps blue).
-- **Range arc** — nominal reach for the selected piece: bands for rook/bishop,
-  circle for queen/king, forward half-disc for pawn, 8 dots for knight. **Off by
-  default** (enable with the `range` toggle) so targeting circles don't clutter
-  the board.
+- **Range arc** — nominal weapon reach for the selected piece: directional bands
+  along each firing line (rook/bishop/queen/king), forward half-disc for pawn,
+  8 dots for knight. **Off by default** (enable with the `range` toggle) so
+  targeting circles don't clutter the board.
 - **Health + reload bars**: every piece shows a thin health bar and a **plain
   red** weapon reload bar (tile-relative, so it stays inside the square), making
   it clear how hurt a piece is and whether it can fire. Both are toggleable
