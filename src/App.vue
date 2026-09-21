@@ -13,7 +13,7 @@ import type { StanceMode, TeamId } from './game/types'
 
 const game = new Game(8)
 const snapshot = shallowRef<GameSnapshot>(game.snapshot())
-const stance = ref<StanceMode>('move')
+const stance = ref<StanceMode>('none')
 const copied = ref(false)
 const boardView = ref<InstanceType<typeof BoardView> | null>(null)
 
@@ -41,14 +41,11 @@ function onSetGameMode(mode: GameMode): void {
 
 function onSetStance(mode: StanceMode): void {
   if (game.selected.length > 0) game.setStance(mode)
-  // Hold is a one-shot command (returns to Move); Move/Fight stay selected so
-  // the next right-click uses them.
-  stance.value = mode === 'hold' ? 'move' : mode
+  stance.value = mode
   refresh()
 }
 
 function onOrdered(): void {
-  stance.value = 'move'
   refresh()
 }
 
@@ -111,7 +108,8 @@ function onKey(event: KeyboardEvent): void {
   } else if (event.key === 'b') {
     game.rewindTurn()
     refresh()
-  } else if (event.key === 'c' || event.key === '4') {
+  } else if (event.key === 'c' || event.key === 'Backspace') {
+    event.preventDefault()
     game.clearOrders()
     refresh()
   } else if (event.key === 'o') {
@@ -121,9 +119,8 @@ function onKey(event: KeyboardEvent): void {
   } else if (event.key === 'Escape') {
     game.clearSelection()
     refresh()
-  } else if (event.key === '1') onSetStance('move')
-  else if (event.key === '2' || event.key === 'a') onSetStance('fight')
-  else if (event.key === '3') onSetStance('hold')
+  } else if (event.key === '1' || event.key === 'm') onSetStance('move')
+  else if (event.key === '2' || event.key === 'a') onSetStance('attack')
 }
 
 onMounted(() => {
@@ -188,11 +185,11 @@ onBeforeUnmount(() => {
         <ul class="hints">
           <li><b>drag</b> select box · <b>shift-click</b> add</li>
           <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
-          <li><b>right-click</b> empty → move (repeat toggles off)</li>
-          <li><b>right-click</b> enemy → attack / track</li>
-          <li><b>1</b>/<b>2</b>(<b>a</b>)/<b>3</b> stance Move/Fight/Hold</li>
+          <li><b>right-click</b> empty → move</li>
+          <li><b>right-click</b> enemy → attack (Attack stance)</li>
+          <li><b>1</b>/<b>m</b> Move · <b>2</b>/<b>a</b> Attack stance</li>
           <li><b>space</b> turn · <b>p</b> pause · <b>s</b> step</li>
-          <li><b>r</b> replay · <b>b</b> rewind · <b>c</b>/<b>4</b> clear orders</li>
+          <li><b>r</b> replay · <b>b</b> rewind · <b>c</b>/<b>Backspace</b> clear orders</li>
           <li><b>o</b> my orders · <b>e</b> enemy · <b>h</b> HUD</li>
         </ul>
       </aside>
@@ -221,8 +218,8 @@ onBeforeUnmount(() => {
         <div class="rail-title">stance</div>
         <ul class="legend">
           <li><span class="dot" style="background: #4ad991"></span><b>M</b> Move — travel, return fire only</li>
-          <li><span class="dot" style="background: #ff3b30"></span><b>F</b> Fight — engage nearby, flee when low</li>
-          <li><span class="dot" style="background: #ffd166"></span><b>H</b> Hold — stay put, fire in range</li>
+          <li><span class="dot" style="background: #ff3b30"></span><b>A</b> Attack — engage nearby, flee when low</li>
+          <li><b>no badge</b> — no order (stand &amp; fire in range)</li>
           <li><span class="dot" style="background: #ff2d20"></span><b>red ring</b> target of an attack</li>
           <li><span class="dot" style="background: #b9c2cc"></span><b>&#9678;</b> tracking an enemy</li>
         </ul>

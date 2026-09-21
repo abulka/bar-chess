@@ -32,8 +32,8 @@ function nearestInFireGeometry(
   return best
 }
 
-/** Fight acquisition: nearest enemy within vision, biased toward damaged ones. */
-function acquireFight(ctx: SimContext, e: Entity, team: 'red' | 'blue', weaponKey: string): Entity | null {
+/** Attack acquisition: nearest enemy within vision, biased toward damaged ones. */
+function acquireAttack(ctx: SimContext, e: Entity, team: 'red' | 'blue', weaponKey: string): Entity | null {
   const cell = ctx.world.require(e, Cell)
   const vision = weaponVision(WEAPONS[weaponKey].geometry)
   const maxDist2 = vision * vision
@@ -61,11 +61,11 @@ function acquire(
   e: Entity,
   team: 'red' | 'blue',
   weaponKey: string,
-  mode: 'fight' | 'hold',
+  aggressive: boolean,
 ): Entity | null {
-  return mode === 'hold'
-    ? nearestInFireGeometry(ctx, e, team, weaponKey)
-    : acquireFight(ctx, e, team, weaponKey)
+  return aggressive
+    ? acquireAttack(ctx, e, team, weaponKey)
+    : nearestInFireGeometry(ctx, e, team, weaponKey)
 }
 
 const system: System = {
@@ -83,7 +83,7 @@ const system: System = {
       const kind = ctx.world.require(e, PieceType).kind
       const def = PIECES[kind]
       if (!def) continue
-      const mode = ctx.teams[team].controller === 'ai' ? 'fight' : stance.mode
+      const mode = ctx.teams[team].controller === 'ai' ? 'attack' : stance.mode
 
       // A specific attack order is sticky: keep the exact enemy until it dies.
       if (order.kind === 'attack') {
@@ -96,10 +96,12 @@ const system: System = {
         order.kind = 'none'
         order.target = null
         target.entity = null
+        // The order is done; return to no stance so the piece stands down.
+        stance.mode = 'none'
         continue
       }
 
-      // Move never initiates a fight: only return fire while under fire.
+      // Move never initiates an attack: only return fire while under fire.
       if (mode === 'move') {
         const attacker = target.lastAttacker
         target.entity =
@@ -117,7 +119,7 @@ const system: System = {
           target.retargetAt = Math.min(target.retargetAt, ctx.tick + 3)
         }
         if (ctx.tick >= target.retargetAt) {
-          const found = acquire(ctx, e, team, def.weapon, mode)
+          const found = acquire(ctx, e, team, def.weapon, mode === 'attack')
           target.entity = found
           target.retargetAt = ctx.tick + RETARGET_TICKS
           if (found !== null) {
@@ -126,7 +128,7 @@ const system: System = {
         }
       } else if (ctx.tick >= target.retargetAt) {
         target.retargetAt = ctx.tick + RETARGET_TICKS
-        const found = acquire(ctx, e, team, def.weapon, mode)
+        const found = acquire(ctx, e, team, def.weapon, mode === 'attack')
         if (found !== null && found !== target.entity) {
           const previous = target.entity
           target.entity = found

@@ -16,7 +16,7 @@ export function createPiece(ctx: SimContext, team: 'red' | 'blue', def: PieceDef
   world.add(e, PieceType, { kind: def.key })
   world.add(e, Render, { glyph: def.glyph, tint: TEAM_COLORS[team], size: def.size })
   world.add(e, Health, { cur: def.hp, max: def.hp })
-  world.add(e, Stance, { mode: 'hold' })
+  world.add(e, Stance, { mode: 'none' })
   world.add(e, Order, { kind: 'none', dest: null, target: null })
   world.add(e, Target, { entity: null, retargetAt: 0, lastAttacker: null, underFireUntil: 0 })
   world.add(e, Weapon, { left: ctx.rng.range(0, 0.5) })

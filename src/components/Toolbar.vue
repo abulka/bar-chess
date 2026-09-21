@@ -23,9 +23,8 @@ const emit = defineEmits<{
 
 const speeds = [0.5, 1, 2, 4]
 const stances: Array<{ id: StanceMode; label: string; title: string }> = [
-  { id: 'move', label: 'Move', title: 'Move stance: travel, only return fire' },
-  { id: 'fight', label: 'Fight', title: 'Fight stance: engage nearby, flee when low' },
-  { id: 'hold', label: 'Hold', title: 'Hold stance: never leave the square' },
+  { id: 'move', label: 'Move', title: 'Move stance (1/m): travel, only return fire' },
+  { id: 'attack', label: 'Attack', title: 'Attack stance (2/a): engage nearby, flee when low' },
 ]
 const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
   { key: 'myOrders', label: 'my orders (o)' },
@@ -36,6 +35,25 @@ const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
   { key: 'grid', label: 'grid' },
   { key: 'health', label: 'health' },
 ]
+
+// Blur after change so global hotkeys keep working when a toolbar control was
+// the last thing clicked.
+function onSizeChange(event: Event): void {
+  const el = event.target as HTMLSelectElement
+  emit('select-size', Number(el.value))
+  el.blur()
+}
+
+function onModeChange(event: Event): void {
+  const el = event.target as HTMLSelectElement
+  emit('set-game-mode', el.value as GameMode)
+  el.blur()
+}
+
+function onOverlayChange(key: keyof OverlayFlags, event: Event): void {
+  emit('toggle-overlay', key)
+  ;(event.target as HTMLInputElement).blur()
+}
 </script>
 
 <template>
@@ -45,7 +63,7 @@ const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
     <select
       class="ctl"
       :value="props.snapshot.boardSize"
-      @change="emit('select-size', Number(($event.target as HTMLSelectElement).value))"
+      @change="onSizeChange"
     >
       <option v-for="s in props.snapshot.boardSizes" :key="s" :value="s">{{ s }}×{{ s }}</option>
     </select>
@@ -53,7 +71,7 @@ const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
     <select
       class="ctl mode-select"
       :value="props.snapshot.gameMode"
-      @change="emit('set-game-mode', ($event.target as HTMLSelectElement).value as GameMode)"
+      @change="onModeChange"
     >
       <option v-for="m in props.snapshot.gameModes" :key="m.id" :value="m.id">{{ m.label }}</option>
     </select>
@@ -110,7 +128,7 @@ const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
       <input
         type="checkbox"
         :checked="props.snapshot.overlays[o.key]"
-        @change="emit('toggle-overlay', o.key)"
+        @change="onOverlayChange(o.key, $event)"
       />
       {{ o.label }}
     </label>

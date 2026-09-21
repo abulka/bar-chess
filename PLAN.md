@@ -50,13 +50,16 @@ autonomous movement, firing, projectile flight and destruction play out.
 
 Two distinct concepts:
 
-**Stance** is a piece's persistent autonomous policy, shown as a badge on the
-piece and set with the toolbar buttons or `1` / `2`(`a`) / `3`:
+**Stance** is a piece's explicit persistent autonomous policy, shown as a badge
+on the piece and set with the toolbar buttons or `1`/`m` (Move) and `2`/`a`
+(Attack):
 
-- **Move** (`1`, green) — travel and return fire only; never starts a fight.
-- **Fight** (`2` or `a`, red) — seek and attack nearby targets, prefer damaged
+- **No stance** (default, no badge) — stand ground and fire at enemies already in
+  range, so the opening board stays clean.
+- **Move** (`1` or `m`, green) — travel and return fire only; never starts an
+  attack.
+- **Attack** (`2` or `a`, red) — seek and attack nearby targets, prefer damaged
   ones, and flee when below 30% HP. Does not chase across the board.
-- **Hold** (`3`, amber) — never repositions; fires at whatever enters range.
 
 **Order** is a one-shot instruction that overrides stance until fulfilled:
 
@@ -64,28 +67,33 @@ piece and set with the toolbar buttons or `1` / `2`(`a`) / `3`:
   **objective**, not a strict destination: each selected piece advances as far as
   its own geometry allows, so a pawn ordered to an off-file square still marches
   forward up its own file.
-- **Right-click an enemy piece** → *attack*: become glued to that enemy, follow
-  it, and fire when possible. Shown as a **red** tracking chain + a **red ring**
-  around the targeted enemy. **Only the Fight stance** attacks; a Move/Hold piece
-  treats an occupied square as a plain move (best-effort advance), never as a
-  target, and a move order clears any stale target.
-- Repeating an order toggles it off; `c` or `4` clears orders on the selection.
-- The attack's route is planned immediately and drawn as a red dashed path (like
-  a move) with a lock reticle on the victim, instead of a straight line.
-- Issuing an attack or a Hold command returns the toolbar to Move; Move/Fight
-  stay selected. An attack leaves the piece in **Hold** so once the target dies
-  it stops and fires at whatever comes into range (no wandering).
-- You can select and command **enemy pieces too** — a player-issued order
-  bypasses the AI move budget, so you can drive either side.
+- **Right-click an enemy piece** → *attack* (only while in the **Attack**
+  stance): become glued to that enemy, follow it, and fire when possible. Shown
+  as a **red** tracking chain + a **red ring** around the targeted enemy. A
+  Move/no-stance piece treats an occupied square as a plain move (best-effort
+  advance), never as a target, and a move order clears any stale target.
+- Re-issuing an order just keeps/refreshes it (no toggle); `c` or `Backspace`
+  clears orders on the selection.
+- The attack's route is planned immediately and drawn as a **red dashed path** to
+  a firing position, with a lock reticle on the victim. There is no extra direct
+  source→victim line: the route is the display, and it is only drawn when a real
+  route exists (never a misleading straight line through blockers).
+- Issuing an attack does not change the persistent stance: the piece stays in
+  Attack while the order runs and its badge shows a red **A**. When the target
+  dies the order clears and the piece returns to **no stance** (badge
+  disappears), so it stands down instead of wandering.
+- Only pieces whose team is under human control can be commanded: your own team
+  in Human-vs-AI, **both** teams in Human-vs-Human, nobody in AI-vs-AI. Enemy
+  pieces remain selectable for inspection.
 - Tracking rings/chains follow the overlay scope: visible for the selection and,
   when on, `my orders` (`o`) / `enemy plans` (`e`) — never floating permanently.
 
 **Team colour is Orange vs Blue** so that **red is reserved for attack
-indicators** (tracking chain, targeted ring, Fight stance). Pieces have no
+indicators** (tracking chain, targeted ring, Attack stance). Pieces have no
 default ring — a red ring means "this piece is under an attack order".
 
-Auto-targeting follows from this: attack order = sticky target; Fight = scored
-auto-acquire; Hold = in-range only; Move = retaliation only (returns fire at its
+Auto-targeting follows from this: attack order = sticky target; Attack = scored
+auto-acquire; no stance = in-range only; Move = retaliation only (returns fire at its
 attacker while continuing to move).
 
 ## Turn flow, pause and replay
@@ -118,8 +126,8 @@ across turns). It may skip moves but never exceed yours. AI-vs-AI is unrestricte
 
 `human-vs-ai` (default), `ai-vs-ai`, `human-vs-human`, chosen in the toolbar.
 The player's team (default blue) is shown in the `You: Blue · Red ai` badge.
-Human pieces default to **Hold** and only act on your orders; AI teams
-rally/engage on their own. Both still fire autonomously.
+Human pieces start with **no stance** (no badge) and only act on your orders; AI
+teams rally/engage on their own. Both still fire autonomously.
 
 ## Overlays: seeing what is going on
 
@@ -150,14 +158,15 @@ selected pieces to keep the board readable.
 
 Mouse: **drag** to box-select (any cell the box touches; shift-click adds),
 **shift-drag** or middle-drag to pan, **wheel** to zoom, **right-click** to
-order (goto on an empty square, attack on an enemy while in Fight stance). Hover shows a per-piece order preview (faint
+order (goto on an empty square, attack on an enemy while in Attack stance). Hover shows a per-piece order preview (faint
 ghosts) and the square name. The board is labelled with chess coordinates, and
 the control hints + stance legend live in always-visible side rails (even with
 the HUD hidden). A **Copy position JSON** button captures the full situation.
 
 Keyboard summary: `1/2/3` stance, `space` turn, `p` pause, `s` step, `r` replay,
-`b` rewind (undo last turn), `c`/`4` clear orders, `o` my orders, `e` enemy
-plans, `h` HUD, `Esc` clear selection. Turns and replays both play at 0.5× speed
+`b` rewind (undo last turn), `c`/`Backspace` clear orders, `o` my orders, `e`
+enemy plans, `h` HUD, `Esc` clear selection. Turns and replays both play at 0.5×
+speed
 (one move at a time), and the wide **turn bar** under the toolbar sweeps the full
 width (same colour for both).
 
@@ -166,7 +175,7 @@ width (same colour for both).
 - [x] **Phase 0 — Scaffold & port.** Vite/Vue/TS project, ECS core, timed
       pipeline, camera, terrain, snapshot UI, 8–64 boards, hideable HUD.
 - [x] **Phase 1 — Occupancy, movement, intents.** One piece per square,
-      geometry-driven A*, move cooldowns, Move/Fight/Hold, immediate order paths.
+      geometry-driven A*, move cooldowns, Move/Attack, immediate order paths.
 - [x] **Phase 2 — Firing geometry & LOS.** Chess weapon patterns, blockers,
       weapon cooldowns, auto-engage while moving.
 - [x] **Phase 3 — Projectiles & spectacle.** Data-driven trajectories

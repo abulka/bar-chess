@@ -91,7 +91,7 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `PieceType` | `{ kind }` | keys into `PIECES` |
 | `Render` | `{ glyph, tint, size }` | unicode glyph + team tint |
 | `Health` | `{ cur, max }` | |
-| `Stance` | `{ mode }` | persistent policy: `move` / `fight` / `hold` |
+| `Stance` | `{ mode }` | persistent policy: `none` / `move` / `attack` (`none` stands ground and fires in range, with no badge) |
 | `Order` | `{ kind, dest, target }` | one-shot: `none` / `goto` / `attack` |
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping |
 | `Weapon` | `{ left }` | seconds until next shot |
@@ -151,9 +151,11 @@ requestAnimationFrame(frame):
 
 `TeamRuntime.controller` is `'human'` or `'ai'`, set from `gameMode`
 (`human-vs-ai`, `ai-vs-ai`, `human-vs-human`) and `playerTeam`. The `ai` system
-only auto-manages AI teams (rally/engage). Human pieces default to `hold` and
-act solely on player `Intent`s, while still firing autonomously via combat.
-The toolbar shows the mode and a `You: Blue · Red ai` badge.
+only auto-manages AI teams (rally/engage). Human pieces start with no stance
+(`none`, no badge) and act solely on player orders, while still
+firing autonomously via combat. A piece is commandable only when its team's
+controller is `human`. The toolbar shows the mode and a `You: Blue · Red ai`
+badge.
 
 `SimContext` (`src/ecs/types.ts`) is the shared mutable context passed to every
 system: `world`, `bus`, `board`, `rng`, `tick`, `dt`, `cmds`, `teams`,
@@ -229,18 +231,19 @@ cell/reservation during movement validation and path planning.
 - **spawn** — drains `cmds.deploy`, finds a free passable entry lane for the team
   and `createPiece`s there; updates `TeamRuntime.alive` / `deployed`.
 - **targeting** — rebuilds occupancy, then sets the engagement target from
-  stance + order: an `attack` order is sticky on its enemy; `hold` picks the
-  nearest enemy already in firing geometry; `fight` auto-acquires the nearest
+  stance + order: an `attack` order is sticky on its enemy; `none` picks the
+  nearest enemy already in firing geometry; `attack` auto-acquires the nearest
   enemy within `weaponVision`, biased toward damaged ones; `move` only targets
   its `lastAttacker` while `underFire`. AI-controlled teams always behave as
-  `fight`.
+  `attack`. When an attack order ends (target gone) the piece's stance resets to
+  `none`.
 - **ai** — turns stance/order into `Motion.goal`: an `attack` order pursues the
-  target (or holds to fire when in geometry); a `goto` order advances toward the
-  objective (best effort); autonomous `fight` pursues in a leash, flees below
-  30% HP, and rallies only for AI teams; `move`/`hold` clear the goal. Pursuit
-  targets a *firing position* from `attackApproachCells` (a cell from which the
-  enemy is inside the weapon geometry) rather than the occupied enemy cell, so
-  pieces do not pile into an unreachable square.
+  target (or stops to fire when in geometry); a `goto` order advances toward the
+  objective (best effort); autonomous `attack` pursues in a leash, flees below
+  30% HP, and rallies only for AI teams; anything other than `attack` clears the
+  goal. Pursuit targets a *firing position* from `bestFiringCell` (the nearest
+  reachable cell from which the enemy is inside the weapon geometry) rather than
+  the occupied enemy cell, so pieces do not pile into an unreachable square.
 - **pathfinding** — budgeted A* (`PATH_BUDGET_PER_TICK`) over the piece's
   movement geometry, with other pieces passed in as blockers (excluding the
   piece itself). Unreachable goals fall back to the nearest reachable cell.
@@ -255,8 +258,9 @@ cell/reservation during movement validation and path planning.
   (and replays) read as a sequence of individual moves. Travel time scales with
   the slide length. An AI team whose opponent is human is also capped by the
   opponent's cumulative `movesMade`, so it cannot out-move the player. A
-  player-issued order (`Order.kind !== 'none'`) bypasses the budget, so either
-  side's pieces can be commanded directly.
+  player-issued order (`Order.kind !== 'none'`) bypasses the budget; only pieces
+  whose team is under human control can be commanded (your own team in
+  Human-vs-AI, both teams in Human-vs-Human, none in AI-vs-AI).
 - **combat** — ticks `Weapon.left`; when ready, fires at `Target.entity` if it is
   inside `fireCells`. Because targeting decides whether a target exists at all,
   combat inherits the stance/order fire policy automatically.
@@ -354,26 +358,32 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
 `attackCells`, `rangeArcs`. `rangeArcs` is off by default; move/attack cells and
 range arcs are drawn for selected pieces only, army scopes show paths/goals/targets.
 
-Stance is chosen with the toolbar buttons or `1`/`2`/`3`; right-click issues an
-order (goto on any square, or an attack on an enemy only while the piece is in
-Fight stance). Drag box-selection selects any piece whose cell the box touches
-(`Game.selectRect`), shift-click adds, shift/middle-drag pans. Hovering computes
-a per-selected-piece order preview (`Game.setHover`, drawn as faint ghosts) and a
-cell readout.
+Stance is chosen with the toolbar buttons or `1`/`m` (Move) and `2`/`a` (Attack);
+right-click issues an order (goto on any square, or an attack on an enemy only
+while the piece is in Attack stance). Pieces start with no stance and show no
+badge; only an explicit stance or an active attack order draws one. Toolbar
+selects/checkboxes blur after
+use so the global shortcuts always reach the window. Drag box-selection selects
+any piece whose cell the box touches (`Game.selectRect`), shift-click adds,
+shift/middle-drag pans. Hovering computes a per-selected-piece order preview
+(`Game.setHover`, drawn as faint ghosts) and a cell readout.
 Chess coordinates (`coordName`) label the board margins. The right rail has a
 **Copy position JSON** button (`Game.toDebugJson`) for debugging snapshots.
 
-Keyboard: `1`/`2`(`a`)/`3` stance, `space` turn, `p` pause, `s` step, `r` replay,
-`c`/`4` clear orders, `o` my orders, `e` enemy plans, `h` HUD, `Esc` clear
-selection. `Game.orderAt` makes a goto on any square and an attack on an enemy only
-in Fight stance; repeating the same order toggles it off. An attack also sets the
-piece's stance to **Hold**, so after the kill it stops and fires in range, and
-`planAttack` routes it to a firing position immediately (visible while paused). A
-right-click never changes the selection. `space` is ignored while a turn/replay
-is running; `b` rewinds the last turn.
+Keyboard: `1`/`m` Move and `2`/`a` Attack stance, `space` turn, `p` pause, `s`
+step, `r` replay, `c`/`Backspace` clear orders, `o` my orders, `e` enemy plans,
+`h` HUD, `Esc` clear selection. `Game.orderAt` makes a goto on any square and an
+attack on an enemy only in Attack stance; re-issuing the same order keeps it, and
+only pieces under human control can be commanded. An attack does not change the
+persistent stance; its badge shows a red **A** while the order is active. The
+attack route is a red dashed path to a firing position with a lock reticle (never
+a straight line through blockers). When the target dies the order clears, stance
+resets to `none`, and `planAttack` routes immediately (visible while paused)
+against a fresh occupancy map. A right-click never changes the selection. `space`
+is ignored while a turn/replay is running; `b` rewinds the last turn.
 
 Team colour is Orange vs Blue; **red is reserved for attack indicators**: the
-tracking chain, the Fight stance badge, and the ring drawn around a piece that is
+tracking chain, the Attack stance badge, and the ring drawn around a piece that is
 the target of an attack order. Pieces no longer draw a default ring. Target
 rings/chains are computed from **scoped** pieces only (selection + `my orders` /
 `enemy plans`), so they never float permanently. Every piece draws a thin health

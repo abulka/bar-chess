@@ -24,7 +24,9 @@ import type { BoardSize, Placement } from './boards'
 import { createBoardData, initialArmy } from './boards'
 import { FIXED_DT, MAX_STEPS_PER_FRAME, PATH_BUDGET_PER_TICK, TEAM_COLORS, TEAM_NAMES } from './constants'
 import { coordName } from './coords'
-import { attackApproachCells, containsCell, fireCells } from './geometry'
+import { containsCell, fireCells } from './geometry'
+import type { OccupiedFn } from './geometry'
+import { bestFiringCell } from './approach'
 import { createPiece } from './factory'
 import { buildOccupancy, occupiedExcept } from './occupancy'
 import type { StanceMode, TeamId, Vec2 } from './types'
@@ -609,8 +611,11 @@ export class Game {
 
   /** Set the autonomous stance for the selection and clear any active order. */
   setStance(mode: StanceMode): void {
+    let n = 0
     for (const e of this.selected) {
       if (!this.world.isAlive(e)) continue
+      const team = this.world.get(e, Team)
+      if (!team || !this.commandable(team)) continue
       const stance = this.world.get(e, Stance)
       const order = this.world.get(e, Order)
       const motion = this.world.get(e, Motion)
@@ -625,8 +630,14 @@ export class Game {
         motion.path = []
         motion.arrived = true
       }
+      n++
     }
-    this.bus.emit('info', `${this.selected.length} piece(s) stance: ${mode}`)
+    this.bus.emit('info', `${n} piece(s) stance: ${mode}`)
+  }
+
+  /** A piece can be commanded only when its team is under human control. */
+  private commandable(team: TeamId): boolean {
+    return this.teams[team].controller === 'human'
   }
 
   /** Right-click: attack the enemy on `cell`, otherwise move toward it. */
@@ -641,35 +652,21 @@ export class Game {
       const motion = this.world.get(e, Motion)
       const team = this.world.get(e, Team)
       if (!order || !motion || !team) continue
+      if (!this.commandable(team)) continue
       const occupantTeam = occupant !== undefined && occupant !== e ? this.world.get(occupant, Team) : undefined
       const enemyOccupied =
         occupant !== undefined && occupant !== e && occupantTeam !== undefined && occupantTeam !== team
-      // Only Fight stance attacks on right-click; Move/Hold treat an occupied
-      // square as a plain move order (no target).
-      const stanceMode = this.world.get(e, Stance)?.mode ?? 'hold'
-      const attacking = enemyOccupied && stanceMode === 'fight'
-      // Repeating the same order toggles it off.
-      const sameOrder =
-        (attacking && order.kind === 'attack' && order.target === occupant) ||
-        (!attacking && order.kind === 'goto' && order.dest !== null && order.dest.x === cell.x && order.dest.y === cell.y)
-      if (sameOrder) {
-        order.kind = 'none'
-        order.dest = null
-        order.target = null
-        motion.goal = null
-        motion.path = []
-        motion.arrived = true
-      } else if (attacking) {
+      // Only the Attack stance attacks on right-click; Move/None treat an
+      // occupied square as a plain move order (no target).
+      const stanceMode = this.world.get(e, Stance)?.mode ?? 'none'
+      const attacking = enemyOccupied && stanceMode === 'attack'
+      if (attacking) {
         order.kind = 'attack'
         order.target = occupant
         order.dest = null
         motion.goal = null
         motion.path = []
         motion.arrived = true
-        // After the kill the piece reverts to Hold: stop and fire in range,
-        // rather than wandering in Fight.
-        const stance = this.world.get(e, Stance)
-        if (stance) stance.mode = 'hold'
         // Plan the route to a firing position now so it is visible while paused.
         this.planAttack(e, motion, occupant)
       } else {
@@ -683,7 +680,7 @@ export class Game {
           t.lastAttacker = null
         }
         motion.goal = cell
-        this.planNow(e, motion, cell)
+        this.planNow(e, motion, cell, occupiedExcept(this.board, occ, e))
       }
       n++
     }
@@ -695,8 +692,11 @@ export class Game {
   }
 
   clearOrders(): void {
+    let n = 0
     for (const e of this.selected) {
       if (!this.world.isAlive(e)) continue
+      const team = this.world.get(e, Team)
+      if (!team || !this.commandable(team)) continue
       const order = this.world.get(e, Order)
       const motion = this.world.get(e, Motion)
       if (order) {
@@ -709,8 +709,9 @@ export class Game {
         motion.path = []
         motion.arrived = true
       }
+      n++
     }
-    this.bus.emit('info', `${this.selected.length} piece(s) orders cleared`)
+    this.bus.emit('info', `${n} piece(s) orders cleared`)
   }
 
   /** Hover feedback and per-piece order preview (computed once per hovered cell). */
@@ -730,6 +731,7 @@ export class Game {
       const fromCell = this.world.get(e, Cell)
       const kind = this.world.get(e, PieceType)?.kind
       if (!team || !fromCell || !kind) continue
+      if (!this.commandable(team)) continue
       const def = PIECES[kind]
       if (!def) continue
       const occupantTeam = occupant !== undefined && occupant !== e ? this.world.get(occupant, Team) : undefined
@@ -813,30 +815,20 @@ export class Game {
       motion.path = []
       return
     }
-    const candidates = attackApproachCells(this.board, tcell, geometry, team, blocked)
-    let best: Vec2 | null = null
-    let bestDist = Infinity
-    for (const c of candidates) {
-      const d = (c.x - cell.x) ** 2 + (c.y - cell.y) ** 2
-      if (d < bestDist) {
-        bestDist = d
-        best = c
-      }
-    }
+    const best = bestFiringCell(this.board, cell, tcell, def.move, geometry, team, blocked)
     if (best) {
       motion.goal = best
-      this.planNow(e, motion, best)
+      this.planNow(e, motion, best, blocked)
     }
   }
 
-  private planNow(e: Entity, motion: MotionData, dest: Vec2): void {
+  private planNow(e: Entity, motion: MotionData, dest: Vec2, occupied: OccupiedFn): void {
     const cell = this.world.get(e, Cell)
     const kind = this.world.get(e, PieceType)?.kind
     const team = this.world.get(e, Team)
     if (!cell || !kind || !team) return
     const def = PIECES[kind]
     if (!def) return
-    const occupied = occupiedExcept(this.board, this.occupancy, e)
     const result = findPath(this.board, cell, dest, def.move, team, occupied)
     motion.path = result.cells
     motion.replanAt = this.tick + 15

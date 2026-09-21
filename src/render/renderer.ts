@@ -25,8 +25,7 @@ import { bakeTerrain } from './terrain'
 
 const STANCE_COLORS: Record<string, string> = {
   move: '#4ad991',
-  fight: '#ff3b30',
-  hold: '#ffd166',
+  attack: '#ff3b30',
 }
 const TRACK_COLOR = '#ff2d20'
 
@@ -186,7 +185,13 @@ export class Renderer {
       for (const c of fires) ctx.strokeRect(c.x * t + 4, c.y * t + 4, t - 8, t - 8)
     }
 
-    if (motion && motion.path.length > 0) {
+    const order = game.world.get(e, Order)
+    const autoTarget = game.world.get(e, Target)?.entity ?? null
+    const target = order?.kind === 'attack' ? order.target : autoTarget
+
+    // A gold route for goto/autonomous moves; attack orders draw their own red
+    // route below so the two do not overlap.
+    if (motion && motion.path.length > 0 && order?.kind !== 'attack') {
       ctx.strokeStyle = full ? '#ffd166' : 'rgba(255,209,102,0.7)'
       ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
       ctx.setLineDash([5 / this.camera.zoom, 4 / this.camera.zoom])
@@ -200,12 +205,8 @@ export class Renderer {
       ctx.setLineDash([])
     }
 
-    const order = game.world.get(e, Order)
-    const autoTarget = game.world.get(e, Target)?.entity ?? null
-    const target = order?.kind === 'attack' ? order.target : autoTarget
-
-    // Attack order: show the route it will take (like a move) plus a lock
-    // reticle on the victim. Falls back to a straight line once in position.
+    // Attack order: draw the route to the firing position plus a lock reticle on
+    // the victim. No direct source→victim line: the route is the display.
     if (order?.kind === 'attack' && target !== null && game.world.isAlive(target)) {
       const tp = game.world.get(target, Position)
       if (tp) {
@@ -221,12 +222,6 @@ export class Renderer {
           }
           ctx.stroke()
           ctx.setLineDash([])
-        } else {
-          ctx.setLineDash([])
-          ctx.beginPath()
-          ctx.moveTo(pos.x, pos.y)
-          ctx.lineTo(tp.x, tp.y)
-          ctx.stroke()
         }
         const ang = Math.atan2(tp.y - pos.y, tp.x - pos.x)
         const ah = t * 0.2
@@ -507,22 +502,27 @@ export class Renderer {
         }
       }
 
-      const team = game.world.get(e, Team)
-      const stanceComp = game.world.get(e, Stance)?.mode ?? 'hold'
-      const stance = team && game.teams[team].controller === 'ai' ? 'fight' : stanceComp
+      // Badge shows an active attack order (red A) or an explicit stance. A
+      // piece with no stance and no order shows nothing, keeping the opening
+      // board clean.
+      const stance = game.world.get(e, Stance)?.mode ?? 'none'
       const order = game.world.get(e, Order)
-      const bx = pos.x + size * 0.34
-      const by = pos.y + size * 0.36
-      const br = size * 0.17
-      ctx.fillStyle = order?.kind === 'attack' ? TRACK_COLOR : STANCE_COLORS[stance] ?? '#888'
-      ctx.beginPath()
-      ctx.arc(bx, by, br, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = '#0b0f16'
-      ctx.font = `bold ${br * 1.5}px ui-monospace, monospace`
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillText(stance[0].toUpperCase(), bx, by + br * 0.06)
+      const attacking = order?.kind === 'attack'
+      if (attacking || stance !== 'none') {
+        const letter = attacking ? 'A' : stance[0].toUpperCase()
+        const bx = pos.x + size * 0.34
+        const by = pos.y + size * 0.36
+        const br = size * 0.17
+        ctx.fillStyle = attacking ? TRACK_COLOR : STANCE_COLORS[stance] ?? '#888'
+        ctx.beginPath()
+        ctx.arc(bx, by, br, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = '#0b0f16'
+        ctx.font = `bold ${br * 1.5}px ui-monospace, monospace`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(letter, bx, by + br * 0.06)
+      }
 
       if (game.selected.includes(e)) {
         ctx.strokeStyle = '#ffd166'

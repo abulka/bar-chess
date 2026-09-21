@@ -1,5 +1,6 @@
-import { attackApproachCells, containsCell, fireCells, moveDestinations } from '../../game/geometry'
+import { containsCell, fireCells, moveDestinations } from '../../game/geometry'
 import { makeOccupied } from '../../game/occupancy'
+import { bestFiringCell } from '../../game/approach'
 import { PIECES, WEAPONS } from '../../game/pieces'
 import { Cell, Health, Motion, Order, PieceType, Stance, Target, Team } from '../components'
 import type { Entity } from '../world'
@@ -30,16 +31,7 @@ function pursue(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'
   const cell = ctx.world.require(e, Cell)
   const tcell = ctx.world.require(target, Cell)
   const occupied = makeOccupied(ctx.board, ctx.occupancy)
-  const candidates = attackApproachCells(ctx.board, tcell, WEAPONS[def.weapon].geometry, team, occupied)
-  let best: { x: number; y: number } | null = null
-  let bestDist = Infinity
-  for (const c of candidates) {
-    const d = (c.x - cell.x) ** 2 + (c.y - cell.y) ** 2
-    if (d < bestDist) {
-      bestDist = d
-      best = c
-    }
-  }
+  const best = bestFiringCell(ctx.board, cell, tcell, def.move, WEAPONS[def.weapon].geometry, team, occupied)
   return best ?? { x: tcell.x, y: tcell.y }
 }
 
@@ -91,6 +83,8 @@ const system: System = {
         }
         order.kind = 'none'
         order.target = null
+        // The order is done; return to no stance so the piece stands down.
+        stance.mode = 'none'
       }
 
       // 2. Goto order: advance toward the objective (best effort if unreachable).
@@ -107,9 +101,9 @@ const system: System = {
 
       // 3. Autonomous stance.
       const controller = ctx.teams[team].controller
-      const mode = controller === 'ai' ? 'fight' : stance.mode
+      const mode = controller === 'ai' ? 'attack' : stance.mode
 
-      if (mode === 'hold' || mode === 'move') {
+      if (mode !== 'attack') {
         motion.goal = null
         continue
       }
@@ -124,7 +118,7 @@ const system: System = {
         continue
       }
       if (!targetValid) {
-        // AI armies advance; a player's Fight stance skirmishes locally.
+        // AI armies advance; a player's Attack stance skirmishes locally.
         motion.goal = controller === 'ai' ? rally(ctx, team) : null
         continue
       }
