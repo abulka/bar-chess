@@ -33,6 +33,8 @@ import type { Occupancy } from './occupancy'
 import type { StanceMode, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { findPath } from './pathfind'
+import { buildBoard, buildWorldSnapshot, serializePosition, validatePosition } from './position'
+import type { SavedPosition } from './position'
 import { Rng } from './rng'
 
 export type GameMode = 'human-vs-ai' | 'ai-vs-ai' | 'human-vs-human'
@@ -843,6 +845,67 @@ export class Game {
       teams: { red: this.teams.red, blue: this.teams.blue },
       pieces,
     }
+  }
+
+  /**
+   * A complete, JSON-serializable snapshot of the battle (terrain, every
+   * component, RNG, teams). Round-trips through `importPosition`; used by save
+   * slots and export/copy.
+   */
+  exportPosition(): SavedPosition {
+    return serializePosition(this)
+  }
+
+  /**
+   * Replace the current battle with a previously exported position. Returns an
+   * error instead of mutating the game when the data is malformed.
+   */
+  importPosition(data: unknown): { ok: true } | { ok: false; error: string } {
+    const valid = validatePosition(data)
+    if (!valid.ok) return valid
+    const saved = data as SavedPosition
+
+    this.world.clear()
+    this.world.restore(buildWorldSnapshot(saved))
+    this.board = buildBoard(saved)
+
+    this.rng.setState(saved.rng)
+    this.tick = saved.tick
+    this.turn = saved.turn
+    this.winner = saved.winner
+    this.teams = structuredClone(saved.teams)
+    this.gameMode = saved.gameMode
+    this.playerTeam = saved.playerTeam
+    this.orderMode = saved.orderMode
+    this.overlays = { ...this.overlays, ...saved.overlays }
+
+    this.occupancy.clear()
+    this.selected = []
+    this.hoverCell = null
+    this.hoverPreview = []
+    this.hoverAttackTarget = null
+    this.cmds.damage.length = 0
+    this.cmds.deploy.length = 0
+    this.cmds.destroy.length = 0
+
+    this.turnActive = false
+    this.replaying = false
+    this.canReplay = false
+    this.turnSnapshot = null
+    this.lastTurn = null
+    this.turnTicks = 0
+    this.turnProgress = 0
+    this.replayTicks = 0
+    this.replayProgress = 0
+    this.accumulator = 0
+    this.paused = true
+
+    this.terrainVersion++
+    this.ctx = this.buildContext()
+
+    this.bus.emit('map', `loaded position ${this.board.data.name}`)
+    this.bus.emit('info', `position loaded (tick ${this.tick})`)
+    return { ok: true }
   }
 
   /**

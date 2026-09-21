@@ -9,6 +9,8 @@ import type { BoardSize } from './game/boards'
 import { SNAPSHOT_INTERVAL_MS } from './game/constants'
 import { Game } from './game/game'
 import type { GameMode, GameSnapshot, OverlayFlags } from './game/game'
+import { deleteSlot, listSlots, loadSlot, saveSlot } from './game/storage'
+import type { SlotMeta } from './game/storage'
 import type { StanceMode, TeamId } from './game/types'
 
 const game = new Game(8)
@@ -16,6 +18,10 @@ const snapshot = shallowRef<GameSnapshot>(game.snapshot())
 const stance = ref<StanceMode>('move')
 const copied = ref(false)
 const boardView = ref<InstanceType<typeof BoardView> | null>(null)
+const slots = ref<SlotMeta[]>([])
+const slotName = ref('')
+const ioMessage = ref('')
+const fileInput = ref<HTMLInputElement | null>(null)
 
 let timer = 0
 
@@ -80,13 +86,82 @@ function onReplay(): void {
 }
 
 async function copyJson(): Promise<void> {
-  const json = JSON.stringify(game.toDebugJson(), null, 2)
+  const json = JSON.stringify(game.exportPosition(), null, 2)
   try {
     await navigator.clipboard.writeText(json)
     copied.value = true
     window.setTimeout(() => (copied.value = false), 1200)
   } catch {
     console.log(json)
+  }
+}
+
+function refreshSlots(): void {
+  slots.value = listSlots()
+}
+
+function applyLoaded(data: unknown): void {
+  const result = game.importPosition(data)
+  if (!result.ok) {
+    ioMessage.value = result.error
+    return
+  }
+  ioMessage.value = ''
+  boardView.value?.fit()
+  refresh()
+}
+
+function onSaveSlot(): void {
+  const result = saveSlot(slotName.value, game.exportPosition())
+  if (!result.ok) {
+    ioMessage.value = result.error
+    return
+  }
+  ioMessage.value = ''
+  slotName.value = ''
+  refreshSlots()
+}
+
+function onLoadSlot(id: string): void {
+  const data = loadSlot(id)
+  if (!data) {
+    ioMessage.value = 'slot not found'
+    return
+  }
+  if (!window.confirm('Load this position? Unsaved progress will be lost.')) return
+  applyLoaded(data)
+}
+
+function onDeleteSlot(id: string): void {
+  if (!window.confirm('Delete this saved position?')) return
+  deleteSlot(id)
+  refreshSlots()
+}
+
+function onExport(): void {
+  const json = JSON.stringify(game.exportPosition(), null, 2)
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `bar-chess-${snapshot.value.boardId}-tick${snapshot.value.tick}.json`
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
+function onImportClick(): void {
+  fileInput.value?.click()
+}
+
+async function onImportFile(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  try {
+    applyLoaded(JSON.parse(await file.text()))
+  } catch {
+    ioMessage.value = 'invalid JSON file'
   }
 }
 
@@ -125,6 +200,7 @@ function onKey(event: KeyboardEvent): void {
 
 onMounted(() => {
   game.start()
+  refreshSlots()
   timer = window.setInterval(refresh, SNAPSHOT_INTERVAL_MS)
   window.addEventListener('keydown', onKey)
   if (import.meta.env.DEV) {
@@ -241,7 +317,37 @@ onBeforeUnmount(() => {
           <li><span class="ln ln-blocked"></span> blocked</li>
           <li><span class="ln ln-unreachable"></span> out of reach</li>
         </ul>
+        <div class="rail-title">position</div>
         <button class="ctl copy-btn" @click="copyJson">{{ copied ? 'Copied!' : 'Copy position JSON' }}</button>
+        <div class="save-row">
+          <input
+            v-model="slotName"
+            class="slot-input"
+            type="text"
+            placeholder="slot name"
+            @keydown.enter="onSaveSlot"
+          />
+          <button class="ctl" @click="onSaveSlot">Save</button>
+        </div>
+        <ul v-if="slots.length" class="slots">
+          <li v-for="slot in slots" :key="slot.id">
+            <span class="slot-name" :title="new Date(slot.savedAt).toLocaleString()">{{ slot.name }}</span>
+            <button class="ctl small" @click="onLoadSlot(slot.id)">Load</button>
+            <button class="ctl small" @click="onDeleteSlot(slot.id)">Del</button>
+          </li>
+        </ul>
+        <div class="io-row">
+          <button class="ctl" @click="onExport">Export JSON</button>
+          <button class="ctl" @click="onImportClick">Import JSON</button>
+        </div>
+        <input
+          ref="fileInput"
+          class="hidden-file"
+          type="file"
+          accept="application/json,.json"
+          @change="onImportFile"
+        />
+        <p v-if="ioMessage" class="io-msg">{{ ioMessage }}</p>
       </aside>
     </div>
 

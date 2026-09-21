@@ -33,7 +33,9 @@ export class Rng {
   }
 
   getState(): number {
-    return this.state
+    // `next()` accumulates without truncating; canonicalize to the 32-bit word
+    // `setState` restores, so a saved/restored stream is byte-identical.
+    return this.state >>> 0
   }
 
   setState(state: number): void {

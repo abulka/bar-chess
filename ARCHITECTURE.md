@@ -386,8 +386,30 @@ use so the global shortcuts always reach the window. Drag box-selection selects
 any piece whose cell the box touches (`Game.selectRect`), shift-click adds,
 shift/middle-drag pans. Hovering computes a per-selected-piece order preview
 (`Game.setHover`, drawn as faint ghosts) and a cell readout.
-Chess coordinates (`coordName`) label the board margins. The right rail has a
-**Copy position JSON** button (`Game.toDebugJson`) for debugging snapshots.
+Chess coordinates (`coordName`) label the board margins.
+
+### Position save / load / export
+
+The right rail's **position** section saves and restores whole battles. The unit
+of transfer is `SavedPosition` (`src/game/position.ts`): terrain, every component
+store (via `World.capture`, so entity ids and references survive), RNG state,
+tick/turn, teams, mode and overlays. It is plain JSON and versioned
+(`POSITION_VERSION`); `validatePosition` rejects unknown versions/stores before
+anything is mutated.
+
+- `Game.exportPosition()` / `Game.importPosition(data)` build and apply it.
+  Import rebuilds the `Board`, restores the world (mapping serialized store names
+  back through a registry), resets all transient turn/replay/selection state,
+  pauses and rebuilds `ctx`.
+- **Save/Load**: named slots in `localStorage` (`src/game/storage.ts`), keys
+  `bar-chess.positions.index` and `bar-chess.positions.<id>`; a same-named save
+  overwrites. Load/Delete confirm first.
+- **Copy / Export / Import**: the copy button and **Export JSON** emit the same
+  `SavedPosition` (so copied/exported JSON can be re-imported); **Import JSON**
+  reads a file. `Game.toDebugJson()` remains the terse debug view.
+
+`Rng.getState()` is canonicalized to 32 bits so a save/restore produces a
+byte-identical stream (see §10).
 
 Keyboard: `1`/`m` Move and `2`/`a` Attack order mode, `space` turn, `p` pause,
 `s` step, `r` replay, `c`/`Backspace` clear orders, `o` my orders, `e` enemy
@@ -506,6 +528,8 @@ src/
     pathfind.ts                geometry A* + memoized reachableCells flood fill
     pieces.ts                  Piece/Weapon/Projectile defs, weaponVision
     factory.ts                 createPiece
+    position.ts                SavedPosition serialize/validate/restore
+    storage.ts                 localStorage save slots
     game.ts                    Game facade + loop + GameSnapshot + runTicks
   render/
     camera.ts                  centre-based camera with fit floor
