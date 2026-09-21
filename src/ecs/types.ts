@@ -22,7 +22,10 @@ export interface Commands {
   destroy: Entity[]
 }
 
+export type TeamController = 'human' | 'ai'
+
 export interface TeamRuntime {
+  controller: TeamController
   /** reinforcement production cooldown remaining per piece key, in seconds */
   cooldown: Record<string, number>
   /** living piece count per key */
@@ -46,4 +49,6 @@ export interface SimContext {
   occupancy: Map<number, Entity>
   pathBudget: number
   verbosePhases: boolean
+  /** when true, each piece may make at most one move this turn */
+  turnActive: boolean
 }

@@ -58,7 +58,7 @@ export const PROJECTILES: Record<string, ProjectileDef> = {
 export const WEAPONS: Record<string, WeaponDef> = {
   pawnShot: {
     key: 'pawnShot',
-    geometry: { kind: 'slide', dirs: [[1, -1], [-1, -1]], range: 2 },
+    geometry: { kind: 'slide', dirs: [[1, -1], [-1, -1]], range: 1 },
     damage: 7,
     cooldown: 1.3,
     projectile: 'bolt',

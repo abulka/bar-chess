@@ -16,11 +16,12 @@ export function createPiece(ctx: SimContext, team: 'red' | 'blue', def: PieceDef
   world.add(e, PieceType, { kind: def.key })
   world.add(e, Render, { glyph: def.glyph, tint: TEAM_COLORS[team], size: def.size })
   world.add(e, Health, { cur: def.hp, max: def.hp })
-  world.add(e, Intent, { mode: 'fight', dest: null, player: false })
+  world.add(e, Intent, { mode: 'hold', dest: null, player: false })
   world.add(e, Target, { entity: null, retargetAt: 0 })
   world.add(e, Weapon, { left: ctx.rng.range(0, 0.5) })
   world.add(e, Motion, {
     goal: null,
+    reserved: null,
     path: [],
     fromX: center.x,
     fromY: center.y,
@@ -33,6 +34,8 @@ export function createPiece(ctx: SimContext, team: 'red' | 'blue', def: PieceDef
     arrived: true,
     replanAt: 0,
     blocked: false,
+    steps: 0,
+    movedThisTurn: false,
   })
   return e
 }

@@ -1,8 +1,9 @@
 import { Cell, Fx, Health, Motion, PieceType, Position, Projectile, Render, Target, Team } from '../ecs/components'
 import type { Entity } from '../ecs/world'
-import { makeOccupied } from '../game/occupancy'
+import { buildOccupancy, makeOccupied } from '../game/occupancy'
 import { fireCells, moveDestinations } from '../game/geometry'
 import { PIECES, WEAPONS } from '../game/pieces'
+import { resolveGeometry } from '../game/types'
 import type { Game } from '../game/game'
 import { Camera } from './camera'
 import { bakeTerrain } from './terrain'
@@ -58,7 +59,7 @@ export class Renderer {
       this.terrainKey = key
     }
 
-    const occupancy = this.buildOccupancy(game)
+    const occupancy = buildOccupancy(game.world, board)
     const occupied = makeOccupied(board, occupancy)
 
     ctx.save()
@@ -69,12 +70,10 @@ export class Renderer {
     if (this.terrain) ctx.drawImage(this.terrain, 0, 0)
 
     this.drawSpawns(ctx, game)
-    if (game.overlays.intentions || game.overlays.ranges || game.overlays.targets) {
-      this.drawBoardOverlays(ctx, game, occupied)
+    for (const { e, full } of this.scopedPieces(game)) {
+      this.drawPieceOverlay(ctx, game, occupied, e, full)
     }
-    if (game.selected.length > 0) this.drawSelectedOverlays(ctx, game, occupied)
     this.drawPieces(ctx, game)
-    this.drawTargets(ctx, game)
     this.drawProjectiles(ctx, game)
     this.drawFx(ctx, game)
     ctx.restore()
@@ -82,13 +81,24 @@ export class Renderer {
     this.drawBorder(ctx, game)
   }
 
-  private buildOccupancy(game: Game): Map<number, Entity> {
-    const map = new Map<number, Entity>()
-    for (const e of game.world.query(Cell)) {
-      const c = game.world.require(e, Cell)
-      map.set(c.y * game.board.width + c.x, e)
+  /**
+   * Pieces to annotate: the current selection (full detail) plus, when enabled,
+   * the player's army and/or the enemy army (lighter detail).
+   */
+  private scopedPieces(game: Game): Array<{ e: Entity; full: boolean }> {
+    const out = new Map<Entity, boolean>()
+    for (const e of game.selected) {
+      if (game.world.isAlive(e)) out.set(e, true)
     }
-    return map
+    if (game.overlays.myOrders || game.overlays.enemyPlans) {
+      for (const e of game.world.query(Cell, Team)) {
+        if (out.has(e)) continue
+        const team = game.world.require(e, Team)
+        const mine = team === game.playerTeam
+        if ((mine && game.overlays.myOrders) || (!mine && game.overlays.enemyPlans)) out.set(e, false)
+      }
+    }
+    return Array.from(out, ([e, full]) => ({ e, full }))
   }
 
   private drawSpawns(ctx: CanvasRenderingContext2D, game: Game): void {
@@ -100,125 +110,180 @@ export class Renderer {
     }
   }
 
-  private drawBoardOverlays(
+  /**
+   * Overlay for one piece: nominal range arc, legal move cells (blue), attack
+   * cells (red), path, destination and engagement line. `full` marks a selected
+   * piece (brighter) versus an army-overview piece.
+   */
+  private drawPieceOverlay(
     ctx: CanvasRenderingContext2D,
     game: Game,
     occupied: (x: number, y: number) => boolean,
+    e: Entity,
+    full: boolean,
   ): void {
     const board = game.board
     const t = board.tile
-    for (const e of game.world.query(Position, Cell, Team, PieceType)) {
-      const cell = game.world.require(e, Cell)
-      const team = game.world.require(e, Team)
-      const kind = game.world.require(e, PieceType).kind
-      const def = PIECES[kind]
-      if (!def) continue
-      const tint = team === 'red' ? 'rgba(255,107,90,' : 'rgba(90,176,255,'
+    const cell = game.world.get(e, Cell)
+    const kind = game.world.get(e, PieceType)?.kind
+    const team = game.world.get(e, Team)
+    const motion = game.world.get(e, Motion)
+    const pos = game.world.get(e, Position)
+    if (!cell || !kind || !team || !pos) return
+    const def = PIECES[kind]
+    if (!def) return
+    const glow = full ? 1 : 0.55
 
-      if (game.overlays.ranges) {
-        const moves = moveDestinations(board, cell, def.move, team, occupied)
-        ctx.fillStyle = `${tint}0.06)`
-        for (const c of moves) ctx.fillRect(c.x * t, c.y * t, t, t)
-        const fires = fireCells(board, cell, WEAPONS[def.weapon].geometry, team, occupied)
-        ctx.strokeStyle = `${tint}0.18)`
-        ctx.lineWidth = 1 / this.camera.zoom
-        for (const c of fires) ctx.strokeRect(c.x * t + 2, c.y * t + 2, t - 4, t - 4)
-      }
+    // Range arcs are subtle and scale with the weapon, so only show them for
+    // selected pieces; army views rely on move/attack cells + paths.
+    if (game.overlays.rangeArcs && full) this.drawRangeArc(ctx, board, cell, def, team, glow)
 
-      if (game.overlays.intentions) {
-        const motion = game.world.get(e, Motion)
-        const goal = motion?.goal ?? null
-        if (goal) {
-          const pos = game.world.require(e, Position)
-          const center = board.cellCenter(goal.x, goal.y)
-          ctx.strokeStyle = `${tint}0.28)`
-          ctx.lineWidth = 1 / this.camera.zoom
-          ctx.beginPath()
-          ctx.moveTo(pos.x, pos.y)
-          ctx.lineTo(center.x, center.y)
-          ctx.stroke()
-          ctx.beginPath()
-          ctx.arc(center.x, center.y, t * 0.22, 0, Math.PI * 2)
-          ctx.stroke()
-        }
-      }
-    }
-  }
-
-  private drawSelectedOverlays(
-    ctx: CanvasRenderingContext2D,
-    game: Game,
-    occupied: (x: number, y: number) => boolean,
-  ): void {
-    const board = game.board
-    const t = board.tile
-
-    for (const e of game.selected) {
-      if (!game.world.isAlive(e)) continue
-      const cell = game.world.get(e, Cell)
-      const kind = game.world.get(e, PieceType)?.kind
-      const team = game.world.get(e, Team)
-      const motion = game.world.get(e, Motion)
-      if (!cell || !kind || !team) continue
-      const def = PIECES[kind]
-      if (!def) continue
-      const tint = team === 'red' ? 'rgba(255,107,90,' : 'rgba(90,176,255,'
-
+    // Reach/attack shading is detailed, so it is reserved for selected pieces;
+    // army views show paths, goals and targets instead.
+    if (game.overlays.moveCells && full) {
       const moves = moveDestinations(board, cell, def.move, team, occupied)
-      ctx.fillStyle = `${tint}0.14)`
-      for (const c of moves) ctx.fillRect(c.x * t + 2, c.y * t + 2, t - 4, t - 4)
-
-      const fires = fireCells(board, cell, WEAPONS[def.weapon].geometry, team, occupied)
-      ctx.fillStyle = 'rgba(255,209,102,0.10)'
-      ctx.strokeStyle = 'rgba(255,209,102,0.35)'
+      ctx.fillStyle = `rgba(90,176,255,${0.18 * glow})`
+      ctx.strokeStyle = `rgba(90,176,255,${0.32 * glow})`
       ctx.lineWidth = 1 / this.camera.zoom
-      for (const c of fires) {
+      for (const c of moves) {
         ctx.fillRect(c.x * t + 3, c.y * t + 3, t - 6, t - 6)
         ctx.strokeRect(c.x * t + 3, c.y * t + 3, t - 6, t - 6)
       }
-
-      if (motion && motion.path.length > 0) {
-        const pos = game.world.get(e, Position)
-        if (pos) {
-          ctx.strokeStyle = '#ffd166'
-          ctx.lineWidth = 2 / this.camera.zoom
-          ctx.setLineDash([5 / this.camera.zoom, 4 / this.camera.zoom])
-          ctx.beginPath()
-          ctx.moveTo(pos.x, pos.y)
-          for (const c of motion.path) {
-            const center = board.cellCenter(c.x, c.y)
-            ctx.lineTo(center.x, center.y)
-          }
-          ctx.stroke()
-          ctx.setLineDash([])
-        }
-      }
-
-      const goal = motion?.goal ?? null
-      if (goal) {
-        const center = board.cellCenter(goal.x, goal.y)
-        const pos = game.world.get(e, Position)
-        ctx.strokeStyle = motion?.blocked ? '#ff7b72' : '#ffd166'
-        ctx.lineWidth = 2 / this.camera.zoom
-        if (pos && (!motion || motion.path.length === 0)) {
-          ctx.setLineDash([3 / this.camera.zoom, 5 / this.camera.zoom])
-          ctx.beginPath()
-          ctx.moveTo(pos.x, pos.y)
-          ctx.lineTo(center.x, center.y)
-          ctx.stroke()
-          ctx.setLineDash([])
-        }
-        ctx.beginPath()
-        ctx.arc(center.x, center.y, t * 0.26, 0, Math.PI * 2)
-        ctx.stroke()
-        ctx.beginPath()
-        ctx.moveTo(center.x - t * 0.16, center.y)
-        ctx.lineTo(center.x + t * 0.16, center.y)
-        ctx.moveTo(center.x, center.y - t * 0.16)
-        ctx.lineTo(center.x, center.y + t * 0.16)
-        ctx.stroke()
-      }
     }
+
+    if (game.overlays.attackCells && full) {
+      // Attacks are outlined (not filled) so they remain readable where they
+      // coincide with the movement fill (rooks, bishops, queens).
+      const fires = fireCells(board, cell, WEAPONS[def.weapon].geometry, team, occupied)
+      ctx.strokeStyle = `rgba(255,90,70,${0.85 * glow})`
+      ctx.lineWidth = 2 / this.camera.zoom
+      for (const c of fires) ctx.strokeRect(c.x * t + 4, c.y * t + 4, t - 8, t - 8)
+    }
+
+    if (motion && motion.path.length > 0) {
+      ctx.strokeStyle = full ? '#ffd166' : 'rgba(255,209,102,0.7)'
+      ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
+      ctx.setLineDash([5 / this.camera.zoom, 4 / this.camera.zoom])
+      ctx.beginPath()
+      ctx.moveTo(pos.x, pos.y)
+      for (const c of motion.path) {
+        const center = board.cellCenter(c.x, c.y)
+        ctx.lineTo(center.x, center.y)
+      }
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
+
+    const goal = motion?.goal ?? null
+    if (goal) {
+      const center = board.cellCenter(goal.x, goal.y)
+      ctx.strokeStyle = motion?.blocked ? '#ff7b72' : '#ffd166'
+      ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
+      if (!motion || motion.path.length === 0) {
+        ctx.setLineDash([3 / this.camera.zoom, 5 / this.camera.zoom])
+        ctx.beginPath()
+        ctx.moveTo(pos.x, pos.y)
+        ctx.lineTo(center.x, center.y)
+        ctx.stroke()
+        ctx.setLineDash([])
+      }
+      ctx.beginPath()
+      ctx.arc(center.x, center.y, t * 0.26, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(center.x - t * 0.16, center.y)
+      ctx.lineTo(center.x + t * 0.16, center.y)
+      ctx.moveTo(center.x, center.y - t * 0.16)
+      ctx.lineTo(center.x, center.y + t * 0.16)
+      ctx.stroke()
+    }
+
+    const target = game.world.get(e, Target)?.entity ?? null
+    if (target === null || !game.world.isAlive(target)) return
+    const tp = game.world.get(target, Position)
+    if (!tp) return
+    ctx.strokeStyle = `rgba(255,209,102,${full ? 0.6 : 0.35})`
+    ctx.lineWidth = 1 / this.camera.zoom
+    ctx.beginPath()
+    ctx.moveTo(pos.x, pos.y)
+    ctx.lineTo(tp.x, tp.y)
+    ctx.stroke()
+    ctx.beginPath()
+    ctx.arc(tp.x, tp.y, t * 0.2, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+
+  /** Nominal weapon range: circle, pawn forward half-disc, knight 8 dots. */
+  private drawRangeArc(
+    ctx: CanvasRenderingContext2D,
+    board: Game['board'],
+    cell: { x: number; y: number },
+    def: (typeof PIECES)[string],
+    team: 'red' | 'blue',
+    alpha: number,
+  ): void {
+    const t = board.tile
+    const center = board.cellCenter(cell.x, cell.y)
+    const weaponGeom = WEAPONS[def.weapon].geometry
+    const fill = `rgba(255,255,255,${0.045 * alpha})`
+    const stroke = `rgba(255,255,255,${0.22 * alpha})`
+    ctx.fillStyle = fill
+    ctx.strokeStyle = stroke
+    ctx.lineWidth = 1.5 / this.camera.zoom
+    ctx.setLineDash([4 / this.camera.zoom, 4 / this.camera.zoom])
+
+    const range = weaponGeom.kind === 'slide' ? weaponGeom.range : 1
+    const radius = Math.min(range, Math.max(board.width, board.height)) * t
+
+    if (weaponGeom.kind === 'leap') {
+      for (const [dx, dy] of weaponGeom.offsets) {
+        if (!board.inBounds(cell.x + dx, cell.y + dy)) continue
+        ctx.beginPath()
+        ctx.arc(center.x + dx * t, center.y + dy * t, t * 0.15, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.stroke()
+      }
+      ctx.setLineDash([])
+      return
+    }
+
+    if (def.move.kind === 'pawn') {
+      const resolved = resolveGeometry(def.move, team)
+      const dy = resolved.kind === 'pawn' ? resolved.dy : -1
+      const start = dy < 0 ? Math.PI : 0
+      ctx.beginPath()
+      ctx.moveTo(center.x, center.y)
+      ctx.arc(center.x, center.y, range * t, start, start + Math.PI)
+      ctx.closePath()
+      ctx.fill()
+      ctx.stroke()
+      ctx.setLineDash([])
+      return
+    }
+
+    const resolved = resolveGeometry(weaponGeom, team)
+    if (resolved.kind === 'slide' && resolved.dirs.length < 8) {
+      // Rook (ranks/files) and bishop (diagonals) get accurate directional
+      // bands rather than a circle that implies unreachable diagonals.
+      ctx.setLineDash([])
+      ctx.lineCap = 'round'
+      ctx.strokeStyle = fill
+      ctx.lineWidth = t * 0.5
+      for (const [dx, dy] of resolved.dirs) {
+        ctx.beginPath()
+        ctx.moveTo(center.x, center.y)
+        ctx.lineTo(center.x + dx * resolved.range * t, center.y + dy * resolved.range * t)
+        ctx.stroke()
+      }
+      ctx.lineCap = 'butt'
+      return
+    }
+
+    ctx.beginPath()
+    ctx.arc(center.x, center.y, radius, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.stroke()
+    ctx.setLineDash([])
   }
 
   private drawPieces(ctx: CanvasRenderingContext2D, game: Game): void {
@@ -286,31 +351,6 @@ export class Renderer {
     ctx.strokeStyle = tint
     ctx.lineWidth = 1 / this.camera.zoom
     ctx.strokeRect(left, y, w, h)
-  }
-
-  private drawTargets(ctx: CanvasRenderingContext2D, game: Game): void {
-    const showAll = game.overlays.targets
-    if (!showAll && game.selected.length === 0) return
-    ctx.lineWidth = 1 / this.camera.zoom
-    for (const e of game.world.query(Target, Position)) {
-      const selected = game.selected.includes(e)
-      if (!showAll && !selected) continue
-      const target = game.world.require(e, Target).entity
-      if (target === null) continue
-      const tp = game.world.get(target, Position)
-      const pos = game.world.require(e, Position)
-      if (!tp) continue
-      const team = game.world.get(e, Team)
-      ctx.strokeStyle = selected
-        ? 'rgba(255,209,102,0.6)'
-        : team === 'red'
-          ? 'rgba(255,107,90,0.22)'
-          : 'rgba(90,176,255,0.22)'
-      ctx.beginPath()
-      ctx.moveTo(pos.x, pos.y)
-      ctx.lineTo(tp.x, tp.y)
-      ctx.stroke()
-    }
   }
 
   private drawProjectiles(ctx: CanvasRenderingContext2D, game: Game): void {

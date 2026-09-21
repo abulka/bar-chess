@@ -14,12 +14,23 @@ const emit = defineEmits<{ (e: 'changed'): void }>()
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const wrapperRef = ref<HTMLDivElement | null>(null)
 
+interface Box {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+const box = ref<Box | null>(null)
+const panning = ref(false)
+
 let renderer: Renderer | null = null
 let observer: ResizeObserver | null = null
 let pointerDown = false
-let panning = false
+let selecting = false
 let moved = false
 let button = 0
+let startX = 0
+let startY = 0
 let lastX = 0
 let lastY = 0
 
@@ -30,30 +41,57 @@ function pointerPos(event: PointerEvent | MouseEvent): { x: number; y: number } 
   return { x: event.clientX - rect.left, y: event.clientY - rect.top }
 }
 
-function cellAt(event: PointerEvent | MouseEvent): Vec2 {
+function worldAt(event: PointerEvent | MouseEvent): Vec2 {
   const p = pointerPos(event)
   const w = renderer!.camera.screenToWorld(p.x, p.y)
+  return w
+}
+
+function cellAt(event: PointerEvent | MouseEvent): Vec2 {
+  const w = worldAt(event)
   return props.game.board.worldToCell(w.x, w.y)
 }
 
+function additive(event: PointerEvent | MouseEvent): boolean {
+  return event.ctrlKey || event.metaKey
+}
+
 function onPointerDown(event: PointerEvent): void {
+  if (event.button === 2) return
   canvasRef.value?.setPointerCapture(event.pointerId)
   const p = pointerPos(event)
+  startX = p.x
+  startY = p.y
   lastX = p.x
   lastY = p.y
   moved = false
   button = event.button
   pointerDown = true
-  panning = event.button === 1 || event.button === 0
+
+  const wantsPan = event.button === 1 || event.shiftKey
+  if (wantsPan) {
+    panning.value = true
+  } else if (event.button === 0) {
+    selecting = true
+    box.value = { x: p.x, y: p.y, w: 0, h: 0 }
+  }
 }
 
 function onPointerMove(event: PointerEvent): void {
   if (!pointerDown) return
   const p = pointerPos(event)
   if (Math.abs(p.x - lastX) > DRAG_THRESHOLD || Math.abs(p.y - lastY) > DRAG_THRESHOLD) moved = true
-  if (panning && moved) {
+
+  if (panning.value && moved) {
     renderer?.camera.panBy(p.x - lastX, p.y - lastY)
     emit('changed')
+  } else if (selecting) {
+    box.value = {
+      x: Math.min(startX, p.x),
+      y: Math.min(startY, p.y),
+      w: Math.abs(p.x - startX),
+      h: Math.abs(p.y - startY),
+    }
   }
   lastX = p.x
   lastY = p.y
@@ -61,24 +99,33 @@ function onPointerMove(event: PointerEvent): void {
 
 function onPointerUp(event: PointerEvent): void {
   canvasRef.value?.releasePointerCapture(event.pointerId)
-  const wasPanning = panning && moved
   pointerDown = false
-  panning = false
+  panning.value = false
 
-  if (button === 2 && !wasPanning) {
-    const dest = cellAt(event)
-    props.game.orderSelected(props.orderMode, dest)
-    emit('changed')
-    return
-  }
+  if (button === 2) return
 
-  if (button === 0 && !wasPanning) {
-    const p = pointerPos(event)
-    const w = renderer!.camera.screenToWorld(p.x, p.y)
-    props.game.selectAt(w.x, w.y, event.shiftKey)
+  if (selecting) {
+    const rect = box.value
+    if (rect && (rect.w > DRAG_THRESHOLD || rect.h > DRAG_THRESHOLD)) {
+      const a = renderer!.camera.screenToWorld(rect.x, rect.y)
+      const b = renderer!.camera.screenToWorld(rect.x + rect.w, rect.y + rect.h)
+      props.game.selectRect(a.x, a.y, b.x, b.y, additive(event))
+    } else {
+      const w = worldAt(event)
+      props.game.selectAt(w.x, w.y, additive(event) || event.shiftKey)
+    }
     emit('changed')
   }
+  selecting = false
+  box.value = null
   moved = false
+}
+
+function onContextMenu(event: MouseEvent): void {
+  event.preventDefault()
+  const dest = cellAt(event)
+  props.game.orderSelected(props.orderMode, dest)
+  emit('changed')
 }
 
 function onWheel(event: WheelEvent): void {
@@ -123,12 +170,18 @@ onBeforeUnmount(() => {
     <canvas
       ref="canvasRef"
       class="board-canvas"
+      :class="{ panning: panning }"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
       @wheel="onWheel"
-      @contextmenu.prevent
+      @contextmenu="onContextMenu"
     />
+    <div
+      v-if="box"
+      class="select-box"
+      :style="{ left: box.x + 'px', top: box.y + 'px', width: box.w + 'px', height: box.h + 'px' }"
+    ></div>
   </div>
 </template>

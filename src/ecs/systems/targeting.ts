@@ -1,3 +1,4 @@
+import { buildOccupancy } from '../../game/occupancy'
 import { PIECES, WEAPONS, weaponVision } from '../../game/pieces'
 import { Cell, PieceType, Target, Team } from '../components'
 import type { Entity } from '../world'
@@ -32,11 +33,9 @@ function findTarget(ctx: SimContext, e: Entity, team: 'red' | 'blue'): Entity | 
 const system: System = {
   name: 'targeting',
   update(ctx) {
+    const built = buildOccupancy(ctx.world, ctx.board)
     ctx.occupancy.clear()
-    for (const e of ctx.world.query(Cell)) {
-      const c = ctx.world.require(e, Cell)
-      ctx.occupancy.set(c.y * ctx.board.width + c.x, e)
-    }
+    for (const [key, value] of built) ctx.occupancy.set(key, value)
 
     for (const e of ctx.world.query(Target, Cell, Team)) {
       const target = ctx.world.require(e, Target)

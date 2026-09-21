@@ -3,8 +3,8 @@ import type { EventRecord } from '../ecs/events'
 import { Pipeline } from '../ecs/pipeline'
 import { createPipeline } from '../ecs/systems'
 import { World } from '../ecs/world'
-import type { Entity } from '../ecs/world'
-import type { Commands, SimContext, TeamRuntime } from '../ecs/types'
+import type { Entity, WorldSnapshot } from '../ecs/world'
+import type { Commands, SimContext, TeamController, TeamRuntime } from '../ecs/types'
 import { Cell, Fx, Intent, Motion, PieceType, Position, Projectile, Team } from '../ecs/components'
 import type { MotionData } from '../ecs/components'
 import { Board } from './board'
@@ -12,10 +12,19 @@ import type { BoardSize, Placement } from './boards'
 import { createBoardData, initialArmy } from './boards'
 import { FIXED_DT, MAX_STEPS_PER_FRAME, PATH_BUDGET_PER_TICK, TEAM_COLORS, TEAM_NAMES } from './constants'
 import { createPiece } from './factory'
+import { occupiedExcept } from './occupancy'
 import type { IntentMode, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES } from './pieces'
 import { findPath } from './pathfind'
 import { Rng } from './rng'
+
+export type GameMode = 'human-vs-ai' | 'ai-vs-ai' | 'human-vs-human'
+
+export const GAME_MODES: Array<{ id: GameMode; label: string }> = [
+  { id: 'human-vs-ai', label: 'Human vs AI' },
+  { id: 'ai-vs-ai', label: 'AI vs AI' },
+  { id: 'human-vs-human', label: 'Human vs Human' },
+]
 
 export interface PieceSnapshot {
   key: string
@@ -31,6 +40,7 @@ export interface TeamSnapshot {
   id: TeamId
   name: string
   color: string
+  controller: TeamController
   alive: number
   kills: number
   losses: number
@@ -46,11 +56,20 @@ export interface ComponentLine {
 
 export interface OverlayFlags {
   grid: boolean
-  intentions: boolean
-  paths: boolean
-  ranges: boolean
-  targets: boolean
   health: boolean
+  myOrders: boolean
+  enemyPlans: boolean
+  moveCells: boolean
+  attackCells: boolean
+  rangeArcs: boolean
+}
+
+interface TurnState {
+  world: WorldSnapshot
+  rng: number
+  tick: number
+  teams: Record<TeamId, TeamRuntime>
+  winner: TeamId | null
 }
 
 export interface GameSnapshot {
@@ -76,17 +95,29 @@ export interface GameSnapshot {
   winner: TeamId | null
   overlays: OverlayFlags
   hudVisible: boolean
+  playerTeam: TeamId
+  gameMode: GameMode
+  gameModes: Array<{ id: GameMode; label: string }>
+  turnActive: boolean
+  canReplay: boolean
+  replaying: boolean
   terrainVersion: number
 }
 
-function createTeamRuntime(): TeamRuntime {
+function createTeamRuntime(controller: TeamController): TeamRuntime {
   const cooldown: Record<string, number> = {}
   const alive: Record<string, number> = {}
   for (const def of PIECE_LIST) {
     cooldown[def.key] = 0
     alive[def.key] = 0
   }
-  return { cooldown, alive, kills: 0, losses: 0, supply: 0, deployed: 0 }
+  return { controller, cooldown, alive, kills: 0, losses: 0, supply: 0, deployed: 0 }
+}
+
+function controllersFor(mode: GameMode, playerTeam: TeamId): Record<TeamId, TeamController> {
+  if (mode === 'ai-vs-ai') return { red: 'ai', blue: 'ai' }
+  if (mode === 'human-vs-human') return { red: 'human', blue: 'human' }
+  return playerTeam === 'blue' ? { red: 'ai', blue: 'human' } : { red: 'human', blue: 'ai' }
 }
 
 export class Game {
@@ -96,7 +127,7 @@ export class Game {
   board: Board
   rng = new Rng()
   cmds: Commands = { damage: [], deploy: [], destroy: [] }
-  teams: Record<TeamId, TeamRuntime> = { red: createTeamRuntime(), blue: createTeamRuntime() }
+  teams: Record<TeamId, TeamRuntime>
   occupancy = new Map<number, Entity>()
 
   tick = 0
@@ -106,17 +137,30 @@ export class Game {
   hudVisible = true
   winner: TeamId | null = null
   terrainVersion = 0
+  playerTeam: TeamId = 'blue'
+  gameMode: GameMode = 'human-vs-ai'
 
   overlays: OverlayFlags = {
     grid: true,
-    intentions: false,
-    paths: true,
-    ranges: false,
-    targets: false,
     health: true,
+    myOrders: true,
+    enemyPlans: false,
+    moveCells: true,
+    attackCells: true,
+    rangeArcs: true,
   }
 
   selected: Entity[] = []
+
+  turnActive = false
+  canReplay = false
+
+  private turnSnapshot: TurnState | null = null
+  private turnTicks = 0
+  private lastTurn: { snapshot: TurnState; ticks: number } | null = null
+  private replaying = false
+  private replayTicks = 0
+  private static readonly TURN_MAX_TICKS = 60
 
   fps = 0
   private tps = 0
@@ -129,11 +173,28 @@ export class Game {
 
   onFrame: ((alpha: number) => void) | null = null
 
-  constructor(size: BoardSize = 16) {
+  constructor(size: BoardSize = 16, mode: GameMode = 'human-vs-ai') {
+    this.gameMode = mode
+    const controllers = controllersFor(mode, this.playerTeam)
+    this.teams = {
+      red: createTeamRuntime(controllers.red),
+      blue: createTeamRuntime(controllers.blue),
+    }
     this.board = new Board(createBoardData(size))
     this.ctx = this.buildContext()
     this.placeArmy(initialArmy(size))
+    this.paused = true
     this.bus.emit('map', `loaded ${this.board.data.name}`)
+    this.bus.emit('info', 'paused \u2014 give orders, then press space for a turn')
+  }
+
+  setGameMode(mode: GameMode): void {
+    this.gameMode = mode
+    const controllers = controllersFor(mode, this.playerTeam)
+    for (const id of ['red', 'blue'] as TeamId[]) {
+      this.teams[id].controller = controllers[id]
+    }
+    this.bus.emit('info', `mode: ${mode} (you: ${this.playerTeam})`)
   }
 
   private buildContext(): SimContext {
@@ -149,6 +210,7 @@ export class Game {
       occupancy: this.occupancy,
       pathBudget: PATH_BUDGET_PER_TICK,
       verbosePhases: this.pipeline.verbose,
+      turnActive: this.turnActive,
     }
   }
 
@@ -176,14 +238,128 @@ export class Game {
   }
 
   togglePause(): void {
+    if (this.turnActive) {
+      this.turnActive = false
+      this.paused = true
+      this.bus.emit('info', 'turn cancelled')
+      return
+    }
+    if (this.replaying) this.replaying = false
     this.paused = !this.paused
     this.bus.emit('info', this.paused ? 'paused' : 'resumed')
   }
 
   stepOnce(): void {
+    if (this.turnActive) this.turnActive = false
+    if (this.replaying) this.replaying = false
     this.paused = true
     this.step()
     this.bus.emit('info', `stepped to tick ${this.tick}`)
+  }
+
+  /**
+   * A "turn" is one movement step per piece. Every piece may make at most one
+   * move, then the turn pauses (waiting for in-flight moves to land first).
+   * Move cooldowns are cleared at the start so each piece is ready, which makes
+   * turns short, readable beats rather than several seconds of real time.
+   */
+  beginTurn(): void {
+    if (this.turnActive || this.replaying) return
+    this.turnSnapshot = this.captureTurn()
+    this.turnTicks = 0
+    for (const e of this.world.query(Motion)) {
+      const motion = this.world.get(e, Motion)
+      if (!motion) continue
+      motion.cooldown = 0
+      motion.movedThisTurn = motion.moving
+    }
+    this.canReplay = false
+    this.turnActive = true
+    this.paused = false
+    this.bus.emit('info', 'turn started')
+  }
+
+  replayTurn(): void {
+    if (!this.lastTurn || this.replaying || this.turnActive) return
+    this.restoreTurn(this.lastTurn.snapshot)
+    this.selected = []
+    this.replaying = true
+    this.replayTicks = 0
+    this.paused = false
+    this.bus.emit('info', `replaying last turn (${this.lastTurn.ticks} ticks)`)
+  }
+
+  private advanceTurn(): void {
+    this.turnTicks++
+    // Pending = pieces still able to make their one move (or mid-move). A piece
+    // with no goal, or blocked with no route, counts as settled.
+    let pending = 0
+    for (const e of this.world.query(Motion)) {
+      const motion = this.world.get(e, Motion)
+      if (!motion) continue
+      if (motion.moving) {
+        pending++
+        continue
+      }
+      if (motion.movedThisTurn) continue
+      if (motion.goal && motion.path.length > 0) pending++
+    }
+    if (pending === 0) {
+      this.finishTurn()
+      return
+    }
+    if (this.turnTicks >= Game.TURN_MAX_TICKS) {
+      this.snapMoves()
+      this.finishTurn()
+    }
+  }
+
+  /** Settle any in-flight animation onto its logical cell (deterministic). */
+  private snapMoves(): void {
+    for (const e of this.world.query(Motion, Cell, Position)) {
+      const motion = this.world.get(e, Motion)
+      const cell = this.world.get(e, Cell)
+      const pos = this.world.get(e, Position)
+      if (!motion || !cell || !pos || !motion.moving) continue
+      const dest = this.board.worldToCell(motion.toX, motion.toY)
+      cell.x = dest.x
+      cell.y = dest.y
+      pos.x = motion.toX
+      pos.y = motion.toY
+      motion.moving = false
+      motion.reserved = null
+    }
+  }
+
+  private finishTurn(): void {
+    this.turnActive = false
+    this.paused = true
+    if (this.turnSnapshot) {
+      this.lastTurn = { snapshot: this.turnSnapshot, ticks: this.turnTicks }
+      this.canReplay = true
+      this.turnSnapshot = null
+    }
+    this.bus.emit('info', `turn ended after ${this.turnTicks} ticks`)
+  }
+
+  private captureTurn(): TurnState {
+    return {
+      world: this.world.capture(),
+      rng: this.rng.getState(),
+      tick: this.tick,
+      teams: structuredClone(this.teams),
+      winner: this.winner,
+    }
+  }
+
+  private restoreTurn(state: TurnState): void {
+    this.world.restore(state.world)
+    this.rng.setState(state.rng)
+    this.tick = state.tick
+    this.teams = structuredClone(state.teams)
+    this.winner = state.winner
+    this.occupancy.clear()
+    this.selected = this.selected.filter((e) => this.world.isAlive(e))
   }
 
   setSpeed(speed: number): void {
@@ -223,12 +399,24 @@ export class Game {
   private step(): void {
     this.ctx.tick = this.tick
     this.ctx.verbosePhases = this.pipeline.verbose
+    this.ctx.turnActive = this.turnActive
     this.bus.tick = this.tick
     this.bus.phase = 'tick'
     this.pipeline.run(this.ctx)
     this.tick++
     this.ticksThisSecond++
     this.updateWinner()
+
+    if (this.replaying) {
+      this.replayTicks++
+      if (this.replayTicks >= (this.lastTurn?.ticks ?? 0)) {
+        this.replaying = false
+        this.paused = true
+        this.bus.emit('info', 'replay finished')
+      }
+      return
+    }
+    if (this.turnActive) this.advanceTurn()
   }
 
   private updateWinner(): void {
@@ -241,13 +429,23 @@ export class Game {
 
   loadSize(size: BoardSize): void {
     this.world.clear()
-    this.teams = { red: createTeamRuntime(), blue: createTeamRuntime() }
+    const controllers = controllersFor(this.gameMode, this.playerTeam)
+    this.teams = {
+      red: createTeamRuntime(controllers.red),
+      blue: createTeamRuntime(controllers.blue),
+    }
     this.board = new Board(createBoardData(size))
     this.occupancy.clear()
     this.tick = 0
     this.rng.reset()
     this.selected = []
     this.winner = null
+    this.turnActive = false
+    this.replaying = false
+    this.canReplay = false
+    this.lastTurn = null
+    this.turnSnapshot = null
+    this.paused = true
     this.ctx = this.buildContext()
     this.placeArmy(initialArmy(size))
     this.terrainVersion++
@@ -287,6 +485,24 @@ export class Game {
       this.selected = [best]
     }
     return best
+  }
+
+  /** Select every piece whose position falls inside a world-space rectangle. */
+  selectRect(ax: number, ay: number, bx: number, by: number, additive = false): void {
+    const minX = Math.min(ax, bx)
+    const maxX = Math.max(ax, bx)
+    const minY = Math.min(ay, by)
+    const maxY = Math.max(ay, by)
+    const chosen: Entity[] = []
+    for (const e of this.world.query(Position, Cell)) {
+      const pos = this.world.require(e, Position)
+      if (pos.x >= minX && pos.x <= maxX && pos.y >= minY && pos.y <= maxY) chosen.push(e)
+    }
+    if (additive) {
+      for (const e of chosen) if (!this.selected.includes(e)) this.selected.push(e)
+    } else {
+      this.selected = chosen
+    }
   }
 
   clearSelection(): void {
@@ -334,7 +550,8 @@ export class Game {
     if (!cell || !kind || !team) return
     const def = PIECES[kind]
     if (!def) return
-    const result = findPath(this.board, cell, dest, def.move, team)
+    const occupied = occupiedExcept(this.board, this.occupancy, e)
+    const result = findPath(this.board, cell, dest, def.move, team, occupied)
     motion.path = result.cells
     motion.replanAt = this.tick + 15
     motion.blocked = !result.found
@@ -359,6 +576,7 @@ export class Game {
         id,
         name: TEAM_NAMES[id],
         color: TEAM_COLORS[id],
+        controller: runtime.controller,
         alive: Object.values(runtime.alive).reduce((a, b) => a + b, 0),
         kills: runtime.kills,
         losses: runtime.losses,
@@ -403,6 +621,12 @@ export class Game {
       winner: this.winner,
       overlays: { ...this.overlays },
       hudVisible: this.hudVisible,
+      playerTeam: this.playerTeam,
+      gameMode: this.gameMode,
+      gameModes: GAME_MODES,
+      turnActive: this.turnActive,
+      canReplay: this.canReplay,
+      replaying: this.replaying,
       terrainVersion: this.terrainVersion,
     }
   }

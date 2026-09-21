@@ -1,3 +1,4 @@
+import { occupiedExcept } from '../../game/occupancy'
 import { findPath } from '../../game/pathfind'
 import { PIECES } from '../../game/pieces'
 import { Cell, Motion, PieceType, Team } from '../components'
@@ -35,7 +36,8 @@ const system: System = {
 
       budget--
       const team = ctx.world.require(e, Team)
-      const result = findPath(ctx.board, cell, goal, def.move, team)
+      const occupied = occupiedExcept(ctx.board, ctx.occupancy, e)
+      const result = findPath(ctx.board, cell, goal, def.move, team, occupied)
       motion.path = result.cells
       motion.replanAt = ctx.tick + (result.found ? 15 : 10)
       motion.blocked = !result.found

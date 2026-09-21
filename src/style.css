@@ -100,6 +100,23 @@ input {
   flex: 1;
 }
 
+.mode-select {
+  background: #1f6feb22;
+  border-color: var(--blue);
+}
+
+.vs-badge {
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.vs-badge b {
+  font-weight: 700;
+}
+
 .toggle {
   display: inline-flex;
   align-items: center;
@@ -123,7 +140,15 @@ input {
 .center {
   position: relative;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   background: var(--bg);
+}
+
+.board-area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
 
 .board-wrapper {
@@ -136,19 +161,33 @@ input {
   width: 100%;
   height: 100%;
   touch-action: none;
-  cursor: grab;
+  cursor: crosshair;
 }
 
-.board-hint {
+.board-canvas.panning {
+  cursor: grabbing;
+}
+
+.select-box {
   position: absolute;
-  left: 8px;
-  bottom: 8px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  background: rgba(17, 22, 29, 0.8);
-  border: 1px solid var(--border);
-  color: var(--muted);
+  border: 1px solid var(--accent);
+  background: rgba(255, 209, 102, 0.12);
   pointer-events: none;
+}
+
+.hints {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 5px 10px;
+  list-style: none;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  background: var(--panel);
+  line-height: 1.5;
+}
+
+.hints li b {
+  color: var(--text);
 }
 
 /* ---------- roster ---------- */

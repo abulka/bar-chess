@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { GameSnapshot, OverlayFlags } from '../game/game'
+import type { GameMode, GameSnapshot, OverlayFlags } from '../game/game'
 import type { IntentMode } from '../game/types'
 
 const props = defineProps<{
@@ -9,8 +9,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'select-size', size: number): void
+  (e: 'set-game-mode', mode: GameMode): void
   (e: 'toggle-pause'): void
   (e: 'step'): void
+  (e: 'turn'): void
+  (e: 'replay'): void
   (e: 'set-speed', speed: number): void
   (e: 'set-order-mode', mode: IntentMode): void
   (e: 'toggle-overlay', key: keyof OverlayFlags): void
@@ -25,11 +28,12 @@ const orderModes: Array<{ id: IntentMode; label: string }> = [
   { id: 'hold', label: 'Hold' },
 ]
 const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
+  { key: 'myOrders', label: 'my orders (o)' },
+  { key: 'enemyPlans', label: 'enemy plans' },
+  { key: 'moveCells', label: 'move' },
+  { key: 'attackCells', label: 'attack' },
+  { key: 'rangeArcs', label: 'range' },
   { key: 'grid', label: 'grid' },
-  { key: 'intentions', label: 'intentions' },
-  { key: 'paths', label: 'paths' },
-  { key: 'ranges', label: 'ranges' },
-  { key: 'targets', label: 'targets' },
   { key: 'health', label: 'health' },
 ]
 </script>
@@ -46,8 +50,31 @@ const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
       <option v-for="s in props.snapshot.boardSizes" :key="s" :value="s">{{ s }}×{{ s }}</option>
     </select>
 
+    <select
+      class="ctl mode-select"
+      :value="props.snapshot.gameMode"
+      @change="emit('set-game-mode', ($event.target as HTMLSelectElement).value as GameMode)"
+    >
+      <option v-for="m in props.snapshot.gameModes" :key="m.id" :value="m.id">{{ m.label }}</option>
+    </select>
+
+    <span class="vs-badge">
+      <b :style="{ color: props.snapshot.teams[props.snapshot.playerTeam].color }">
+        {{ props.snapshot.teams[props.snapshot.playerTeam].name }}
+      </b>
+      you ·
+      <b :style="{ color: props.snapshot.teams[props.snapshot.playerTeam === 'blue' ? 'red' : 'blue'].color }">
+        {{ props.snapshot.teams[props.snapshot.playerTeam === 'blue' ? 'red' : 'blue'].name }}
+      </b>
+      {{ props.snapshot.teams[props.snapshot.playerTeam === 'blue' ? 'red' : 'blue'].controller }}
+    </span>
+
+    <button class="ctl" :class="{ active: props.snapshot.turnActive }" @click="emit('turn')">
+      {{ props.snapshot.turnActive ? '⏵ Turn…' : '⏵ Turn' }}
+    </button>
     <button class="ctl" @click="emit('toggle-pause')">{{ props.snapshot.paused ? '▶ Play' : '⏸ Pause' }}</button>
     <button class="ctl" @click="emit('step')">⏭ Step</button>
+    <button class="ctl" :disabled="!props.snapshot.canReplay" @click="emit('replay')">↺ Replay</button>
 
     <div class="speed-group">
       <button

@@ -8,11 +8,13 @@ export class Camera {
   zoom = 1
   /** smallest allowed zoom: the zoom at which the whole board fits the viewport */
   minZoom = 0.02
-  maxZoom = 4
+  maxZoom = 8
   fitZoom = 0.02
 
   viewportWidth = 0
   viewportHeight = 0
+  worldW = 0
+  worldH = 0
 
   private computeFit(worldW: number, worldH: number): number | null {
     if (this.viewportWidth === 0 || this.viewportHeight === 0) return null
@@ -23,6 +25,8 @@ export class Camera {
 
   /** Fit the whole board and set that as the zoom-out floor. */
   fit(worldW: number, worldH: number): void {
+    this.worldW = worldW
+    this.worldH = worldH
     const z = this.computeFit(worldW, worldH)
     if (z === null) return
     this.fitZoom = z
@@ -38,6 +42,8 @@ export class Camera {
    * the board).
    */
   updateLimits(worldW: number, worldH: number): void {
+    this.worldW = worldW
+    this.worldH = worldH
     const z = this.computeFit(worldW, worldH)
     if (z === null) return
     this.fitZoom = z
@@ -70,5 +76,11 @@ export class Camera {
     const after = this.screenToWorld(sx, sy)
     this.x += before.x - after.x
     this.y += before.y - after.y
+    // At the fully zoomed-out limit, snap back to centre so a panned board
+    // always re-fits cleanly instead of drifting off to one side.
+    if (this.zoom <= this.minZoom + 1e-6 && this.worldW > 0) {
+      this.x = this.worldW / 2
+      this.y = this.worldH / 2
+    }
   }
 }

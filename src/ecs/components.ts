@@ -46,6 +46,8 @@ export interface WeaponData {
 export interface MotionData {
   /** desired destination in tile coordinates, or null to hold */
   goal: Vec2 | null
+  /** cell currently being entered; occupancy reserves it until arrival */
+  reserved: Vec2 | null
   /** upcoming cells in tile coordinates, excluding the current cell */
   path: Vec2[]
   fromX: number
@@ -59,6 +61,10 @@ export interface MotionData {
   arrived: boolean
   replanAt: number
   blocked: boolean
+  /** number of movement steps completed; used to detect a "turn" boundary */
+  steps: number
+  /** true once this piece has made its single move in the current turn */
+  movedThisTurn: boolean
 }
 
 export interface ProjectileData {

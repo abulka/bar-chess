@@ -56,8 +56,56 @@ Three simple intention modes (no command trees):
   destination used until a target appears.
 - **Hold** — stay put and fire at whatever enters the firing geometry.
 
-Order mode is chosen in the toolbar or with `m` / `f` / `o`; right-click applies
+Order mode is chosen in the toolbar or with `1` / `2` / `3`; right-click applies
 the current mode to the whole selection.
+
+## Turn flow, pause and replay
+
+The battle **starts paused**. Give orders, then take a turn:
+
+- `space` — **Turn**: every piece makes **at most one move**, then the turn
+  auto-pauses once those moves land. Move cooldowns are cleared at the start of
+  a turn, so a turn is a short, readable beat (~0.4s), not several seconds of
+  real time. A piece with no orders (or blocked with no route) simply does not
+  move.
+- `p` — pause / resume. Pausing mid-turn cancels the turn.
+- `s` — single simulation step (one tick), for tracing.
+- `r` — **Replay last turn**: the world + RNG + tick are snapshotted at turn
+  start, so replay deterministically re-plays the recorded number of ticks and
+  returns to exactly the same end state.
+
+A "move" is one application of the piece's movement geometry, so a pawn advances
+one square while a rook may slide several cells along a rank/file — one move.
+
+## Game modes
+
+`human-vs-ai` (default), `ai-vs-ai`, `human-vs-human`, chosen in the toolbar.
+The player's team (default blue) is shown in the `You: Blue · Red ai` badge.
+Human pieces default to **Hold** and only act on your orders; AI teams
+rally/engage on their own. Both still fire autonomously.
+
+## Overlays: seeing what is going on
+
+Scope: the **selection** always shows full detail; `my orders` (`o`) and
+`enemy plans` (`e`) extend a summary to each army.
+
+- **Move cells** — blue filled squares (legal one-square moves).
+- **Attack cells** — red outlined squares (what the weapon can hit now; outlined
+  so it stays visible where it overlaps blue).
+- **Range arc** — nominal reach for the selected piece: bands for rook/bishop,
+  circle for queen/king, forward half-disc for pawn, 8 dots for knight.
+- **Path** — dashed gold route; **destination** crosshair (red if blocked);
+  **target** line + reticle.
+
+Army scope shows paths/goals/targets; reach, attack and range are reserved for
+selected pieces to keep the board readable.
+
+Mouse: **drag** to box-select (ctrl/cmd-click adds), **shift-drag** or
+middle-drag to pan, **wheel** to zoom, **right-click** to order. The control
+hints sit in a vertical list below the board so they never cover it.
+
+Keyboard summary: `1/2/3` order mode, `space` turn, `p` pause, `s` step,
+`r` replay, `o` my orders, `e` enemy plans, `h` HUD, `Esc` clear selection.
 
 ## Roadmap
 
@@ -75,6 +123,11 @@ the current mode to the whole selection.
       geometries.
 - [ ] **Phase 6 — Rules bank & presets.** `Rules` object in context, toggles,
       King Aura first.
+- [x] **Phase 6.5 — Turn pacing & replay.** `space` turn advance (settles on
+      squares), `p` pause, `s` step, `r` deterministic replay.
+- [x] **Phase 6.6 — Movement correctness & clarity.** Reservation-based
+      occupancy (one piece per square, only knights leap), turn settling, team
+      controllers/game modes, and the overlay scope/legend overhaul.
 - [ ] **Phase 7 — AI controllers & observer.** Intent-based AI, human-vs-AI,
       AI-vs-AI, camera follow, auto-pause triggers.
 - [ ] **Phase 8 — Strategy overlays.** LOS, threat/influence, projected movement,
@@ -94,8 +147,8 @@ to `localStorage`.
 ## Known rough edges
 
 - A piece ordered to a cell its geometry can never reach (e.g. a bishop to the
-  opposite square colour) stalls; pathfinding should fall back to the nearest
-  reachable cell.
+  opposite square colour) now walks its best partial route and shows a red
+  destination crosshair.
 - Reinforcement is an instant lane deploy; the production queue is Phase 4.
 - Overlay rendering recomputes geometry every frame; fine at current unit counts
   but worth caching if piece counts grow.

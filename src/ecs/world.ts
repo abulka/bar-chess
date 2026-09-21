@@ -97,4 +97,31 @@ export class World {
     for (const store of this.stores) store.map.clear()
     this.next = 1
   }
+
+  /** Deep copy of all component data, used for turn replay. */
+  capture(): WorldSnapshot {
+    return {
+      next: this.next,
+      entities: Array.from(this.entities),
+      stores: this.stores.map((store) => ({
+        store,
+        entries: Array.from(store.map.entries()).map(([e, v]) => [e, structuredClone(v)] as [Entity, any]),
+      })),
+    }
+  }
+
+  restore(snapshot: WorldSnapshot): void {
+    this.next = snapshot.next
+    this.entities = new Set(snapshot.entities)
+    for (const { store, entries } of snapshot.stores) {
+      store.map.clear()
+      for (const [e, v] of entries) store.map.set(e, structuredClone(v))
+    }
+  }
+}
+
+export interface WorldSnapshot {
+  next: number
+  entities: Entity[]
+  stores: Array<{ store: ComponentStore<any>; entries: Array<[Entity, any]> }>
 }

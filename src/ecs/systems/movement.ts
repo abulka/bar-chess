@@ -1,21 +1,22 @@
-import { MOVE_TRAVEL } from '../../game/constants'
+import { moveDestinations } from '../../game/geometry'
 import { lerp } from '../../game/math'
-import { makeOccupied } from '../../game/occupancy'
+import { buildOccupancy, cellIndex, occupiedExcept } from '../../game/occupancy'
 import { PIECES } from '../../game/pieces'
-import { Cell, Motion, PieceType, Position } from '../components'
+import { Cell, Motion, PieceType, Position, Team } from '../components'
 import type { System } from '../pipeline'
 
 const system: System = {
   name: 'movement',
   update(ctx) {
     const board = ctx.board
-    const occupied = makeOccupied(board, ctx.occupancy)
+    const occupancy = buildOccupancy(ctx.world, board)
 
-    for (const e of ctx.world.query(Motion, Cell, Position, PieceType)) {
+    for (const e of ctx.world.query(Motion, Cell, Position, PieceType, Team)) {
       const motion = ctx.world.require(e, Motion)
       const cell = ctx.world.require(e, Cell)
       const pos = ctx.world.require(e, Position)
       const kind = ctx.world.require(e, PieceType).kind
+      const team = ctx.world.require(e, Team)
       const def = PIECES[kind]
       if (!def) continue
 
@@ -30,23 +31,33 @@ const system: System = {
           motion.moving = false
           pos.x = motion.toX
           pos.y = motion.toY
-          const arrivedCell = board.worldToCell(motion.toX, motion.toY)
-          cell.x = arrivedCell.x
-          cell.y = arrivedCell.y
+          // Release the origin only now that the piece has actually arrived.
+          occupancy.delete(cellIndex(board, cell.x, cell.y))
+          const dest = board.worldToCell(motion.toX, motion.toY)
+          cell.x = dest.x
+          cell.y = dest.y
+          motion.reserved = null
+          occupancy.set(cellIndex(board, dest.x, dest.y), e)
           motion.cooldown = def.moveCooldown
           motion.arrived = motion.path.length === 0
         }
         continue
       }
 
+      if (ctx.turnActive && motion.movedThisTurn) continue
       if (motion.cooldown > 0) continue
       if (motion.path.length === 0) {
         motion.arrived = true
         continue
       }
 
+      // The next route cell must still be a legal one-move destination for this
+      // piece's geometry given the live board (only knights may leap blockers).
+      const blocked = occupiedExcept(board, occupancy, e)
       const next = motion.path[0]
-      if (occupied(next.x, next.y) && (next.x !== cell.x || next.y !== cell.y)) {
+      const legal = moveDestinations(board, cell, def.move, team, blocked)
+      const canStep = legal.some((c) => c.x === next.x && c.y === next.y)
+      if (!canStep || blocked(next.x, next.y)) {
         motion.blocked = true
         motion.replanAt = Math.min(motion.replanAt, ctx.tick + 4)
         motion.path = []
@@ -59,12 +70,16 @@ const system: System = {
       motion.fromY = pos.y
       motion.toX = center.x
       motion.toY = center.y
-      motion.travel = Math.min(MOVE_TRAVEL, def.moveCooldown)
+      const span = Math.max(Math.abs(next.x - cell.x), Math.abs(next.y - cell.y))
+      motion.travel = Math.min(def.moveCooldown, 0.1 + 0.07 * span)
       motion.elapsed = 0
       motion.moving = true
       motion.arrived = false
-      cell.x = next.x
-      cell.y = next.y
+      motion.blocked = false
+      motion.movedThisTurn = true
+      motion.reserved = { x: next.x, y: next.y }
+      motion.steps++
+      occupancy.set(cellIndex(board, next.x, next.y), e)
     }
   },
 }

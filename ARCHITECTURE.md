@@ -94,7 +94,7 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Intent` | `{ mode, dest, player }` | `move` / `fight` / `hold` |
 | `Target` | `{ entity, retargetAt }` | current acquisition |
 | `Weapon` | `{ left }` | seconds until next shot |
-| `Motion` | `{ goal, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked }` | grid movement + render interpolation |
+| `Motion` | `{ goal, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn }` | grid movement + render interpolation; `reserved` is the cell being entered |
 | `Projectile` | `{ team, damage, ttl, trajectory, splash, radius, color, target, owner, waypoints, waypointIndex }` | |
 | `Fx` | `{ ttl, maxTtl, radius, color }` | render-only impact/explosion |
 | `Dead` | `true` | marker processed by the death system |
@@ -120,6 +120,33 @@ requestAnimationFrame(frame):
 - `FIXED_DT = 1/30`, `MAX_STEPS_PER_FRAME = 6` (`src/game/constants.ts`).
 - `speed` (0.5–4×) scales the accumulator only, so the sim stays deterministic.
 - `stepOnce()` runs exactly one tick (used by the Step button while paused).
+
+### Turn model & replay
+
+`Game` also exposes a coarse "turn" layer on top of the tick loop:
+
+- The game starts **paused**. `beginTurn()` snapshots the world, RNG, tick,
+  teams and winner, clears every piece's move cooldown, sets `movedThisTurn` for
+  any piece already animating, then unpauses. Each piece may make **one move**
+  (the movement system skips a piece once `movedThisTurn` is set).
+- `advanceTurn()` ends the turn when no piece is *pending* — not mid-move, not
+  already moved, and either has no goal or no route. In-flight moves are awaited,
+  so turns settle on squares; `TURN_MAX_TICKS = 60` is the ceiling, after which
+  `snapMoves()` lands stragglers. `finishTurn()` then pauses and stores the start
+  snapshot + tick count.
+- `replayTurn()` restores that snapshot and re-runs the recorded number of ticks.
+  Because the simulation is deterministic, replay returns to the exact same end
+  state. `World.capture()/restore()` does a deep `structuredClone` of every
+  component store; `Rng.getState()/setState()` restores the PRNG.
+- `togglePause()` cancels an active turn; `stepOnce()` cancels turn/replay.
+
+### Team control & game modes
+
+`TeamRuntime.controller` is `'human'` or `'ai'`, set from `gameMode`
+(`human-vs-ai`, `ai-vs-ai`, `human-vs-human`) and `playerTeam`. The `ai` system
+only auto-manages AI teams (rally/engage). Human pieces default to `hold` and
+act solely on player `Intent`s, while still firing autonomously via combat.
+The toolbar shows the mode and a `You: Blue · Red ai` badge.
 
 `SimContext` (`src/ecs/types.ts`) is the shared mutable context passed to every
 system: `world`, `bus`, `board`, `rng`, `tick`, `dt`, `cmds`, `teams`,
@@ -175,9 +202,12 @@ unreachable it returns the best-effort partial route to the closest reached cell
 
 ### Occupancy — `src/game/occupancy.ts`
 
-`buildOccupancy(world, board)` maps cell index → entity. The targeting system
-rebuilds it each tick into `ctx.occupancy`; `makeOccupied` adapts it to the
-`OccupiedFn` used by geometry queries.
+`buildOccupancy(world, board)` maps cell index → entity from each piece's `Cell`
+**and** its `Motion.reserved` cell, so a destination is claimed for the whole
+duration of a move. The targeting system rebuilds it each tick into
+`ctx.occupancy`; `makeOccupied` adapts it to the `OccupiedFn` used by geometry
+queries, and `occupiedExcept(board, occupancy, self)` excludes a piece's own
+cell/reservation during movement validation and path planning.
 
 ---
 
@@ -190,12 +220,18 @@ rebuilds it each tick into `ctx.occupancy`; `makeOccupied` adapts it to the
 - **ai** — translates `Intent` into `Motion.goal`: `hold` clears the goal,
   `move` uses `intent.dest`, `fight` advances on the current target (rallying to
   `intent.dest` or the enemy lane when no target is in sight).
-- **pathfinding** — budgeted A* (`PATH_BUDGET_PER_TICK`) for pieces whose goal
-  changed or whose path is empty, rate-limited by `motion.replanAt`.
-- **movement** — consumes `Motion`. When the cooldown is up and the next cell is
-  free, it starts a step: `Cell` claims the destination immediately (reserving
-  it), `Position` interpolates from current to target over `travel` seconds.
-  Blocked steps clear the path and schedule a re-plan.
+- **pathfinding** — budgeted A* (`PATH_BUDGET_PER_TICK`) over the piece's
+  movement geometry, with other pieces passed in as blockers (excluding the
+  piece itself). Unreachable goals fall back to the nearest reachable cell.
+- **movement** — consumes `Motion`. `Cell` stays at the **origin** and
+  `Motion.reserved` claims the destination while the piece animates into it;
+  the origin is only released on arrival. Before each step it re-validates that
+  the next route cell is a legal one-move destination for the piece's geometry
+  given live occupancy, so slides stop at the first piece/wall and only leaps
+  pass over blockers. Two pieces can never share a cell, and there is no visual
+  cross-through. During a turn, a piece is skipped once `movedThisTurn` is set
+  (one move per turn); travel time scales with the slide length so a rook's
+  multi-cell move reads clearly.
 - **combat** — ticks `Weapon.left`; when ready, checks the target is inside
   `fireCells` and spawns a projectile, then resets the cooldown.
 - **projectile** — advances waypoints at `speed`; applies splash/direct damage on
@@ -217,7 +253,8 @@ rebuilds it each tick into `ctx.occupancy`; `makeOccupied` adapts it to the
 `splash`, `color`.
 
 Shipped chess set: pawn, knight, bishop, rook, queen, king. `weaponVision`
-derives target-acquisition radius from the weapon geometry.
+derives target-acquisition radius from the weapon geometry. The pawn fires both
+forward diagonals at range 1.
 
 ---
 
@@ -237,33 +274,58 @@ waypoint polyline) → FX rings → border.
 
 Centre-based: `screen = (world − camera) × zoom + viewport/2`. `fit()` computes
 the whole-board zoom and stores it as `fitZoom`; that value is also the
-`minZoom`, so the player can never zoom out past the fitted board. `resize()`
-calls `updateLimits` to recompute the floor and clamp the current zoom. `zoomAt`
-is cursor-anchored; wheel zoom is exponential on `deltaY` for a gentle trackpad
-feel.
+`minZoom`, so the player can never zoom out past the fitted board. When `zoomAt`
+reaches that floor it snaps `x/y` back to the board centre, so a panned board
+always re-fits cleanly. `resize()` calls `updateLimits` to recompute the floor
+and clamp the current zoom. `maxZoom = 8` gives comfortable close-up range on
+large displays. `zoomAt` is cursor-anchored; wheel zoom is exponential on
+`deltaY` (`exp(-delta * 0.0008)`, clamped 0.7–1.4) for a gentle trackpad feel.
 
 ---
 
 ## 9. Vue UI and snapshot contract
 
-`App.vue` constructs one `Game`, starts it, and copies `game.snapshot()` into a
-`shallowRef` every `SNAPSHOT_INTERVAL_MS = 120`. The simulation never depends on
-Vue reactivity.
+`App.vue` constructs one `Game` (which starts **paused**), starts the frame loop,
+and copies `game.snapshot()` into a `shallowRef` every
+`SNAPSHOT_INTERVAL_MS = 120`. The simulation never depends on Vue reactivity.
+Control hints render as a vertical list in a strip below the board (`.hints`),
+not over the canvas.
 
 `GameSnapshot` fields (`src/game/game.ts`): `running paused tick fps tps speed
 boardId boardSize boardSizes teams timings events eventCount shots kills
-warnings selected selectedLines counts winner overlays hudVisible
-terrainVersion`.
+warnings selected selectedLines counts winner overlays hudVisible playerTeam
+turnActive canReplay replaying terrainVersion`.
 
 | Component | Responsibility |
 | --------- | -------------- |
-| `Toolbar.vue` | board size, pause/step/speed, order mode, overlay toggles, HUD toggle, reset |
-| `BoardView.vue` | canvas + Renderer; pan, zoom, select (shift = additive), right-click order |
+| `Toolbar.vue` | board size, turn/pause/step/replay, speed, order mode, overlay toggles, HUD toggle, reset |
+| `BoardView.vue` | canvas + Renderer; drag box-select (ctrl/cmd-click adds), shift/middle-drag pan, wheel zoom, right-click order; draws the selection rectangle |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
 | `StatsBar.vue` | tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Inspector for the selection |
 
-Keyboard: `space` pause, `m`/`f`/`o` order mode, `h` HUD, `Esc` clear selection.
+### Overlay scope and legend
+
+Overlays have a scope model: the **selection** always gets full detail; `my
+orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
+
+- **Move cells** — blue translucent squares: legal one-square destinations.
+- **Attack cells** — red outlined squares: cells the weapon can hit now
+  (geometry + line of sight). Outlined rather than filled so red remains visible
+  where it coincides with blue (rooks/bishops/queens).
+- **Range arc** — nominal weapon reach for the selected piece: directional bands
+  for rook (files/ranks) and bishop (diagonals), a circle for queen/king, a
+  forward half-disc for the pawn, and 8 dots for the knight.
+- **Path** — dashed gold route; **destination** crosshair (red when blocked);
+  **target** thin line + reticle.
+- Army scope shows paths, destinations and targets; reach/attack shading and
+  range arcs are reserved for selected pieces so the board stays readable.
+
+`overlays` flags: `grid`, `health`, `myOrders`, `enemyPlans`, `moveCells`,
+`attackCells`, `rangeArcs`.
+
+Keyboard: `1`/`2`/`3` order mode, `space` turn, `p` pause, `s` step, `r` replay,
+`o` my orders, `e` enemy plans, `h` HUD, `Esc` clear selection.
 
 ---
 

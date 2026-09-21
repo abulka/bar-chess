@@ -2,6 +2,7 @@ import { containsCell, fireCells } from '../../game/geometry'
 import { makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS } from '../../game/pieces'
 import { Cell, Intent, Motion, PieceType, Target, Team } from '../components'
+import type { IntentData, MotionData, TargetData } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
@@ -17,41 +18,55 @@ function inFiringGeometry(ctx: SimContext, e: Entity, target: Entity, team: 'red
   return containsCell(cells, tcell.x, tcell.y)
 }
 
+function rally(ctx: SimContext, team: 'red' | 'blue', intent: IntentData): { x: number; y: number } | null {
+  if (intent.dest) return intent.dest
+  const enemy = team === 'red' ? 'blue' : 'red'
+  const lanes = ctx.board.data.lanes[enemy]
+  return lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
+}
+
+/** Advance on the current target until it enters the firing geometry, then hold. */
+function engage(
+  ctx: SimContext,
+  e: Entity,
+  motion: MotionData,
+  target: TargetData,
+  intent: IntentData,
+  team: 'red' | 'blue',
+): void {
+  const valid = target.entity !== null && ctx.world.isAlive(target.entity) && ctx.world.has(target.entity, Cell)
+  if (!valid) {
+    motion.goal = rally(ctx, team, intent)
+    return
+  }
+  if (inFiringGeometry(ctx, e, target.entity as number, team)) {
+    motion.goal = null
+  } else {
+    const tcell = ctx.world.require(target.entity as number, Cell)
+    motion.goal = { x: tcell.x, y: tcell.y }
+  }
+}
+
 const system: System = {
   name: 'ai',
   update(ctx) {
-    for (const e of ctx.world.query(Intent, Motion, Cell)) {
+    for (const e of ctx.world.query(Intent, Motion, Cell, Team, Target)) {
       const intent = ctx.world.require(e, Intent)
       const motion = ctx.world.require(e, Motion)
       const target = ctx.world.require(e, Target)
+      const team = ctx.world.require(e, Team)
+
+      if (ctx.teams[team].controller === 'ai') {
+        engage(ctx, e, motion, target, intent, team)
+        continue
+      }
 
       if (intent.mode === 'hold') {
         motion.goal = null
-        continue
-      }
-
-      if (intent.mode === 'move') {
+      } else if (intent.mode === 'move') {
         motion.goal = intent.dest
-        continue
-      }
-
-      // fight: close on the target until it enters the firing geometry, then hold
-      if (target.entity === null || !ctx.world.isAlive(target.entity)) {
-        if (intent.dest) {
-          motion.goal = intent.dest
-        } else {
-          const enemy = ctx.world.require(e, Team) === 'red' ? 'blue' : 'red'
-          const lanes = ctx.board.data.lanes[enemy]
-          motion.goal = lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
-        }
-        continue
-      }
-      const team = ctx.world.require(e, Team)
-      if (inFiringGeometry(ctx, e, target.entity, team)) {
-        motion.goal = null
       } else {
-        const tcell = ctx.world.require(target.entity, Cell)
-        motion.goal = { x: tcell.x, y: tcell.y }
+        engage(ctx, e, motion, target, intent, team)
       }
     }
   },
