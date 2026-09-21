@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import type { GameMode, GameSnapshot, OverlayFlags } from '../game/game'
-import type { IntentMode } from '../game/types'
+import type { StanceMode } from '../game/types'
 
 const props = defineProps<{
   snapshot: GameSnapshot
-  orderMode: IntentMode
+  stance: StanceMode
 }>()
 
 const emit = defineEmits<{
@@ -15,17 +15,17 @@ const emit = defineEmits<{
   (e: 'turn'): void
   (e: 'replay'): void
   (e: 'set-speed', speed: number): void
-  (e: 'set-order-mode', mode: IntentMode): void
+  (e: 'set-stance', mode: StanceMode): void
   (e: 'toggle-overlay', key: keyof OverlayFlags): void
   (e: 'reset'): void
   (e: 'toggle-hud'): void
 }>()
 
 const speeds = [0.5, 1, 2, 4]
-const orderModes: Array<{ id: IntentMode; label: string }> = [
-  { id: 'move', label: 'Move' },
-  { id: 'fight', label: 'Fight' },
-  { id: 'hold', label: 'Hold' },
+const stances: Array<{ id: StanceMode; label: string; title: string }> = [
+  { id: 'move', label: 'Move', title: 'Move stance: travel, only return fire' },
+  { id: 'fight', label: 'Fight', title: 'Fight stance: engage nearby, flee when low' },
+  { id: 'hold', label: 'Hold', title: 'Hold stance: never leave the square' },
 ]
 const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
   { key: 'myOrders', label: 'my orders (o)' },
@@ -88,13 +88,15 @@ const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
       </button>
     </div>
 
-    <div class="speed-group order-modes" title="right-click issues this order">
+    <div class="speed-group order-modes" title="stance for the selected pieces">
+      <span class="stance-label">stance</span>
       <button
-        v-for="m in orderModes"
+        v-for="m in stances"
         :key="m.id"
         class="ctl small"
-        :class="{ active: props.orderMode === m.id }"
-        @click="emit('set-order-mode', m.id)"
+        :class="{ active: props.stance === m.id }"
+        :title="m.title"
+        @click="emit('set-stance', m.id)"
       >
         {{ m.label }}
       </button>

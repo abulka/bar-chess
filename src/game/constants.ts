@@ -3,12 +3,12 @@ import type { TeamId } from './types'
 export const TEAM_IDS: TeamId[] = ['red', 'blue']
 
 export const TEAM_COLORS: Record<TeamId, string> = {
-  red: '#ff6b5a',
+  red: '#ff9f43',
   blue: '#5ab0ff',
 }
 
 export const TEAM_NAMES: Record<TeamId, string> = {
-  red: 'Red',
+  red: 'Orange',
   blue: 'Blue',
 }
 

@@ -91,8 +91,9 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `PieceType` | `{ kind }` | keys into `PIECES` |
 | `Render` | `{ glyph, tint, size }` | unicode glyph + team tint |
 | `Health` | `{ cur, max }` | |
-| `Intent` | `{ mode, dest, player }` | `move` / `fight` / `hold` |
-| `Target` | `{ entity, retargetAt }` | current acquisition |
+| `Stance` | `{ mode }` | persistent policy: `move` / `fight` / `hold` |
+| `Order` | `{ kind, dest, target }` | one-shot: `none` / `goto` / `attack` |
+| `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping |
 | `Weapon` | `{ left }` | seconds until next shot |
 | `Motion` | `{ goal, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn }` | grid movement + render interpolation; `reserved` is the cell being entered |
 | `Projectile` | `{ team, damage, ttl, trajectory, splash, radius, color, target, owner, waypoints, waypointIndex }` | |
@@ -130,14 +131,17 @@ requestAnimationFrame(frame):
   any piece already animating, then unpauses. Each piece may make **one move**
   (the movement system skips a piece once `movedThisTurn` is set).
 - `advanceTurn()` ends the turn when no piece is *pending* — not mid-move, not
-  already moved, and either has no goal or no route. In-flight moves are awaited,
-  so turns settle on squares; `TURN_MAX_TICKS = 60` is the ceiling, after which
+  already moved, and either has no goal or no route — and at least
+  `MIN_TURN_TICKS = 30` ticks (~1s) have elapsed, so reloads and fire advance
+  even when nobody moves. `TURN_MAX_TICKS = 240` is the ceiling, after which
   `snapMoves()` lands stragglers. `finishTurn()` then pauses and stores the start
-  snapshot + tick count.
-- `replayTurn()` restores that snapshot and re-runs the recorded number of ticks.
-  Because the simulation is deterministic, replay returns to the exact same end
+  snapshot + tick count. `replayTurn()` plays the recorded ticks at 0.5× speed.
+- `replayTurn()` restores that snapshot and re-runs the recorded number of ticks
+  at ~0.2× speed (so the moves read one by one), returning to the exact same end
   state. `World.capture()/restore()` does a deep `structuredClone` of every
-  component store; `Rng.getState()/setState()` restores the PRNG.
+  component store; `Rng.getState()/setState()` restores the PRNG. During replay
+  `ctx.turnActive` is forced true so the one-move-per-turn gate matches the
+  original turn — otherwise the replay would diverge.
 - `togglePause()` cancels an active turn; `stepOnce()` cancels turn/replay.
 
 ### Team control & game modes
@@ -192,13 +196,19 @@ defined from blue's perspective (forward = −y); red negates `dy` in
   stop at walls and at the first piece (which is included as a hittable target);
   leaps cover their offsets regardless of blockers.
 - `lineClear(...)` — Bresenham sight line used for validation.
+- `attackApproachCells(board, targetCell, geom, team, occupied)` — empty cells
+  from which the target sits inside the geometry (computed as `target − dir`, so
+  asymmetric pawn patterns approach from the correct side). Used to pick a place
+  to shoot from.
 
 ### Pathfinding — `src/game/pathfind.ts`
 
 A* over the graph induced by a piece's **movement geometry**, with terrain move
-costs and a Chebyshev heuristic. Occupancy is ignored during planning; the
-movement system waits and re-plans if a step is actually blocked. If the goal is
-unreachable it returns the best-effort partial route to the closest reached cell.
+costs and a Chebyshev heuristic. Unreachable goals return a best-effort partial
+route to the closest reached cell, chosen by **Euclidean** distance so a step
+that reduces only one axis still counts as progress (a pawn ordered to an
+off-file square marches up its own file). Occupancy is passed in as blockers;
+the movement system waits and re-plans if a step becomes blocked.
 
 ### Occupancy — `src/game/occupancy.ts`
 
@@ -215,11 +225,19 @@ cell/reservation during movement validation and path planning.
 
 - **spawn** — drains `cmds.deploy`, finds a free passable entry lane for the team
   and `createPiece`s there; updates `TeamRuntime.alive` / `deployed`.
-- **targeting** — rebuilds occupancy, then acquires the nearest enemy within the
-  piece's `weaponVision` (independent of LOS) and re-acquires periodically.
-- **ai** — translates `Intent` into `Motion.goal`: `hold` clears the goal,
-  `move` uses `intent.dest`, `fight` advances on the current target (rallying to
-  `intent.dest` or the enemy lane when no target is in sight).
+- **targeting** — rebuilds occupancy, then sets the engagement target from
+  stance + order: an `attack` order is sticky on its enemy; `hold` picks the
+  nearest enemy already in firing geometry; `fight` auto-acquires the nearest
+  enemy within `weaponVision`, biased toward damaged ones; `move` only targets
+  its `lastAttacker` while `underFire`. AI-controlled teams always behave as
+  `fight`.
+- **ai** — turns stance/order into `Motion.goal`: an `attack` order pursues the
+  target (or holds to fire when in geometry); a `goto` order advances toward the
+  objective (best effort); autonomous `fight` pursues in a leash, flees below
+  30% HP, and rallies only for AI teams; `move`/`hold` clear the goal. Pursuit
+  targets a *firing position* from `attackApproachCells` (a cell from which the
+  enemy is inside the weapon geometry) rather than the occupied enemy cell, so
+  pieces do not pile into an unreachable square.
 - **pathfinding** — budgeted A* (`PATH_BUDGET_PER_TICK`) over the piece's
   movement geometry, with other pieces passed in as blockers (excluding the
   piece itself). Unreachable goals fall back to the nearest reachable cell.
@@ -230,10 +248,12 @@ cell/reservation during movement validation and path planning.
   given live occupancy, so slides stop at the first piece/wall and only leaps
   pass over blockers. Two pieces can never share a cell, and there is no visual
   cross-through. During a turn, a piece is skipped once `movedThisTurn` is set
-  (one move per turn); travel time scales with the slide length so a rook's
-  multi-cell move reads clearly.
-- **combat** — ticks `Weapon.left`; when ready, checks the target is inside
-  `fireCells` and spawns a projectile, then resets the cooldown.
+  (one move per turn) **and only one piece may be `moving` at a time**, so turns
+  (and replays) read as a sequence of individual moves. Travel time scales with
+  the slide length.
+- **combat** — ticks `Weapon.left`; when ready, fires at `Target.entity` if it is
+  inside `fireCells`. Because targeting decides whether a target exists at all,
+  combat inherits the stance/order fire policy automatically.
 - **projectile** — advances waypoints at `speed`; applies splash/direct damage on
   impact via `cmds.damage`; `line` shots are stopped by walls; jump/arc ignore
   blockers.
@@ -253,8 +273,9 @@ cell/reservation during movement validation and path planning.
 `splash`, `color`.
 
 Shipped chess set: pawn, knight, bishop, rook, queen, king. `weaponVision`
-derives target-acquisition radius from the weapon geometry. The pawn fires both
-forward diagonals at range 1.
+derives target-acquisition radius from the weapon geometry. The pawn fires the
+two forward diagonals at range 1 (chess capture); a piece directly ahead blocks
+it and is not a target.
 
 ---
 
@@ -322,10 +343,26 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   range arcs are reserved for selected pieces so the board stays readable.
 
 `overlays` flags: `grid`, `health`, `myOrders`, `enemyPlans`, `moveCells`,
-`attackCells`, `rangeArcs`.
+`attackCells`, `rangeArcs`. `rangeArcs` is off by default; move/attack cells and
+range arcs are drawn for selected pieces only, army scopes show paths/goals/targets.
 
-Keyboard: `1`/`2`/`3` order mode, `space` turn, `p` pause, `s` step, `r` replay,
-`o` my orders, `e` enemy plans, `h` HUD, `Esc` clear selection.
+Stance is chosen with the toolbar buttons or `1`/`2`/`3`; right-click issues an
+order (goto on empty, attack on an enemy). Hovering computes a per-selected-piece
+order preview (`Game.setHover`, drawn as faint ghosts) and a cell readout.
+Chess coordinates (`coordName`) label the board margins. The right rail has a
+**Copy position JSON** button (`Game.toDebugJson`) for debugging snapshots.
+
+Keyboard: `1`/`2`(`a`)/`3` stance, `space` turn, `p` pause, `s` step, `r` replay,
+`c`/`4` clear orders, `o` my orders, `e` enemy plans, `h` HUD, `Esc` clear
+selection. `Game.orderAt` makes a goto on an empty square and an attack on an
+enemy, and repeating the same order toggles it off.
+
+Team colour is Orange vs Blue; **red is reserved for attack indicators**: the
+tracking chain, the Fight stance badge, and the ring drawn around a piece that is
+the target of an attack order. Pieces no longer draw a default ring. Target
+rings/chains are computed from **scoped** pieces only (selection + `my orders` /
+`enemy plans`), so they never float permanently. Every piece draws a health bar
+and a cyan reload bar.
 
 ---
 
@@ -369,6 +406,7 @@ src/
     types.ts                   TeamId, Vec2, Geometry, dirs, resolveGeometry
     constants.ts               FIXED_DT, budgets, teams, timings
     math.ts / rng.ts           helpers / seeded PRNG
+    coords.ts                  chess-style square names (a1, ...)
     board.ts                   terrain defs, Board, MapData
     boards.ts                  board generation, initial armies, sizes
     geometry.ts                moveDestinations, fireCells, lineClear

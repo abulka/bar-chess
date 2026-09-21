@@ -5,15 +5,28 @@ import { createPipeline } from '../ecs/systems'
 import { World } from '../ecs/world'
 import type { Entity, WorldSnapshot } from '../ecs/world'
 import type { Commands, SimContext, TeamController, TeamRuntime } from '../ecs/types'
-import { Cell, Fx, Intent, Motion, PieceType, Position, Projectile, Team } from '../ecs/components'
+import {
+  Cell,
+  Fx,
+  Health,
+  Motion,
+  Order,
+  PieceType,
+  Position,
+  Projectile,
+  Stance,
+  Target,
+  Team,
+} from '../ecs/components'
 import type { MotionData } from '../ecs/components'
 import { Board } from './board'
 import type { BoardSize, Placement } from './boards'
 import { createBoardData, initialArmy } from './boards'
 import { FIXED_DT, MAX_STEPS_PER_FRAME, PATH_BUDGET_PER_TICK, TEAM_COLORS, TEAM_NAMES } from './constants'
+import { coordName } from './coords'
 import { createPiece } from './factory'
-import { occupiedExcept } from './occupancy'
-import type { IntentMode, TeamId, Vec2 } from './types'
+import { buildOccupancy, occupiedExcept } from './occupancy'
+import type { StanceMode, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES } from './pieces'
 import { findPath } from './pathfind'
 import { Rng } from './rng'
@@ -52,6 +65,13 @@ export interface TeamSnapshot {
 export interface ComponentLine {
   name: string
   value: string
+}
+
+export interface HoverPreview {
+  entity: Entity
+  cells: Vec2[]
+  dest: Vec2 | null
+  attack: boolean
 }
 
 export interface OverlayFlags {
@@ -98,6 +118,8 @@ export interface GameSnapshot {
   playerTeam: TeamId
   gameMode: GameMode
   gameModes: Array<{ id: GameMode; label: string }>
+  hoverName: string | null
+  hoverKind: 'empty' | 'friendly' | 'enemy' | 'blocked' | null
   turnActive: boolean
   canReplay: boolean
   replaying: boolean
@@ -147,10 +169,13 @@ export class Game {
     enemyPlans: false,
     moveCells: true,
     attackCells: true,
-    rangeArcs: true,
+    rangeArcs: false,
   }
 
   selected: Entity[] = []
+  hoverCell: Vec2 | null = null
+  hoverPreview: HoverPreview[] = []
+  hoverAttackTarget: Entity | null = null
 
   turnActive = false
   canReplay = false
@@ -160,7 +185,11 @@ export class Game {
   private lastTurn: { snapshot: TurnState; ticks: number } | null = null
   private replaying = false
   private replayTicks = 0
-  private static readonly TURN_MAX_TICKS = 60
+  // Turns are serialized (one move at a time), so the cap is generous; the turn
+  // normally ends as soon as every piece has moved or is blocked.
+  private static readonly TURN_MAX_TICKS = 240
+  /** Minimum sim time per turn (~1s) so reloads/fire advance even if nobody moves. */
+  private static readonly MIN_TURN_TICKS = 30
 
   fps = 0
   private tps = 0
@@ -173,7 +202,7 @@ export class Game {
 
   onFrame: ((alpha: number) => void) | null = null
 
-  constructor(size: BoardSize = 16, mode: GameMode = 'human-vs-ai') {
+  constructor(size: BoardSize = 8, mode: GameMode = 'human-vs-ai') {
     this.gameMode = mode
     const controllers = controllersFor(mode, this.playerTeam)
     this.teams = {
@@ -265,7 +294,8 @@ export class Game {
    */
   beginTurn(): void {
     if (this.turnActive || this.replaying) return
-    this.turnSnapshot = this.captureTurn()
+    // Mutate first, then snapshot: replay must start from the exact turn-start
+    // state (cooldowns cleared, movedThisTurn set) or it diverges.
     this.turnTicks = 0
     for (const e of this.world.query(Motion)) {
       const motion = this.world.get(e, Motion)
@@ -273,6 +303,7 @@ export class Game {
       motion.cooldown = 0
       motion.movedThisTurn = motion.moving
     }
+    this.turnSnapshot = this.captureTurn()
     this.canReplay = false
     this.turnActive = true
     this.paused = false
@@ -304,7 +335,9 @@ export class Game {
       if (motion.movedThisTurn) continue
       if (motion.goal && motion.path.length > 0) pending++
     }
-    if (pending === 0) {
+    // Even when everyone is settled, hold the turn open for a minimum beat so
+    // weapon cooldowns and in-range fire actually progress.
+    if (pending === 0 && this.turnTicks >= Game.MIN_TURN_TICKS) {
       this.finishTurn()
       return
     }
@@ -382,7 +415,8 @@ export class Game {
     }
 
     if (!this.paused) {
-      this.accumulator += delta * this.speed
+      const scale = this.replaying ? 0.5 : this.speed
+      this.accumulator += delta * scale
       let steps = 0
       while (this.accumulator >= FIXED_DT && steps < MAX_STEPS_PER_FRAME) {
         this.step()
@@ -399,7 +433,8 @@ export class Game {
   private step(): void {
     this.ctx.tick = this.tick
     this.ctx.verbosePhases = this.pipeline.verbose
-    this.ctx.turnActive = this.turnActive
+    // A replay re-runs a recorded turn, so the one-move-per-turn gate must apply.
+    this.ctx.turnActive = this.turnActive || this.replaying
     this.bus.tick = this.tick
     this.bus.phase = 'tick'
     this.pipeline.run(this.ctx)
@@ -509,37 +544,186 @@ export class Game {
     this.selected = []
   }
 
-  orderSelected(mode: IntentMode, dest: Vec2 | null): void {
+  /** Set the autonomous stance for the selection and clear any active order. */
+  setStance(mode: StanceMode): void {
     for (const e of this.selected) {
       if (!this.world.isAlive(e)) continue
-      const intent = this.world.get(e, Intent)
+      const stance = this.world.get(e, Stance)
+      const order = this.world.get(e, Order)
       const motion = this.world.get(e, Motion)
-      if (!intent || !motion) continue
-      intent.mode = mode
-      intent.dest = mode === 'hold' ? null : dest
-      intent.player = true
-
-      if (mode === 'move' && dest) {
-        // Plan immediately so the route is visible even while paused.
-        motion.goal = dest
-        this.planNow(e, motion, dest)
-      } else if (mode === 'fight' && dest) {
-        // Fight treats the destination as a rally point until a target appears.
-        motion.goal = dest
-        this.planNow(e, motion, dest)
-      } else {
+      if (stance) stance.mode = mode
+      if (order) {
+        order.kind = 'none'
+        order.dest = null
+        order.target = null
+      }
+      if (motion) {
         motion.goal = null
         motion.path = []
         motion.arrived = true
       }
     }
-    const n = this.selected.length
-    if (mode === 'move' && dest) {
-      this.bus.emit('info', `orders: ${n} piece(s) move to (${dest.x},${dest.y})`)
-    } else if (mode === 'hold') {
-      this.bus.emit('info', `orders: ${n} piece(s) hold`)
+    this.bus.emit('info', `${this.selected.length} piece(s) stance: ${mode}`)
+  }
+
+  /** Right-click: attack the enemy on `cell`, otherwise move toward it. */
+  orderAt(cell: Vec2): void {
+    if (!this.board.inBounds(cell.x, cell.y)) return
+    const occ = buildOccupancy(this.world, this.board)
+    const occupant = occ.get(cell.y * this.board.width + cell.x)
+    let n = 0
+    for (const e of this.selected) {
+      if (!this.world.isAlive(e)) continue
+      const order = this.world.get(e, Order)
+      const motion = this.world.get(e, Motion)
+      const team = this.world.get(e, Team)
+      if (!order || !motion || !team) continue
+      const occupantTeam = occupant !== undefined && occupant !== e ? this.world.get(occupant, Team) : undefined
+      const enemyOccupied =
+        occupant !== undefined && occupant !== e && occupantTeam !== undefined && occupantTeam !== team
+      // A right-click is an attack only for a piece in a fighting stance on an
+      // enemy; a Move-stance piece treats an occupied square as a move order.
+      const stanceMode = this.world.get(e, Stance)?.mode ?? 'hold'
+      const attacking = enemyOccupied && stanceMode !== 'move'
+      // Repeating the same order toggles it off.
+      const sameOrder =
+        (attacking && order.kind === 'attack' && order.target === occupant) ||
+        (!attacking && order.kind === 'goto' && order.dest !== null && order.dest.x === cell.x && order.dest.y === cell.y)
+      if (sameOrder) {
+        order.kind = 'none'
+        order.dest = null
+        order.target = null
+        motion.goal = null
+        motion.path = []
+        motion.arrived = true
+      } else if (attacking) {
+        order.kind = 'attack'
+        order.target = occupant
+        order.dest = null
+        motion.goal = null
+        motion.path = []
+        motion.arrived = true
+      } else {
+        order.kind = 'goto'
+        order.dest = cell
+        order.target = null
+        // A plain move must not leave a stale combat target behind.
+        const t = this.world.get(e, Target)
+        if (t) {
+          t.entity = null
+          t.lastAttacker = null
+        }
+        motion.goal = cell
+        this.planNow(e, motion, cell)
+      }
+      n++
+    }
+    if (occupant !== undefined && this.world.get(occupant, Team) !== undefined) {
+      this.bus.emit('info', `orders: ${n} at #${occupant} (${coordName(cell.x, cell.y, this.board.height)})`)
     } else {
-      this.bus.emit('info', `orders: ${n} piece(s) ${mode}`)
+      this.bus.emit('info', `orders: ${n} move toward ${coordName(cell.x, cell.y, this.board.height)}`)
+    }
+  }
+
+  clearOrders(): void {
+    for (const e of this.selected) {
+      if (!this.world.isAlive(e)) continue
+      const order = this.world.get(e, Order)
+      const motion = this.world.get(e, Motion)
+      if (order) {
+        order.kind = 'none'
+        order.dest = null
+        order.target = null
+      }
+      if (motion) {
+        motion.goal = null
+        motion.path = []
+        motion.arrived = true
+      }
+    }
+    this.bus.emit('info', `${this.selected.length} piece(s) orders cleared`)
+  }
+
+  /** Hover feedback and per-piece order preview (computed once per hovered cell). */
+  setHover(cell: Vec2 | null): void {
+    if (cell && this.hoverCell && cell.x === this.hoverCell.x && cell.y === this.hoverCell.y) return
+    if (!cell && this.hoverCell === null) return
+    this.hoverCell = cell ? { x: cell.x, y: cell.y } : null
+    this.hoverPreview = []
+    this.hoverAttackTarget = null
+    if (!cell || !this.board.inBounds(cell.x, cell.y) || this.selected.length === 0) return
+
+    const occ = buildOccupancy(this.world, this.board)
+    const occupant = occ.get(cell.y * this.board.width + cell.x)
+    for (const e of this.selected) {
+      if (!this.world.isAlive(e)) continue
+      const team = this.world.get(e, Team)
+      const fromCell = this.world.get(e, Cell)
+      const kind = this.world.get(e, PieceType)?.kind
+      if (!team || !fromCell || !kind) continue
+      const def = PIECES[kind]
+      if (!def) continue
+      const occupantTeam = occupant !== undefined && occupant !== e ? this.world.get(occupant, Team) : undefined
+      if (occupant !== undefined && occupant !== e && occupantTeam !== undefined && occupantTeam !== team) {
+        this.hoverAttackTarget = occupant
+        this.hoverPreview.push({ entity: e, cells: [], dest: { x: cell.x, y: cell.y }, attack: true })
+        continue
+      }
+      const blocked = occupiedExcept(this.board, occ, e)
+      const result = findPath(this.board, fromCell, cell, def.move, team, blocked)
+      const dest = result.cells.length > 0 ? result.cells[result.cells.length - 1] : null
+      this.hoverPreview.push({ entity: e, cells: result.cells, dest, attack: false })
+    }
+  }
+
+  toDebugJson(): unknown {
+    const occ = buildOccupancy(this.world, this.board)
+    const pieces: unknown[] = []
+    for (const e of this.world.query(Position, Cell, Team, PieceType)) {
+      const pos = this.world.require(e, Position)
+      const cell = this.world.require(e, Cell)
+      const team = this.world.require(e, Team)
+      const kind = this.world.require(e, PieceType).kind
+      const hp = this.world.get(e, Health)
+      const stance = this.world.get(e, Stance)
+      const order = this.world.get(e, Order)
+      const target = this.world.get(e, Target)
+      const motion = this.world.get(e, Motion)
+      pieces.push({
+        e,
+        team,
+        kind,
+        cell: { x: cell.x, y: cell.y },
+        name: coordName(cell.x, cell.y, this.board.height),
+        pos: { x: Math.round(pos.x), y: Math.round(pos.y) },
+        hp: hp ? { cur: hp.cur, max: hp.max } : null,
+        stance: stance?.mode ?? null,
+        order: order ? { kind: order.kind, dest: order.dest, target: order.target } : null,
+        target: target ? { entity: target.entity, lastAttacker: target.lastAttacker } : null,
+        motion: motion
+          ? {
+              goal: motion.goal,
+              blocked: motion.blocked,
+              moving: motion.moving,
+              cooldown: Math.round(motion.cooldown * 100) / 100,
+              path: motion.path,
+            }
+          : null,
+      })
+    }
+    return {
+      boardId: this.board.data.id,
+      size: this.board.width,
+      tile: this.board.tile,
+      terrain: Array.from(this.board.terrain),
+      tick: this.tick,
+      gameMode: this.gameMode,
+      playerTeam: this.playerTeam,
+      turnActive: this.turnActive,
+      selected: this.selected.slice(),
+      occupancyCells: occ.size,
+      teams: { red: this.teams.red, blue: this.teams.blue },
+      pieces,
     }
   }
 
@@ -562,6 +746,16 @@ export class Game {
     if (this.board.terrainAt(x, y) === terrain) return
     this.board.setTerrain(x, y, terrain)
     this.terrainVersion++
+  }
+
+  private hoverKind(): 'empty' | 'friendly' | 'enemy' | 'blocked' | null {
+    const cell = this.hoverCell
+    if (!cell || !this.board.inBounds(cell.x, cell.y)) return null
+    const occupant = buildOccupancy(this.world, this.board).get(cell.y * this.board.width + cell.x)
+    if (occupant !== undefined) {
+      return this.world.get(occupant, Team) === this.playerTeam ? 'friendly' : 'enemy'
+    }
+    return this.board.passable(cell.x, cell.y) ? 'empty' : 'blocked'
   }
 
   snapshot(): GameSnapshot {
@@ -624,6 +818,8 @@ export class Game {
       playerTeam: this.playerTeam,
       gameMode: this.gameMode,
       gameModes: GAME_MODES,
+      hoverName: this.hoverCell ? coordName(this.hoverCell.x, this.hoverCell.y, this.board.height) : null,
+      hoverKind: this.hoverKind(),
       turnActive: this.turnActive,
       canReplay: this.canReplay,
       replaying: this.replaying,

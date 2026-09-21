@@ -5,7 +5,9 @@ export interface Vec2 {
   y: number
 }
 
-export type IntentMode = 'move' | 'fight' | 'hold'
+export type StanceMode = 'move' | 'fight' | 'hold'
+
+export type OrderKind = 'none' | 'goto' | 'attack'
 
 export type Trajectory = 'line' | 'homing' | 'arc' | 'jump' | 'beam'
 

@@ -9,11 +9,12 @@ import type { BoardSize } from './game/boards'
 import { SNAPSHOT_INTERVAL_MS } from './game/constants'
 import { Game } from './game/game'
 import type { GameMode, GameSnapshot, OverlayFlags } from './game/game'
-import type { IntentMode, TeamId } from './game/types'
+import type { StanceMode, TeamId } from './game/types'
 
-const game = new Game(16)
+const game = new Game(8)
 const snapshot = shallowRef<GameSnapshot>(game.snapshot())
-const orderMode = ref<IntentMode>('move')
+const stance = ref<StanceMode>('move')
+const copied = ref(false)
 const boardView = ref<InstanceType<typeof BoardView> | null>(null)
 
 let timer = 0
@@ -36,6 +37,14 @@ function onSelectSize(size: number): void {
 function onSetGameMode(mode: GameMode): void {
   game.setGameMode(mode)
   refresh()
+}
+
+function onSetStance(mode: StanceMode): void {
+  stance.value = mode
+  if (game.selected.length > 0) {
+    game.setStance(mode)
+    refresh()
+  }
 }
 
 function onToggleOverlay(key: keyof OverlayFlags): void {
@@ -66,6 +75,17 @@ function onReplay(): void {
   refresh()
 }
 
+async function copyJson(): Promise<void> {
+  const json = JSON.stringify(game.toDebugJson(), null, 2)
+  try {
+    await navigator.clipboard.writeText(json)
+    copied.value = true
+    window.setTimeout(() => (copied.value = false), 1200)
+  } catch {
+    console.log(json)
+  }
+}
+
 function onKey(event: KeyboardEvent): void {
   const target = event.target
   if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return
@@ -81,6 +101,9 @@ function onKey(event: KeyboardEvent): void {
     refresh()
   } else if (event.key === 'r') {
     onReplay()
+  } else if (event.key === 'c' || event.key === '4') {
+    game.clearOrders()
+    refresh()
   } else if (event.key === 'o') {
     onToggleOverlay('myOrders')
   } else if (event.key === 'e') {
@@ -88,9 +111,9 @@ function onKey(event: KeyboardEvent): void {
   } else if (event.key === 'Escape') {
     game.clearSelection()
     refresh()
-  } else if (event.key === '1') orderMode.value = 'move'
-  else if (event.key === '2') orderMode.value = 'fight'
-  else if (event.key === '3') orderMode.value = 'hold'
+  } else if (event.key === '1') onSetStance('move')
+  else if (event.key === '2' || event.key === 'a') onSetStance('fight')
+  else if (event.key === '3') onSetStance('hold')
 }
 
 onMounted(() => {
@@ -113,7 +136,7 @@ onBeforeUnmount(() => {
   <div class="app" :class="{ 'hud-hidden': !snapshot.hudVisible }">
     <Toolbar
       :snapshot="snapshot"
-      :order-mode="orderMode"
+      :stance="stance"
       @select-size="onSelectSize"
       @set-game-mode="onSetGameMode"
       @toggle-pause="game.togglePause(); refresh()"
@@ -121,43 +144,69 @@ onBeforeUnmount(() => {
       @turn="onTurn"
       @replay="onReplay"
       @set-speed="game.setSpeed($event); refresh()"
-      @set-order-mode="orderMode = $event"
+      @set-stance="onSetStance"
       @toggle-overlay="onToggleOverlay"
       @reset="onReset"
       @toggle-hud="onToggleHud"
     />
 
     <div class="stage" :class="{ 'no-rosters': !snapshot.hudVisible }">
+      <aside class="rail left">
+        <div class="rail-title">controls</div>
+        <ul class="hints">
+          <li><b>drag</b> select box</li>
+          <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
+          <li><b>right-click</b> empty → move (repeat toggles off)</li>
+          <li><b>right-click</b> enemy → attack / track</li>
+          <li><b>1</b>/<b>2</b>(<b>a</b>)/<b>3</b> stance Move/Fight/Hold</li>
+          <li><b>space</b> turn · <b>p</b> pause · <b>s</b> step</li>
+          <li><b>r</b> replay · <b>c</b>/<b>4</b> clear orders</li>
+          <li><b>o</b> my orders · <b>e</b> enemy · <b>h</b> HUD</li>
+        </ul>
+      </aside>
+
       <ReinforcementBar
         v-if="snapshot.hudVisible"
         :team="snapshot.teams.red"
         side="left"
         @deploy="onDeploy('red', $event)"
       />
+
       <div class="center">
         <div class="board-area">
-          <BoardView ref="boardView" :game="game" :order-mode="orderMode" @changed="refresh" />
+          <BoardView ref="boardView" :game="game" @changed="refresh" />
         </div>
-        <ul v-if="snapshot.hudVisible" class="hints">
-          <li><b>drag</b> — select a box of pieces</li>
-          <li><b>shift-drag</b> or middle-drag — pan · <b>wheel</b> — zoom</li>
-          <li>
-            <b>right-click</b> — order
-            <b :style="{ color: orderMode === 'move' ? '#5ab0ff' : orderMode === 'fight' ? '#ff6b5a' : '#ffd166' }">
-              {{ orderMode.toUpperCase() }}
-            </b>
-            (<b>1</b>/<b>2</b>/<b>3</b> to change)
-          </li>
-          <li><b>space</b> — turn (each piece moves once) · <b>p</b> pause · <b>s</b> step · <b>r</b> replay</li>
-          <li><b>o</b> my orders · <b>e</b> enemy plans · <b>h</b> HUD · <b>Esc</b> clear</li>
-        </ul>
       </div>
+
       <ReinforcementBar
         v-if="snapshot.hudVisible"
         :team="snapshot.teams.blue"
         side="right"
         @deploy="onDeploy('blue', $event)"
       />
+
+      <aside class="rail right">
+        <div class="rail-title">stance</div>
+        <ul class="legend">
+          <li><span class="dot" style="background: #4ad991"></span><b>M</b> Move — travel, return fire only</li>
+          <li><span class="dot" style="background: #ff3b30"></span><b>F</b> Fight — engage nearby, flee when low</li>
+          <li><span class="dot" style="background: #ffd166"></span><b>H</b> Hold — stay put, fire in range</li>
+          <li><span class="dot" style="background: #ff2d20"></span><b>red ring</b> target of an attack</li>
+          <li><span class="dot" style="background: #b9c2cc"></span><b>&#9678;</b> tracking an enemy</li>
+        </ul>
+        <div class="rail-title">hover</div>
+        <div class="hover-readout">
+          <span>{{ snapshot.hoverName ?? '—' }}</span>
+          <span v-if="snapshot.hoverKind" class="muted">· {{ snapshot.hoverKind }}</span>
+        </div>
+        <div class="rail-title">legend</div>
+        <ul class="legend">
+          <li><span class="sw sw-move"></span> move cells</li>
+          <li><span class="sw sw-attack"></span> attack cells</li>
+          <li><span class="sw sw-path"></span> path / objective</li>
+        </ul>
+        <button class="ctl copy-btn" @click="copyJson">{{ copied ? 'Copied!' : 'Copy position JSON' }}</button>
+      </aside>
     </div>
 
     <div v-if="snapshot.hudVisible" class="bottom">

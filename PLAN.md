@@ -38,7 +38,7 @@ autonomous movement, firing, projectile flight and destruction play out.
 | 1 | Movement feel | Cell-claim grid movement with smooth render interpolation + move cooldown |
 | 2 | Ordering | Watchable vertical slice first, then depth |
 | 3 | Renderer | Canvas 2D |
-| 4 | Default board | 16×16 @ 48px tiles; sizes 8/16/32/64 selectable |
+| 4 | Default board | 8×8 @ 48px tiles; sizes 8/16/32/64 selectable |
 | 5 | Art | Unicode chess glyphs tinted by team (no CDN dependency) |
 | 6 | Blocking | Walls block movement + LOS + projectiles; water blocks movement only; pieces block movement + LOS |
 | 7 | Firing | A weapon must satisfy its firing geometry (not merely range) to hit |
@@ -46,33 +46,56 @@ autonomous movement, firing, projectile flight and destruction play out.
 | 9 | Teams | red / blue (N-team friendly) |
 | 10 | Conventions | Strict TS, single runtime dependency (Vue), no comments unless asked |
 
-## Order model
+## Stance vs order
 
-Three simple intention modes (no command trees):
+Two distinct concepts:
 
-- **Move** — right-click sets a destination. The piece paths there with its own
-  movement geometry, fights anything it can reach on the way, and continues.
-- **Fight** — seek and engage the nearest enemy; right-click sets a rally
-  destination used until a target appears.
-- **Hold** — stay put and fire at whatever enters the firing geometry.
+**Stance** is a piece's persistent autonomous policy, shown as a badge on the
+piece and set with the toolbar buttons or `1` / `2`(`a`) / `3`:
 
-Order mode is chosen in the toolbar or with `1` / `2` / `3`; right-click applies
-the current mode to the whole selection.
+- **Move** (`1`, green) — travel and return fire only; never starts a fight.
+- **Fight** (`2` or `a`, red) — seek and attack nearby targets, prefer damaged
+  ones, and flee when below 30% HP. Does not chase across the board.
+- **Hold** (`3`, amber) — never repositions; fires at whatever enters range.
+
+**Order** is a one-shot instruction that overrides stance until fulfilled:
+
+- **Right-click an empty square** → *goto*: move toward it. This is an
+  **objective**, not a strict destination: each selected piece advances as far as
+  its own geometry allows, so a pawn ordered to an off-file square still marches
+  forward up its own file.
+- **Right-click an enemy piece** → *attack*: become glued to that enemy, follow
+  it, and fire when possible. Shown as a **red** tracking chain + a **red ring**
+  around the targeted enemy. This applies to a piece in a **Fight/Hold** stance;
+  a **Move**-stance piece treats an occupied square as a plain move (best-effort
+  advance), never as an attack, and a move order clears any stale target.
+- Repeating an order toggles it off; `c` or `4` clears orders on the selection.
+- Tracking rings/chains follow the overlay scope: visible for the selection and,
+  when on, `my orders` (`o`) / `enemy plans` (`e`) — never floating permanently.
+
+**Team colour is Orange vs Blue** so that **red is reserved for attack
+indicators** (tracking chain, targeted ring, Fight stance). Pieces have no
+default ring — a red ring means "this piece is under an attack order".
+
+Auto-targeting follows from this: attack order = sticky target; Fight = scored
+auto-acquire; Hold = in-range only; Move = retaliation only (returns fire at its
+attacker while continuing to move).
 
 ## Turn flow, pause and replay
 
 The battle **starts paused**. Give orders, then take a turn:
 
-- `space` — **Turn**: every piece makes **at most one move**, then the turn
-  auto-pauses once those moves land. Move cooldowns are cleared at the start of
-  a turn, so a turn is a short, readable beat (~0.4s), not several seconds of
-  real time. A piece with no orders (or blocked with no route) simply does not
-  move.
+- `space` — **Turn**: pieces move **one at a time**, each making at most one
+  move, then the turn auto-pauses. Move cooldowns are cleared at the start, and
+  every turn runs a minimum beat (~1s of sim time) so reloads and in-range fire
+  still progress even when nobody moves. A piece with no orders (or blocked with
+  no route) simply does not move.
 - `p` — pause / resume. Pausing mid-turn cancels the turn.
 - `s` — single simulation step (one tick), for tracing.
 - `r` — **Replay last turn**: the world + RNG + tick are snapshotted at turn
-  start, so replay deterministically re-plays the recorded number of ticks and
-  returns to exactly the same end state.
+  start (after the turn's setup mutations), so replay deterministically re-plays
+  the recorded ticks and returns to exactly the same end state. Because turns are
+  serialized, replay shows the moves one piece at a time at ~0.5× speed.
 
 A "move" is one application of the piece's movement geometry, so a pawn advances
 one square while a rook may slide several cells along a rank/file — one move.
@@ -93,7 +116,13 @@ Scope: the **selection** always shows full detail; `my orders` (`o`) and
 - **Attack cells** — red outlined squares (what the weapon can hit now; outlined
   so it stays visible where it overlaps blue).
 - **Range arc** — nominal reach for the selected piece: bands for rook/bishop,
-  circle for queen/king, forward half-disc for pawn, 8 dots for knight.
+  circle for queen/king, forward half-disc for pawn, 8 dots for knight. **Off by
+  default** (enable with the `range` toggle) so targeting circles don't clutter
+  the board.
+- **Health + reload bars**: every piece shows a health bar and a cyan weapon
+  reload bar, so it is clear both how hurt it is and whether it can fire.
+- Pawns fire the **two forward diagonals** (chess capture). A piece directly
+  ahead blocks a pawn, exactly as in chess, and is not a target.
 - **Path** — dashed gold route; **destination** crosshair (red if blocked);
   **target** line + reticle.
 
@@ -101,11 +130,14 @@ Army scope shows paths/goals/targets; reach, attack and range are reserved for
 selected pieces to keep the board readable.
 
 Mouse: **drag** to box-select (ctrl/cmd-click adds), **shift-drag** or
-middle-drag to pan, **wheel** to zoom, **right-click** to order. The control
-hints sit in a vertical list below the board so they never cover it.
+middle-drag to pan, **wheel** to zoom, **right-click** to order (goto on an
+empty square, attack on an enemy). Hover shows a per-piece order preview (faint
+ghosts) and the square name. The board is labelled with chess coordinates, and
+the control hints + stance legend live in always-visible side rails (even with
+the HUD hidden). A **Copy position JSON** button captures the full situation.
 
-Keyboard summary: `1/2/3` order mode, `space` turn, `p` pause, `s` step,
-`r` replay, `o` my orders, `e` enemy plans, `h` HUD, `Esc` clear selection.
+Keyboard summary: `1/2/3` stance, `space` turn, `p` pause, `s` step, `r` replay,
+`c` clear orders, `o` my orders, `e` enemy plans, `h` HUD, `Esc` clear selection.
 
 ## Roadmap
 

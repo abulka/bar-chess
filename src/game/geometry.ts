@@ -152,6 +152,40 @@ export function lineClear(
   return true
 }
 
+/**
+ * Empty cells from which `targetCell` sits inside the given firing geometry.
+ * Used to pick a firing position (rather than piling onto the occupied target).
+ * Computed as `target - dir`, which is correct for asymmetric patterns too
+ * (a pawn approaches from the side it fires toward).
+ */
+export function attackApproachCells(
+  board: Board,
+  targetCell: Vec2,
+  geom: Geometry,
+  team: TeamId,
+  occupied: OccupiedFn = NEVER,
+): Vec2[] {
+  const g = resolveGeometry(geom, team)
+  const out: Vec2[] = []
+  const dirs: readonly Dir[] =
+    g.kind === 'slide'
+      ? g.dirs
+      : g.kind === 'leap'
+        ? g.offsets
+        : ([[0, g.dy], [1, g.dy], [-1, g.dy]] as Dir[])
+  const range = g.kind === 'slide' ? g.range : 1
+  for (const [dx, dy] of dirs) {
+    for (let k = 1; k <= range; k++) {
+      const x = targetCell.x - dx * k
+      const y = targetCell.y - dy * k
+      if (!board.inBounds(x, y) || board.blocksVision(x, y)) break
+      if (!occupied(x, y) && board.passable(x, y)) out.push({ x, y })
+      if (occupied(x, y)) break
+    }
+  }
+  return out
+}
+
 export function containsCell(cells: Vec2[], x: number, y: number): boolean {
   for (const c of cells) {
     if (c.x === x && c.y === y) return true

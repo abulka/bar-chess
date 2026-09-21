@@ -1,4 +1,4 @@
-import type { IntentMode, TeamId, Trajectory, Vec2 } from '../game/types'
+import type { OrderKind, StanceMode, TeamId, Trajectory, Vec2 } from '../game/types'
 import type { Entity } from './world'
 import { defineComponent } from './world'
 
@@ -27,16 +27,23 @@ export interface HealthData {
   max: number
 }
 
-export interface IntentData {
-  mode: IntentMode
+/** Persistent autonomous behaviour policy. */
+export interface StanceData {
+  mode: StanceMode
+}
+
+/** A one-shot instruction that overrides stance until fulfilled. */
+export interface OrderData {
+  kind: OrderKind
   dest: Vec2 | null
-  /** set when the player (rather than the AI) issued this intention */
-  player: boolean
+  target: Entity | null
 }
 
 export interface TargetData {
   entity: Entity | null
   retargetAt: number
+  lastAttacker: Entity | null
+  underFireUntil: number
 }
 
 export interface WeaponData {
@@ -97,7 +104,8 @@ export const Team = defineComponent<TeamId>('Team')
 export const PieceType = defineComponent<PieceTypeData>('PieceType')
 export const Render = defineComponent<RenderData>('Render')
 export const Health = defineComponent<HealthData>('Health')
-export const Intent = defineComponent<IntentData>('Intent')
+export const Stance = defineComponent<StanceData>('Stance')
+export const Order = defineComponent<OrderData>('Order')
 export const Target = defineComponent<TargetData>('Target')
 export const Weapon = defineComponent<WeaponData>('Weapon')
 export const Motion = defineComponent<MotionData>('Motion')

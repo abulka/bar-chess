@@ -95,8 +95,11 @@ export function findPath(
   heap.push(startIdx, heuristic(from.x, from.y, to.x, to.y))
 
   let expanded = 0
+  // Best-effort fallback uses Euclidean distance so a step that reduces only
+  // one axis still counts as progress (e.g. a pawn advancing up its file toward
+  // an off-file objective).
   let bestIdx = startIdx
-  let bestH = heuristic(from.x, from.y, to.x, to.y)
+  let bestD = (from.x - to.x) ** 2 + (from.y - to.y) ** 2
 
   while (heap.size > 0) {
     const current = heap.pop()
@@ -106,15 +109,15 @@ export function findPath(
 
     if (current === goalIdx) {
       bestIdx = current
-      bestH = 0
+      bestD = 0
       break
     }
 
     const cx = current % w
     const cy = (current - cx) / w
-    const hh = heuristic(cx, cy, to.x, to.y)
-    if (hh < bestH) {
-      bestH = hh
+    const dd = (cx - to.x) ** 2 + (cy - to.y) ** 2
+    if (dd < bestD) {
+      bestD = dd
       bestIdx = current
     }
 
@@ -129,11 +132,6 @@ export function findPath(
         heap.push(nIdx, tentative + heuristic(n.x, n.y, to.x, to.y))
       }
     }
-  }
-
-  if (bestH > 0 && bestIdx !== goalIdx) {
-    // goal was unreachable; walk back from the closest cell reached and report
-    // the partial route so the piece advances rather than stalling.
   }
 
   const cells: Vec2[] = []

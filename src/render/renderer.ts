@@ -1,12 +1,34 @@
-import { Cell, Fx, Health, Motion, PieceType, Position, Projectile, Render, Target, Team } from '../ecs/components'
+import {
+  Cell,
+  Fx,
+  Health,
+  Motion,
+  Order,
+  PieceType,
+  Position,
+  Projectile,
+  Render,
+  Stance,
+  Target,
+  Team,
+  Weapon,
+} from '../ecs/components'
 import type { Entity } from '../ecs/world'
 import { buildOccupancy, makeOccupied } from '../game/occupancy'
 import { fireCells, moveDestinations } from '../game/geometry'
 import { PIECES, WEAPONS } from '../game/pieces'
 import { resolveGeometry } from '../game/types'
+import { coordName, fileLabel } from '../game/coords'
 import type { Game } from '../game/game'
 import { Camera } from './camera'
 import { bakeTerrain } from './terrain'
+
+const STANCE_COLORS: Record<string, string> = {
+  move: '#4ad991',
+  fight: '#ff3b30',
+  hold: '#ffd166',
+}
+const TRACK_COLOR = '#ff2d20'
 
 export class Renderer {
   camera = new Camera()
@@ -70,15 +92,19 @@ export class Renderer {
     if (this.terrain) ctx.drawImage(this.terrain, 0, 0)
 
     this.drawSpawns(ctx, game)
-    for (const { e, full } of this.scopedPieces(game)) {
+    const scoped = this.scopedPieces(game)
+    for (const { e, full } of scoped) {
       this.drawPieceOverlay(ctx, game, occupied, e, full)
     }
-    this.drawPieces(ctx, game)
+    this.drawHoverGhosts(ctx, game)
+    this.drawPieces(ctx, game, scoped)
     this.drawProjectiles(ctx, game)
     this.drawFx(ctx, game)
+    this.drawHoverCursor(ctx, game)
     ctx.restore()
 
     this.drawBorder(ctx, game)
+    this.drawCoords(ctx, game)
   }
 
   /**
@@ -105,7 +131,7 @@ export class Renderer {
     const t = game.board.tile
     for (const team of ['red', 'blue'] as const) {
       const s = game.board.data.spawns[team]
-      ctx.fillStyle = team === 'red' ? 'rgba(255,107,90,0.05)' : 'rgba(90,176,255,0.05)'
+      ctx.fillStyle = team === 'red' ? 'rgba(255,159,67,0.05)' : 'rgba(90,176,255,0.05)'
       ctx.fillRect(s.x * t, s.y * t, s.w * t, s.h * t)
     }
   }
@@ -174,10 +200,48 @@ export class Renderer {
       ctx.setLineDash([])
     }
 
+    const order = game.world.get(e, Order)
+    const autoTarget = game.world.get(e, Target)?.entity ?? null
+    const target = order?.kind === 'attack' ? order.target : autoTarget
+
+    // Attack order: a "glued" tracking chain and a lock reticle on the victim.
+    if (order?.kind === 'attack' && target !== null && game.world.isAlive(target)) {
+      const tp = game.world.get(target, Position)
+      if (tp) {
+        ctx.strokeStyle = TRACK_COLOR
+        ctx.lineWidth = (full ? 2.4 : 1.6) / this.camera.zoom
+        ctx.setLineDash([])
+        ctx.beginPath()
+        ctx.moveTo(pos.x, pos.y)
+        ctx.lineTo(tp.x, tp.y)
+        ctx.stroke()
+        const ang = Math.atan2(tp.y - pos.y, tp.x - pos.x)
+        const ah = t * 0.2
+        ctx.fillStyle = TRACK_COLOR
+        ctx.beginPath()
+        ctx.moveTo(tp.x, tp.y)
+        ctx.lineTo(tp.x - Math.cos(ang - 0.4) * ah, tp.y - Math.sin(ang - 0.4) * ah)
+        ctx.lineTo(tp.x - Math.cos(ang + 0.4) * ah, tp.y - Math.sin(ang + 0.4) * ah)
+        ctx.closePath()
+        ctx.fill()
+        ctx.beginPath()
+        ctx.arc(tp.x, tp.y, t * 0.24, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.moveTo(tp.x - t * 0.33, tp.y)
+        ctx.lineTo(tp.x + t * 0.33, tp.y)
+        ctx.moveTo(tp.x, tp.y - t * 0.33)
+        ctx.lineTo(tp.x, tp.y + t * 0.33)
+        ctx.stroke()
+      }
+      return
+    }
+
     const goal = motion?.goal ?? null
     if (goal) {
       const center = board.cellCenter(goal.x, goal.y)
-      ctx.strokeStyle = motion?.blocked ? '#ff7b72' : '#ffd166'
+      const partial = motion?.blocked || !(order?.kind === 'goto' && order.dest && order.dest.x === goal.x && order.dest.y === goal.y)
+      ctx.strokeStyle = partial ? '#ffb347' : '#ffd166'
       ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
       if (!motion || motion.path.length === 0) {
         ctx.setLineDash([3 / this.camera.zoom, 5 / this.camera.zoom])
@@ -185,11 +249,12 @@ export class Renderer {
         ctx.moveTo(pos.x, pos.y)
         ctx.lineTo(center.x, center.y)
         ctx.stroke()
-        ctx.setLineDash([])
       }
+      if (partial) ctx.setLineDash([3 / this.camera.zoom, 3 / this.camera.zoom])
       ctx.beginPath()
       ctx.arc(center.x, center.y, t * 0.26, 0, Math.PI * 2)
       ctx.stroke()
+      ctx.setLineDash([])
       ctx.beginPath()
       ctx.moveTo(center.x - t * 0.16, center.y)
       ctx.lineTo(center.x + t * 0.16, center.y)
@@ -198,9 +263,8 @@ export class Renderer {
       ctx.stroke()
     }
 
-    const target = game.world.get(e, Target)?.entity ?? null
-    if (target === null || !game.world.isAlive(target)) return
-    const tp = game.world.get(target, Position)
+    if (autoTarget === null || !game.world.isAlive(autoTarget)) return
+    const tp = game.world.get(autoTarget, Position)
     if (!tp) return
     ctx.strokeStyle = `rgba(255,209,102,${full ? 0.6 : 0.35})`
     ctx.lineWidth = 1 / this.camera.zoom
@@ -211,6 +275,85 @@ export class Renderer {
     ctx.beginPath()
     ctx.arc(tp.x, tp.y, t * 0.2, 0, Math.PI * 2)
     ctx.stroke()
+  }
+
+  /** Faint per-piece destinations + paths for the current hovered order. */
+  private drawHoverGhosts(ctx: CanvasRenderingContext2D, game: Game): void {
+    if (game.hoverPreview.length === 0) return
+    const board = game.board
+    const t = board.tile
+    for (const preview of game.hoverPreview) {
+      const pos = game.world.get(preview.entity, Position)
+      if (!pos) continue
+      ctx.strokeStyle = preview.attack ? `${TRACK_COLOR}aa` : 'rgba(255,255,255,0.4)'
+      ctx.lineWidth = 1.5 / this.camera.zoom
+      ctx.setLineDash([4 / this.camera.zoom, 4 / this.camera.zoom])
+      ctx.beginPath()
+      ctx.moveTo(pos.x, pos.y)
+      for (const c of preview.cells) {
+        const center = board.cellCenter(c.x, c.y)
+        ctx.lineTo(center.x, center.y)
+      }
+      if (preview.cells.length === 0 && preview.dest) {
+        const center = board.cellCenter(preview.dest.x, preview.dest.y)
+        ctx.lineTo(center.x, center.y)
+      }
+      ctx.stroke()
+      ctx.setLineDash([])
+      if (preview.dest) {
+        const center = board.cellCenter(preview.dest.x, preview.dest.y)
+        ctx.strokeStyle = preview.attack ? TRACK_COLOR : 'rgba(255,255,255,0.6)'
+        ctx.beginPath()
+        ctx.arc(center.x, center.y, t * 0.22, 0, Math.PI * 2)
+        ctx.stroke()
+      }
+    }
+  }
+
+  /** Hover outline + square name under the cursor. */
+  private drawHoverCursor(ctx: CanvasRenderingContext2D, game: Game): void {
+    const cell = game.hoverCell
+    if (!cell || !game.board.inBounds(cell.x, cell.y)) return
+    const t = game.board.tile
+    const color =
+      game.hoverAttackTarget !== null
+        ? TRACK_COLOR
+        : game.hoverPreview.length > 0
+          ? 'rgba(255,255,255,0.7)'
+          : 'rgba(255,255,255,0.3)'
+    ctx.strokeStyle = color
+    ctx.lineWidth = 2 / this.camera.zoom
+    ctx.strokeRect(cell.x * t + 1, cell.y * t + 1, t - 2, t - 2)
+    ctx.fillStyle = color
+    ctx.font = `${t * 0.26}px ui-monospace, monospace`
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'top'
+    ctx.fillText(coordName(cell.x, cell.y, game.board.height), cell.x * t + t * 0.08, cell.y * t + t * 0.06)
+  }
+
+  /** Chess coordinates in the margin around the board (screen space). */
+  private drawCoords(ctx: CanvasRenderingContext2D, game: Game): void {
+    const board = game.board
+    const tileScreen = board.tile * this.camera.zoom
+    if (tileScreen < 11) return
+    const topLeft = this.camera.worldToScreen(0, 0)
+    const bottomRight = this.camera.worldToScreen(board.pixelWidth, board.pixelHeight)
+    ctx.fillStyle = 'rgba(201,209,217,0.55)'
+    ctx.font = `${Math.min(13, Math.max(9, tileScreen * 0.34))}px ui-monospace, monospace`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    for (let x = 0; x < board.width; x++) {
+      const sx = topLeft.x + (x + 0.5) * tileScreen
+      if (sx < 6 || sx > this.camera.viewportWidth - 6) continue
+      ctx.fillText(fileLabel(x), sx, bottomRight.y + 4)
+    }
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'middle'
+    for (let y = 0; y < board.height; y++) {
+      const sy = topLeft.y + (y + 0.5) * tileScreen
+      if (sy < 10 || sy > this.camera.viewportHeight - 10) continue
+      ctx.fillText(String(board.height - y), topLeft.x - 4, sy)
+    }
   }
 
   /** Nominal weapon range: circle, pawn forward half-disc, knight 8 dots. */
@@ -286,10 +429,22 @@ export class Renderer {
     ctx.setLineDash([])
   }
 
-  private drawPieces(ctx: CanvasRenderingContext2D, game: Game): void {
+  private drawPieces(
+    ctx: CanvasRenderingContext2D,
+    game: Game,
+    scoped: Array<{ e: Entity; full: boolean }>,
+  ): void {
     const t = game.board.tile
     const entities = game.world.query(Position, Render, Health, PieceType)
     const sorted = entities.slice().sort((a, b) => game.world.require(a, Position).y - game.world.require(b, Position).y)
+
+    // Target rings follow the same scope as orders/overlays: only enemies being
+    // tracked by a scoped piece's attack order get a ring.
+    const targeted = new Set<Entity>()
+    for (const { e } of scoped) {
+      const od = game.world.get(e, Order)
+      if (od?.kind === 'attack' && od.target !== null) targeted.add(od.target)
+    }
 
     for (const e of sorted) {
       const pos = game.world.require(e, Position)
@@ -302,15 +457,14 @@ export class Renderer {
       ctx.ellipse(pos.x, pos.y + size * 0.3, size * 0.4, size * 0.18, 0, 0, Math.PI * 2)
       ctx.fill()
 
-      ctx.beginPath()
-      ctx.arc(pos.x, pos.y, size * 0.46, 0, Math.PI * 2)
-      ctx.fillStyle = render.tint
-      ctx.globalAlpha = 0.16
-      ctx.fill()
-      ctx.globalAlpha = 1
-      ctx.strokeStyle = render.tint
-      ctx.lineWidth = 1.5 / this.camera.zoom
-      ctx.stroke()
+      // Pieces have no default ring; a red ring marks a piece under attack order.
+      if (targeted.has(e)) {
+        ctx.strokeStyle = TRACK_COLOR
+        ctx.lineWidth = 2.5 / this.camera.zoom
+        ctx.beginPath()
+        ctx.arc(pos.x, pos.y, size * 0.62, 0, Math.PI * 2)
+        ctx.stroke()
+      }
 
       ctx.fillStyle = render.tint
       ctx.font = `${size * 0.92}px "Segoe UI Symbol", "Apple Symbols", serif`
@@ -318,9 +472,36 @@ export class Renderer {
       ctx.textBaseline = 'middle'
       ctx.fillText(render.glyph, pos.x, pos.y + size * 0.04)
 
-      if (game.overlays.health && health.cur < health.max) {
-        this.drawHealthBar(ctx, pos.x, pos.y - size * 0.58, size, health.cur / health.max, render.tint)
+      // Two stacked bars: health (team-tinted) and weapon reload (cyan), so it
+      // is always clear both how hurt a piece is and whether it can fire.
+      const barY = pos.y - size * 0.62
+      if (game.overlays.health) {
+        this.drawHealthBar(ctx, pos.x, barY, size, health.cur / health.max, render.tint)
       }
+      const weapon = game.world.get(e, Weapon)
+      const kind = game.world.get(e, PieceType)?.kind
+      const def = kind ? PIECES[kind] : undefined
+      if (weapon && def) {
+        const cd = WEAPONS[def.weapon].cooldown
+        if (cd > 0) this.drawReloadBar(ctx, pos.x, barY + size * 0.12, size, 1 - weapon.left / cd)
+      }
+
+      const team = game.world.get(e, Team)
+      const stanceComp = game.world.get(e, Stance)?.mode ?? 'hold'
+      const stance = team && game.teams[team].controller === 'ai' ? 'fight' : stanceComp
+      const order = game.world.get(e, Order)
+      const bx = pos.x + size * 0.34
+      const by = pos.y + size * 0.36
+      const br = size * 0.17
+      ctx.fillStyle = order?.kind === 'attack' ? TRACK_COLOR : STANCE_COLORS[stance] ?? '#888'
+      ctx.beginPath()
+      ctx.arc(bx, by, br, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#0b0f16'
+      ctx.font = `bold ${br * 1.5}px ui-monospace, monospace`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(stance[0].toUpperCase(), bx, by + br * 0.06)
 
       if (game.selected.includes(e)) {
         ctx.strokeStyle = '#ffd166'
@@ -330,6 +511,26 @@ export class Renderer {
         ctx.stroke()
       }
     }
+  }
+
+  private drawReloadBar(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    ratio: number,
+  ): void {
+    const w = width * 0.8
+    const h = Math.max(2, width * 0.06)
+    const left = x - w / 2
+    const r = Math.max(0, Math.min(1, ratio))
+    ctx.fillStyle = 'rgba(0,0,0,0.65)'
+    ctx.fillRect(left, y, w, h)
+    ctx.fillStyle = r >= 1 ? '#7ad7ff' : '#3aa0d0'
+    ctx.fillRect(left, y, w * r, h)
+    ctx.strokeStyle = 'rgba(122,215,255,0.5)'
+    ctx.lineWidth = 1 / this.camera.zoom
+    ctx.strokeRect(left, y, w, h)
   }
 
   private drawHealthBar(

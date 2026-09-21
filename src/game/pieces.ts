@@ -58,6 +58,8 @@ export const PROJECTILES: Record<string, ProjectileDef> = {
 export const WEAPONS: Record<string, WeaponDef> = {
   pawnShot: {
     key: 'pawnShot',
+    // chess capture: the two forward diagonals (a piece directly ahead blocks
+    // the pawn, as in chess; it is not a valid target).
     geometry: { kind: 'slide', dirs: [[1, -1], [-1, -1]], range: 1 },
     damage: 7,
     cooldown: 1.3,

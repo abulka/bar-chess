@@ -1,5 +1,7 @@
-import { Dead, Health, Team } from '../components'
+import { Dead, Health, Target, Team } from '../components'
 import type { System } from '../pipeline'
+
+const UNDER_FIRE_TICKS = 90
 
 const system: System = {
   name: 'damage',
@@ -12,6 +14,12 @@ const system: System = {
 
       const amount = Math.max(1, Math.round(cmd.amount * ctx.rng.range(0.9, 1.1)))
       health.cur = Math.max(0, health.cur - amount)
+
+      const targetComp = ctx.world.get(target, Target)
+      if (targetComp && cmd.source !== null) {
+        targetComp.lastAttacker = cmd.source
+        targetComp.underFireUntil = ctx.tick + UNDER_FIRE_TICKS
+      }
 
       const team = ctx.world.get(target, Team)
       ctx.bus.emit('damage', `#${target} took ${amount} dmg (hp ${health.cur}/${health.max})`, {

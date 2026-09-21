@@ -11,6 +11,18 @@ const system: System = {
     const board = ctx.board
     const occupancy = buildOccupancy(ctx.world, board)
 
+    // Serialized turns: only one piece moves at a time so a turn (and its
+    // replay) reads as a sequence of individual moves rather than a blur.
+    let anyMoving = false
+    if (ctx.turnActive) {
+      for (const e of ctx.world.query(Motion)) {
+        if (ctx.world.get(e, Motion)?.moving) {
+          anyMoving = true
+          break
+        }
+      }
+    }
+
     for (const e of ctx.world.query(Motion, Cell, Position, PieceType, Team)) {
       const motion = ctx.world.require(e, Motion)
       const cell = ctx.world.require(e, Cell)
@@ -44,7 +56,7 @@ const system: System = {
         continue
       }
 
-      if (ctx.turnActive && motion.movedThisTurn) continue
+      if (ctx.turnActive && (motion.movedThisTurn || anyMoving)) continue
       if (motion.cooldown > 0) continue
       if (motion.path.length === 0) {
         motion.arrived = true
@@ -71,9 +83,10 @@ const system: System = {
       motion.toX = center.x
       motion.toY = center.y
       const span = Math.max(Math.abs(next.x - cell.x), Math.abs(next.y - cell.y))
-      motion.travel = Math.min(def.moveCooldown, 0.1 + 0.07 * span)
+      motion.travel = Math.min(def.moveCooldown, 0.08 + 0.05 * span)
       motion.elapsed = 0
       motion.moving = true
+      if (ctx.turnActive) anyMoving = true
       motion.arrived = false
       motion.blocked = false
       motion.movedThisTurn = true

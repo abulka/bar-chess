@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Game } from '../game/game'
-import type { IntentMode, Vec2 } from '../game/types'
+import type { Vec2 } from '../game/types'
 import { Renderer } from '../render/renderer'
 
 const props = defineProps<{
   game: Game
-  orderMode: IntentMode
 }>()
 
 const emit = defineEmits<{ (e: 'changed'): void }>()
@@ -78,6 +77,9 @@ function onPointerDown(event: PointerEvent): void {
 }
 
 function onPointerMove(event: PointerEvent): void {
+  // Always track the hovered cell so orders can be previewed.
+  props.game.setHover(cellAt(event))
+  emit('changed')
   if (!pointerDown) return
   const p = pointerPos(event)
   if (Math.abs(p.x - lastX) > DRAG_THRESHOLD || Math.abs(p.y - lastY) > DRAG_THRESHOLD) moved = true
@@ -123,8 +125,12 @@ function onPointerUp(event: PointerEvent): void {
 
 function onContextMenu(event: MouseEvent): void {
   event.preventDefault()
-  const dest = cellAt(event)
-  props.game.orderSelected(props.orderMode, dest)
+  props.game.orderAt(cellAt(event))
+  emit('changed')
+}
+
+function onPointerLeave(): void {
+  props.game.setHover(null)
   emit('changed')
 }
 
@@ -175,6 +181,7 @@ onBeforeUnmount(() => {
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
+      @pointerleave="onPointerLeave"
       @wheel="onWheel"
       @contextmenu="onContextMenu"
     />

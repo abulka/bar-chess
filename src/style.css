@@ -6,7 +6,7 @@
   --border: #232b36;
   --text: #c9d1d9;
   --muted: #7d8794;
-  --red: #ff6b5a;
+  --red: #ff9f43;
   --blue: #5ab0ff;
   --accent: #ffd166;
 }
@@ -128,13 +128,106 @@ input {
 /* ---------- stage ---------- */
 .stage {
   display: grid;
-  grid-template-columns: 216px minmax(0, 1fr) 216px;
+  grid-template-columns: 170px 200px minmax(0, 1fr) 200px 170px;
   min-height: 0;
   overflow: hidden;
 }
 
 .stage.no-rosters {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: 170px minmax(0, 1fr) 170px;
+}
+
+.rail {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--bg);
+  font-size: 11px;
+}
+
+.rail.left {
+  border-right: 1px solid var(--border);
+}
+
+.rail.right {
+  border-left: 1px solid var(--border);
+}
+
+.rail-title {
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 8px 0 4px;
+}
+
+.rail-title:first-child {
+  margin-top: 0;
+}
+
+.hints,
+.legend {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.hints b,
+.legend b {
+  color: var(--text);
+}
+
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.sw {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.sw-move {
+  background: rgba(90, 176, 255, 0.3);
+  border: 1px solid rgba(90, 176, 255, 0.8);
+}
+
+.sw-attack {
+  border: 2px solid rgba(255, 90, 70, 0.9);
+}
+
+.sw-path {
+  border: 1px dashed #ffd166;
+}
+
+.hover-readout {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.hover-readout .muted {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.copy-btn {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.stance-label {
+  color: var(--muted);
+  align-self: center;
+  margin-right: 2px;
 }
 
 .center {
@@ -175,20 +268,7 @@ input {
   pointer-events: none;
 }
 
-.hints {
-  flex: 0 0 auto;
-  margin: 0;
-  padding: 5px 10px;
-  list-style: none;
-  border-top: 1px solid var(--border);
-  color: var(--muted);
-  background: var(--panel);
-  line-height: 1.5;
-}
 
-.hints li b {
-  color: var(--text);
-}
 
 /* ---------- roster ---------- */
 .roster {

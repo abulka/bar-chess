@@ -1,4 +1,4 @@
-import { Cell, Health, Intent, Motion, PieceType, Position, Render, Target, Team, Weapon } from '../ecs/components'
+import { Cell, Health, Motion, Order, PieceType, Position, Render, Stance, Target, Team, Weapon } from '../ecs/components'
 import type { Entity } from '../ecs/world'
 import type { SimContext } from '../ecs/types'
 import { TEAM_COLORS } from './constants'
@@ -16,8 +16,9 @@ export function createPiece(ctx: SimContext, team: 'red' | 'blue', def: PieceDef
   world.add(e, PieceType, { kind: def.key })
   world.add(e, Render, { glyph: def.glyph, tint: TEAM_COLORS[team], size: def.size })
   world.add(e, Health, { cur: def.hp, max: def.hp })
-  world.add(e, Intent, { mode: 'hold', dest: null, player: false })
-  world.add(e, Target, { entity: null, retargetAt: 0 })
+  world.add(e, Stance, { mode: 'hold' })
+  world.add(e, Order, { kind: 'none', dest: null, target: null })
+  world.add(e, Target, { entity: null, retargetAt: 0, lastAttacker: null, underFireUntil: 0 })
   world.add(e, Weapon, { left: ctx.rng.range(0, 0.5) })
   world.add(e, Motion, {
     goal: null,
