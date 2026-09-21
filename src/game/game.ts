@@ -177,6 +177,8 @@ export class Game {
   terrainVersion = 0
   playerTeam: TeamId = 'blue'
   gameMode: GameMode = 'human-vs-ai'
+  /** Global order mode: decides what a right-click issues. */
+  orderMode: 'move' | 'attack' = 'move'
 
   overlays: OverlayFlags = {
     grid: true,
@@ -610,30 +612,23 @@ export class Game {
     this.selected = []
   }
 
-  /** Set the autonomous stance for the selection and clear any active order. */
-  setStance(mode: StanceMode): void {
+  /**
+   * Set the global order mode (what a right-click issues) and apply the same
+   * policy to the current selection. Active orders are left alone, so the mode
+   * can be set and then reused across many pieces and targets.
+   */
+  setOrderMode(mode: StanceMode): void {
+    if (mode === 'move' || mode === 'attack') this.orderMode = mode
     let n = 0
     for (const e of this.selected) {
       if (!this.world.isAlive(e)) continue
       const team = this.world.get(e, Team)
       if (!team || !this.commandable(team)) continue
       const stance = this.world.get(e, Stance)
-      const order = this.world.get(e, Order)
-      const motion = this.world.get(e, Motion)
       if (stance) stance.mode = mode
-      if (order) {
-        order.kind = 'none'
-        order.dest = null
-        order.target = null
-      }
-      if (motion) {
-        motion.goal = null
-        motion.path = []
-        motion.arrived = true
-      }
       n++
     }
-    this.bus.emit('info', `${n} piece(s) stance: ${mode}`)
+    this.bus.emit('info', `order mode: ${this.orderMode} (${n} piece(s) stance: ${mode})`)
   }
 
   /** A piece can be commanded only when its team is under human control. */
@@ -657,10 +652,9 @@ export class Game {
       const occupantTeam = occupant !== undefined && occupant !== e ? this.world.get(occupant, Team) : undefined
       const enemyOccupied =
         occupant !== undefined && occupant !== e && occupantTeam !== undefined && occupantTeam !== team
-      // Only the Attack stance attacks on right-click; Move/None treat an
-      // occupied square as a plain move order (no target).
-      const stanceMode = this.world.get(e, Stance)?.mode ?? 'none'
-      const attacking = enemyOccupied && stanceMode === 'attack'
+      // The global order mode decides: in Attack mode a right-click on an enemy
+      // is an attack order, otherwise an occupied square is a plain move.
+      const attacking = enemyOccupied && this.orderMode === 'attack'
       if (attacking) {
         order.kind = 'attack'
         order.target = occupant
@@ -668,6 +662,9 @@ export class Game {
         motion.goal = null
         motion.path = []
         motion.arrived = true
+        // Ordered to attack, so the piece stays in Attack afterwards.
+        const stance = this.world.get(e, Stance)
+        if (stance) stance.mode = 'attack'
         // Plan the route to a firing position now so it is visible while paused.
         order.reachable = this.planAttack(e, motion, occupant)
       } else {

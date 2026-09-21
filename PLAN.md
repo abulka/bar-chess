@@ -61,17 +61,21 @@ on the piece and set with the toolbar buttons or `1`/`m` (Move) and `2`/`a`
 - **Attack** (`2` or `a`, red) — seek and attack nearby targets, prefer damaged
   ones, and flee when below 30% HP. Does not chase across the board.
 
+A **global order mode** (Move / Attack, chosen in the toolbar or with `1`/`m` and
+`2`/`a`) decides what a right-click issues. It persists across selections, so
+attacks can be issued over many pieces and targets.
+
 **Order** is a one-shot instruction that overrides stance until fulfilled:
 
-- **Right-click an empty square** → *goto*: move toward it. This is an
-  **objective**, not a strict destination: each selected piece advances as far as
-  its own geometry allows, so a pawn ordered to an off-file square still marches
-  forward up its own file.
-- **Right-click an enemy piece** → *attack* (only while in the **Attack**
-  stance): become glued to that enemy, follow it, and fire when possible. Shown
-  as a **red** tracking chain + a **red ring** around the targeted enemy. A
-  Move/no-stance piece treats an occupied square as a plain move (best-effort
-  advance), never as a target, and a move order clears any stale target.
+- **Right-click an empty square** → *goto* in either mode: move toward it. This is
+  an **objective**, not a strict destination: each selected piece advances as far
+  as its own geometry allows, so a pawn ordered to an off-file square still
+  marches forward up its own file.
+- **Right-click an enemy piece** → *attack* in **Attack** mode: become glued to
+  that enemy, follow it, and fire when possible. Shown as a **red** tracking chain
+  + a **red ring** around the targeted enemy. In Move mode an occupied square is a
+  plain move (best-effort advance), never a target, and a move order clears any
+  stale target.
 - Re-issuing an order just keeps/refreshes it (no toggle); `c` or `Backspace`
   clears orders on the selection.
 - The attack's route is always shown and **theoretical**: it assumes other pieces
@@ -90,10 +94,10 @@ on the piece and set with the toolbar buttons or `1`/`m` (Move) and `2`/`a`
   line, falling back to a friendly-passable plan when the piece is boxed in, and
   always draws a connector from the end of that route to the objective so a
   partial route never dead-ends in mid-air.
-- Issuing an attack does not change the persistent stance: the piece stays in
-  Attack while the order runs, and when the target dies the order clears but the
-  piece **stays in Attack** — so a follow-up right-click attacks again and it
-  keeps engaging nearby enemies until the player changes the stance.
+- An attack sets the ordered piece's stance to Attack; when the target dies the
+  order clears but the piece **stays in Attack**, so it keeps engaging nearby
+  enemies until the player changes the stance. The global mode is unchanged by
+  orders, so a follow-up right-click on another enemy attacks again.
 - Only pieces whose team is under human control can be commanded: your own team
   in Human-vs-AI, **both** teams in Human-vs-Human, nobody in AI-vs-AI. Enemy
   pieces remain selectable for inspection.
@@ -170,7 +174,7 @@ selected pieces to keep the board readable.
 
 Mouse: **drag** to box-select (any cell the box touches; shift-click adds),
 **shift-drag** or middle-drag to pan, **wheel** to zoom, **right-click** to
-order (goto on an empty square, attack on an enemy while in Attack stance). Hover shows a per-piece order preview (faint
+order (goto on an empty square; attack on an enemy in Attack mode). Hover shows a per-piece order preview (faint
 ghosts) and the square name. The board is labelled with chess coordinates, and
 the control hints + stance legend live in always-visible side rails (even with
 the HUD hidden). A **Copy position JSON** button captures the full situation.

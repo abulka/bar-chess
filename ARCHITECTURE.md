@@ -359,11 +359,13 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
 `attackCells`, `rangeArcs`. `rangeArcs` is off by default; move/attack cells and
 range arcs are drawn for selected pieces only, army scopes show paths/goals/targets.
 
-Stance is chosen with the toolbar buttons or `1`/`m` (Move) and `2`/`a` (Attack);
-right-click issues an order (goto on any square, or an attack on an enemy only
-while the piece is in Attack stance). Pieces start with no stance and show no
-badge; only an explicit stance or an active attack order draws one. Toolbar
-selects/checkboxes blur after
+The toolbar sets a **global order mode** (Move / Attack) with `1`/`m` and
+`2`/`a`; it also stamps that policy onto the current selection. Right-click then
+issues an order for every selected piece: in Move mode a target square is a goto
+(enemy or not), in Attack mode an enemy square is an attack order. The mode
+persists, so attacks can be issued across many pieces and targets. Pieces start
+with no stance and show no badge; only an explicit stance or an active attack
+order draws one. Toolbar selects/checkboxes blur after
 use so the global shortcuts always reach the window. Drag box-selection selects
 any piece whose cell the box touches (`Game.selectRect`), shift-click adds,
 shift/middle-drag pans. Hovering computes a per-selected-piece order preview
@@ -371,12 +373,13 @@ shift/middle-drag pans. Hovering computes a per-selected-piece order preview
 Chess coordinates (`coordName`) label the board margins. The right rail has a
 **Copy position JSON** button (`Game.toDebugJson`) for debugging snapshots.
 
-Keyboard: `1`/`m` Move and `2`/`a` Attack stance, `space` turn, `p` pause, `s`
-step, `r` replay, `c`/`Backspace` clear orders, `o` my orders, `e` enemy plans,
-`h` HUD, `Esc` clear selection. `Game.orderAt` makes a goto on any square and an
-attack on an enemy only in Attack stance; re-issuing the same order keeps it, and
-only pieces under human control can be commanded. An attack does not change the
-persistent stance; its badge shows a red **A** while the order is active. The
+Keyboard: `1`/`m` Move and `2`/`a` Attack order mode, `space` turn, `p` pause,
+`s` step, `r` replay, `c`/`Backspace` clear orders, `o` my orders, `e` enemy
+plans, `h` HUD, `Esc` clear selection. `Game.orderAt` makes a goto on any square
+in Move mode and an attack on an enemy in Attack mode (`Game.orderMode`);
+re-issuing the same order keeps it, and only pieces under human control can be
+commanded. An attack sets the ordered piece to Attack (red **A** badge) and it
+stays in Attack after the order clears. The
 attack navigation is theoretical: a gold dashed route planned as if the board
 were clear (only walls and the target's square avoided), ending on a genuine
 firing cell or the closest empty reachable cell. The firing line from there to

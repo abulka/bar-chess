@@ -13,7 +13,7 @@ import type { StanceMode, TeamId } from './game/types'
 
 const game = new Game(8)
 const snapshot = shallowRef<GameSnapshot>(game.snapshot())
-const stance = ref<StanceMode>('none')
+const stance = ref<StanceMode>('move')
 const copied = ref(false)
 const boardView = ref<InstanceType<typeof BoardView> | null>(null)
 
@@ -40,8 +40,8 @@ function onSetGameMode(mode: GameMode): void {
 }
 
 function onSetStance(mode: StanceMode): void {
-  if (game.selected.length > 0) game.setStance(mode)
   stance.value = mode
+  game.setOrderMode(mode)
   refresh()
 }
 
