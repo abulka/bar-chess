@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import type { OrderStep } from '../../src/ecs/components'
 import { WEAPONS } from '../../src/game/pieces'
+import { queueMarkers } from '../../src/game/queue'
 import { firingLine, routePolyline } from '../../src/render/overlays'
 import { flatBoard, occupiedCells } from '../helpers'
 
@@ -14,6 +16,24 @@ describe('routePolyline', () => {
       center(4, 5),
       center(5, 5),
     ])
+  })
+})
+
+describe('queueMarkers', () => {
+  it('marks the endpoint of each queued step in order', () => {
+    const steps: OrderStep[] = [
+      { kind: 'goto', dest: { x: 2, y: 2 }, path: [{ x: 1, y: 1 }, { x: 2, y: 2 }] },
+      { kind: 'attack', target: 7, path: [{ x: 3, y: 3 }], goal: { x: 3, y: 3 }, reachable: true },
+    ]
+    expect(queueMarkers(steps)).toEqual([
+      { cell: { x: 2, y: 2 }, index: 0, kind: 'goto' },
+      { cell: { x: 3, y: 3 }, index: 1, kind: 'attack' },
+    ])
+  })
+
+  it('falls back to the objective when a step has no planned path', () => {
+    const steps: OrderStep[] = [{ kind: 'goto', dest: { x: 5, y: 5 }, path: [] }]
+    expect(queueMarkers(steps)).toEqual([{ cell: { x: 5, y: 5 }, index: 0, kind: 'goto' }])
   })
 })
 

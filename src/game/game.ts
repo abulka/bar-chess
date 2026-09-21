@@ -18,7 +18,7 @@ import {
   Target,
   Team,
 } from '../ecs/components'
-import type { MotionData } from '../ecs/components'
+import type { MotionData, OrderData, OrderStep } from '../ecs/components'
 import { Board } from './board'
 import type { BoardSize, Placement } from './boards'
 import { createBoardData, initialArmy } from './boards'
@@ -33,6 +33,7 @@ import type { Occupancy } from './occupancy'
 import type { StanceMode, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { findPath } from './pathfind'
+import { anchorFor, planStep } from './queue'
 import { buildBoard, buildWorldSnapshot, serializePosition, validatePosition } from './position'
 import type { SavedPosition } from './position'
 import { formatForLlm, formatShorthand } from './shorthand'
@@ -661,7 +662,12 @@ export class Game {
     return this.teams[team].controller === 'human'
   }
 
-  /** Right-click: attack the enemy on `cell`, otherwise move toward it. */
+  /**
+   * Right-click: create an order for a piece with nothing planned, otherwise
+   * append a step to its queue. In Attack mode an enemy square is an attack
+   * step; otherwise it is a move. A move on an un-queued attacker still
+   * suspends/regroups instead of queueing behind the attack.
+   */
   orderAt(cell: Vec2): void {
     if (!this.board.inBounds(cell.x, cell.y)) return
     const occ = buildOccupancy(this.world, this.board)
@@ -677,49 +683,18 @@ export class Game {
       const occupantTeam = occupant !== undefined && occupant !== e ? this.world.get(occupant, Team) : undefined
       const enemyOccupied =
         occupant !== undefined && occupant !== e && occupantTeam !== undefined && occupantTeam !== team
-      // The global order mode decides: in Attack mode a right-click on an enemy
-      // is an attack order, otherwise an occupied square is a plain move.
       const attacking = enemyOccupied && this.orderMode === 'attack'
-      if (attacking) {
-        order.kind = 'attack'
-        order.target = occupant
-        order.dest = null
-        order.resumeTarget = null
-        order.resumeTurn = -1
-        motion.goal = null
-        motion.path = []
-        motion.arrived = true
-        // Ordered to attack, so the piece stays in Attack afterwards.
-        const stance = this.world.get(e, Stance)
-        if (stance) stance.mode = 'attack'
-        // Plan the route to a firing position now so it is visible while paused.
-        order.reachable = this.planAttack(e, motion, occupant)
+      const activeEmpty = order.kind === 'none' && order.queue.length === 0
+
+      if (activeEmpty) {
+        if (attacking) this.startAttack(e, order, motion, occupant as Entity)
+        else this.startGoto(e, order, motion, cell, occ, team)
+      } else if (order.kind === 'attack' && order.queue.length === 0 && !attacking) {
+        // A move issued on an un-queued attacking piece suspends the attack:
+        // park the target so it resumes after the regroup window.
+        this.startGoto(e, order, motion, cell, occ, team)
       } else {
-        // A move issued on an attacking piece suspends the attack: park the
-        // target so it resumes after the regroup window (see ai system).
-        const parked =
-          order.kind === 'attack' &&
-          order.target !== null &&
-          this.world.isAlive(order.target) &&
-          this.world.has(order.target, Cell)
-            ? order.target
-            : order.resumeTarget
-        order.kind = 'goto'
-        order.dest = cell
-        order.target = null
-        order.resumeTarget = parked
-        order.resumeTurn = -1
-        // A plain move must not leave a stale combat target behind; a suspended
-        // attack keeps lastAttacker/underFire so it can still kite while retreating.
-        const t = this.world.get(e, Target)
-        if (t && parked === null) {
-          t.entity = null
-          t.lastAttacker = null
-        }
-        motion.goal = cell
-        // Fall back to a friendly-passable route when boxed in, so a blocked
-        // move still shows a path instead of a bare straight line.
-        this.planNow(e, motion, cell, occupiedExcept(this.board, occ, e), this.friendlyPass(occ, e, team))
+        this.appendStep(e, order, motion, cell, attacking ? (occupant as Entity) : null, team)
       }
       n++
     }
@@ -728,6 +703,97 @@ export class Game {
     } else {
       this.bus.emit('info', `orders: ${n} move toward ${coordName(cell.x, cell.y, this.board.height)}`)
     }
+  }
+
+  private startAttack(e: Entity, order: OrderData, motion: MotionData, target: Entity): void {
+    order.kind = 'attack'
+    order.target = target
+    order.dest = null
+    order.resumeTarget = null
+    order.resumeTurn = -1
+    motion.goal = null
+    motion.path = []
+    motion.arrived = true
+    // Ordered to attack, so the piece stays in Attack afterwards.
+    const stance = this.world.get(e, Stance)
+    if (stance) stance.mode = 'attack'
+    // Plan the route to a firing position now so it is visible while paused.
+    order.reachable = this.planAttack(e, motion, target)
+  }
+
+  private startGoto(
+    e: Entity,
+    order: OrderData,
+    motion: MotionData,
+    cell: Vec2,
+    occ: Occupancy,
+    team: TeamId,
+  ): void {
+    const parked =
+      order.kind === 'attack' &&
+      order.target !== null &&
+      this.world.isAlive(order.target) &&
+      this.world.has(order.target, Cell)
+        ? order.target
+        : order.resumeTarget
+    order.kind = 'goto'
+    order.dest = { x: cell.x, y: cell.y }
+    order.target = null
+    order.resumeTarget = parked
+    order.resumeTurn = -1
+    // A plain move must not leave a stale combat target behind; a suspended
+    // attack keeps lastAttacker/underFire so it can still kite while retreating.
+    const t = this.world.get(e, Target)
+    if (t && parked === null) {
+      t.entity = null
+      t.lastAttacker = null
+    }
+    motion.goal = { x: cell.x, y: cell.y }
+    // Fall back to a friendly-passable route when boxed in, so a blocked move
+    // still shows a path instead of a bare straight line.
+    this.planNow(e, motion, cell, occupiedExcept(this.board, occ, e), this.friendlyPass(occ, e, team))
+  }
+
+  private appendStep(
+    e: Entity,
+    order: OrderData,
+    motion: MotionData,
+    cell: Vec2,
+    attackTarget: Entity | null,
+    team: TeamId,
+  ): void {
+    const kind = this.world.get(e, PieceType)?.kind
+    const from = this.world.get(e, Cell)
+    const def = kind ? PIECES[kind] : undefined
+    if (!def || !from) return
+    const last = order.queue[order.queue.length - 1] ?? null
+    const anchor = anchorFor(order, motion, from)
+
+    if (attackTarget !== null) {
+      if (
+        (order.kind === 'attack' && order.target === attackTarget) ||
+        (last?.kind === 'attack' && last.target === attackTarget)
+      ) {
+        return
+      }
+      const tcell = this.world.get(attackTarget, Cell) ?? null
+      const step: OrderStep = { kind: 'attack', target: attackTarget, path: [], goal: null, reachable: true }
+      planStep(this.board, anchor, step, def, team, tcell)
+      order.queue.push(step)
+      const stance = this.world.get(e, Stance)
+      if (stance) stance.mode = 'attack'
+      return
+    }
+
+    if (
+      (order.kind === 'goto' && order.dest && order.dest.x === cell.x && order.dest.y === cell.y) ||
+      (last?.kind === 'goto' && last.dest.x === cell.x && last.dest.y === cell.y)
+    ) {
+      return
+    }
+    const step: OrderStep = { kind: 'goto', dest: { x: cell.x, y: cell.y }, path: [] }
+    planStep(this.board, anchor, step, def, team)
+    order.queue.push(step)
   }
 
   clearOrders(): void {
@@ -744,6 +810,7 @@ export class Game {
         order.target = null
         order.resumeTarget = null
         order.resumeTurn = -1
+        order.queue.length = 0
       }
       if (motion) {
         motion.goal = null
@@ -782,7 +849,11 @@ export class Game {
         continue
       }
       const blocked = occupiedExcept(this.board, occ, e)
-      const result = findPath(this.board, fromCell, cell, def.move, team, blocked)
+      // With a queue, preview the appended leg from the end of the plan.
+      const order = this.world.get(e, Order)
+      const motion = this.world.get(e, Motion)
+      const from = order && order.queue.length > 0 && motion ? anchorFor(order, motion, fromCell) : fromCell
+      const result = findPath(this.board, from, cell, def.move, team, blocked)
       const dest = result.cells.length > 0 ? result.cells[result.cells.length - 1] : null
       this.hoverPreview.push({ entity: e, cells: result.cells, dest, attack: false })
     }
@@ -818,6 +889,7 @@ export class Game {
               reachable: order.reachable,
               resumeTarget: order.resumeTarget,
               resumeTurn: order.resumeTurn,
+              queue: order.queue,
             }
           : null,
         target: target ? { entity: target.entity, lastAttacker: target.lastAttacker } : null,

@@ -42,8 +42,9 @@ const FORMAT_LEGEND =
   '# fmt: r|b + piece(PNBRQK) + cell; hp=cur/max; @M=move @A=attack stance; goto=<cell>; ' +
   'atk=#id(cell)[!]=attack order (! positionally unreachable); tgt=#id(cell) current target; ' +
   'fire=#id under retaliation; goal=<cell> path end; path=hop>hop (A* move hops); blk=route blocked; ' +
-  'moving=mid-hop; res=<cell> reserved next cell; park=#id suspended attack; w=weapon reload seconds; ' +
-  'grid red=Upper blue=lower. terrain: . floor : road , sand ~ water # wall'
+  'moving=mid-hop; res=<cell> reserved next cell; park=#id suspended attack; ' +
+  'q=step>step queued steps after the active order (cell=goto, atk#id(cell)=attack); ' +
+  'w=weapon reload seconds; grid red=Upper blue=lower. terrain: . floor : road , sand ~ water # wall'
 
 /**
  * One-time context for an LLM reading the shorthand. Prepend to a position when
@@ -64,6 +65,7 @@ Reading a position block:
   @M | @A                stance: M=move (return fire only), A=attack (auto-engage nearby)
   goto=<cell>            standing move order (park=<#id(cell)> if an attack is suspended for it)
   atk=#id(cell)          standing attack order ('!' = target positionally unreachable, e.g. wrong colour)
+  q=a>b>atk#id(cell)     queued steps after the active order (cell=goto, atk#id=attack), run in sequence
   tgt=#id(cell)          current auto-acquired or retaliated target
   goal=<cell>            current motion goal (where the planned path ends)
   path=a>b>c             planned route waypoints; each is one move hop, not every traversed square
@@ -153,6 +155,14 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
       }
     } else if (order.kind === 'attack' && order.target !== null) {
       flags.push(`atk=${refName(game, width, height, order.target)}${order.reachable ? '' : '!'}`)
+    }
+    if (order.queue.length > 0) {
+      const steps = order.queue
+        .map((step) =>
+          step.kind === 'goto' ? cellName(width, height, step.dest) : `atk${refName(game, width, height, step.target)}`,
+        )
+        .join('>')
+      flags.push(`q=${steps}`)
     }
 
     if (target.entity !== null && game.world.isAlive(target.entity)) {

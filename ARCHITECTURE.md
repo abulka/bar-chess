@@ -92,7 +92,7 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Render` | `{ glyph, tint, size }` | unicode glyph + team tint |
 | `Health` | `{ cur, max }` | |
 | `Stance` | `{ mode }` | persistent policy: `none` / `move` / `attack` (`none` stands ground and fires in range, with no badge) |
-| `Order` | `{ kind, dest, target, reachable, resumeTarget, resumeTurn }` | one-shot: `none` / `goto` / `attack`; `reachable` marks an attack target that is positionally attainable; `resumeTarget`/`resumeTurn` park an attack while a goto suspends it |
+| `Order` | `{ kind, dest, target, reachable, resumeTarget, resumeTurn, queue }` | active step is one-shot `none` / `goto` / `attack`; `reachable` marks an attack target that is positionally attainable; `resumeTarget`/`resumeTurn` park an attack while a goto suspends it; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence |
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping |
 | `Weapon` | `{ left }` | seconds until next shot |
 | `Motion` | `{ goal, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn }` | grid movement + render interpolation; `reserved` is the cell being entered |
@@ -255,6 +255,16 @@ cell/reservation during movement validation and path planning.
   has elapsed *and* it is no longer under fire, or clears the order if the parked
   target is gone. `ctx.turn` is a monotonic turn index captured in `TurnState` so
   rewind/replay stay deterministic.
+  When the active step finishes — a goto arrival, an attack target's death, or a
+  goto whose destination the piece's movement geometry can *never* reach
+  (`destReachable` via `reachableCells`) — `promoteNext` (`src/game/queue.ts`)
+  shifts the first queued step into the active slot instead of clearing, and
+  `rechainQueue` re-plans the remaining steps from the piece's new cell. A
+  waypoint merely blocked by pieces is reachable and therefore **waits**, exactly
+  like a single goto order, so a queue is never lost to a temporary jam; an
+  unreachable waypoint is skipped with a `warn` event. A promoted goto keeps any
+  `resumeTarget`, so a suspended attack resumes only after the whole queue has
+  drained; a promoted attack clears it.
 - **pathfinding** — budgeted A* (`PATH_BUDGET_PER_TICK`) over the piece's
   movement geometry, with other pieces passed in as blockers (excluding the
   piece itself). Unreachable goals fall back to the nearest reachable cell. An
@@ -378,8 +388,16 @@ range arcs are drawn for selected pieces only, army scopes show paths/goals/targ
 The toolbar sets a **global order mode** (Move / Attack) with `1`/`m` and
 `2`/`a`; it also stamps that policy onto the current selection. Right-click then
 issues an order for every selected piece: in Move mode a target square is a goto
-(enemy or not), in Attack mode an enemy square is an attack order. The mode
-persists, so attacks can be issued across many pieces and targets. Pieces start
+(enemy or not), in Attack mode an enemy square is an attack order. If the piece
+already has an active order, the click **appends** a queued step instead
+(`Game.appendStep`), so `move, move, attack` can be planned with repeated
+right-clicks; only the first right-click on an unplanned piece replaces/creates
+the active order, and `c` clears the whole plan. A move on an un-queued attacker
+still suspends/regroups rather than queueing behind the attack. The queued
+remainder is drawn by the renderer as a dim dashed chain with numbered waypoint
+markers (`queueMarkers`), and a queued attack shows a dim threat line to its
+target. The mode persists, so attacks can be issued across many pieces and
+targets. Pieces start
 with no stance and show no badge; only an explicit stance or an active attack
 order draws one. Toolbar selects/checkboxes blur after
 use so the global shortcuts always reach the window. Drag box-selection selects
@@ -419,9 +437,9 @@ into an LLM. `formatShorthand(game)` (`src/game/shorthand.ts`) emits a compact,
 line-oriented dump instead: a header (map/size/tick/turn/mode/you/winner), team
 totals, sparse non-floor terrain, an ASCII grid for boards up to 16×16, one line
 per piece with only non-default attributes (`hp`, `@M`/`@A` stance, `goto`/`atk`
-orders with `#id(cell)` references, `tgt`, `goal`, `path` hops, `blk`, `moving`,
-`w` reload, …), selection ids and in-flight projectiles. Opening 8×8 ≈ 80 tokens;
-a 16×16 mid-game ≈ 250.
+orders with `#id(cell)` references, `q` queued steps, `tgt`, `goal`, `path`
+hops, `blk`, `moving`, `w` reload, …), selection ids and in-flight projectiles.
+Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
 
 - **Copy shorthand** copies the position plus a one-line `# fmt:` legend.
 - **Copy for LLM** prepends `LLM_PREAMBLE`, a constant explaining the game,
@@ -434,7 +452,8 @@ Keyboard: `1`/`m` Move and `2`/`a` Attack order mode, `space` turn, `p` pause,
 `s` step, `r` replay, `c`/`Backspace` clear orders, `o` my orders, `e` enemy
 plans, `h` HUD, `Esc` clear selection. `Game.orderAt` makes a goto on any square
 in Move mode and an attack on an enemy in Attack mode (`Game.orderMode`);
-re-issuing the same order keeps it, and only pieces under human control can be
+re-issuing the same order appends a queued step (a duplicate of the active or
+last queued step is ignored), and only pieces under human control can be
 commanded. An attack sets the ordered piece to Attack (red **A** badge) and it
 stays in Attack after the order clears. The
 attack navigation is theoretical: a gold dashed route planned as if the board
@@ -545,6 +564,7 @@ src/
     geometry.ts                moveDestinations, fireCells, lineClear
     occupancy.ts               Cell -> entity map
     pathfind.ts                geometry A* + memoized reachableCells flood fill
+    queue.ts                   order queue: anchor/plan/rechain/promote/markers
     pieces.ts                  Piece/Weapon/Projectile defs, weaponVision
     factory.ts                 createPiece
     position.ts                SavedPosition serialize/validate/restore

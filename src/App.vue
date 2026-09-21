@@ -275,6 +275,7 @@ onBeforeUnmount(() => {
           <li><b>drag</b> select box · <b>shift-click</b> add</li>
           <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
           <li><b>right-click</b> empty → move</li>
+          <li><b>right-click</b> again → queue next move</li>
           <li><b>right-click</b> enemy → attack (Attack stance)</li>
           <li><b>1</b>/<b>m</b> Move · <b>2</b>/<b>a</b> Attack stance</li>
           <li><b>space</b> turn · <b>p</b> pause · <b>s</b> step</li>
@@ -322,6 +323,7 @@ onBeforeUnmount(() => {
           <li><span class="sw sw-move"></span> move cells</li>
           <li><span class="sw sw-attack"></span> attack cells</li>
           <li><span class="ln ln-route"></span> route / objective</li>
+          <li><span class="dot" style="background: #ffd166"></span><b>1·2·3</b> queued waypoints</li>
           <li><span class="sw sw-bar"></span> health · <span class="sw sw-reload"></span> reload (red)</li>
         </ul>
         <div class="rail-title">firing lines</div>

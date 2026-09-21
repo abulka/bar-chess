@@ -44,7 +44,9 @@ describe('Game integration', () => {
     game.orderAt({ x: 4, y: 5 })
     expect(order.kind).toBe('goto')
     expect(order.dest).toEqual({ x: 4, y: 5 })
+    expect(order.queue).toEqual([])
 
+    game.clearOrders()
     game.orderMode = 'attack'
     game.orderAt({ x: 4, y: 5 })
     expect(order.kind).toBe('attack')

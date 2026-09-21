@@ -17,6 +17,7 @@ import type { Entity } from '../ecs/world'
 import { buildOccupancy, makeOccupied } from '../game/occupancy'
 import { fireCells, moveDestinations } from '../game/geometry'
 import { PIECES, WEAPONS } from '../game/pieces'
+import { queueMarkers } from '../game/queue'
 import { resolveGeometry } from '../game/types'
 import { coordName, fileLabel } from '../game/coords'
 import type { Game } from '../game/game'
@@ -192,6 +193,10 @@ export class Renderer {
     const autoTarget = game.world.get(e, Target)?.entity ?? null
     const target = order?.kind === 'attack' ? order.target : autoTarget
 
+    // The queued remainder is drawn first, beneath the active order's route, so
+    // the immediate plan always reads on top.
+    if (order && order.queue.length > 0) this.drawQueuedRoute(ctx, game, e, pos, cell, full)
+
     // A gold route for goto/autonomous moves; attack orders draw their own red
     // route below so the two do not overlap.
     if (motion && motion.path.length > 0 && order?.kind !== 'attack') {
@@ -329,6 +334,84 @@ export class Renderer {
     for (const c of routePolyline(board, path)) ctx.lineTo(c.x, c.y)
     ctx.stroke()
     ctx.setLineDash([])
+  }
+
+  /**
+   * The queued remainder of an order: a dim dashed chain through every planned
+   * step, numbered waypoint markers, and a dashed threat line for queued attacks.
+   */
+  private drawQueuedRoute(
+    ctx: CanvasRenderingContext2D,
+    game: Game,
+    e: Entity,
+    pos: { x: number; y: number },
+    cell: { x: number; y: number },
+    full: boolean,
+  ): void {
+    const board = game.board
+    const t = board.tile
+    const order = game.world.get(e, Order)
+    const motion = game.world.get(e, Motion)
+    if (!order || order.queue.length === 0) return
+    const dim = full ? 0.85 : 0.5
+    const zoom = this.camera.zoom
+
+    // Start the chain where the active route ends so it reads as one plan.
+    let cursor = { x: pos.x, y: pos.y }
+    if (order.kind === 'goto') {
+      const end = motion && motion.path.length > 0 ? motion.path[motion.path.length - 1] : order.dest
+      if (end) cursor = board.cellCenter(end.x, end.y)
+    } else if (order.kind === 'attack') {
+      const end = motion && motion.path.length > 0 ? motion.path[motion.path.length - 1] : cell
+      cursor = board.cellCenter(end.x, end.y)
+    }
+
+    ctx.strokeStyle = `rgba(255,209,102,${0.55 * dim})`
+    ctx.lineWidth = (full ? 1.6 : 1.2) / zoom
+    ctx.setLineDash([4 / zoom, 5 / zoom])
+    ctx.beginPath()
+    ctx.moveTo(cursor.x, cursor.y)
+    for (const step of order.queue) {
+      for (const c of step.path) {
+        const center = board.cellCenter(c.x, c.y)
+        ctx.lineTo(center.x, center.y)
+      }
+    }
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    for (const marker of queueMarkers(order.queue)) {
+      const center = board.cellCenter(marker.cell.x, marker.cell.y)
+      const attacking = marker.kind === 'attack'
+      if (attacking) {
+        const step = order.queue[marker.index]
+        if (step.kind === 'attack') {
+          const tp = game.world.get(step.target, Position)
+          if (tp) {
+            ctx.strokeStyle = `rgba(255,59,48,${0.6 * dim})`
+            ctx.lineWidth = 1.4 / zoom
+            ctx.setLineDash([4 / zoom, 4 / zoom])
+            ctx.beginPath()
+            ctx.moveTo(center.x, center.y)
+            ctx.lineTo(tp.x, tp.y)
+            ctx.stroke()
+            ctx.setLineDash([])
+            ctx.beginPath()
+            ctx.arc(tp.x, tp.y, t * 0.22, 0, Math.PI * 2)
+            ctx.stroke()
+          }
+        }
+      }
+      ctx.fillStyle = attacking ? `rgba(255,59,48,${0.85 * dim})` : `rgba(255,209,102,${0.9 * dim})`
+      ctx.beginPath()
+      ctx.arc(center.x, center.y, t * 0.2, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = '#0b0f16'
+      ctx.font = `bold ${t * 0.24}px ui-monospace, monospace`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(String(marker.index + 1), center.x, center.y)
+    }
   }
 
   /** Faint per-piece destinations + paths for the current hovered order. */

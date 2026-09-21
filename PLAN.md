@@ -76,8 +76,15 @@ attacks can be issued over many pieces and targets.
   + a **red ring** around the targeted enemy. In Move mode an occupied square is a
   plain move (best-effort advance), never a target, and a move order clears any
   stale target.
-- Re-issuing an order just keeps/refreshes it (no toggle); `c` or `Backspace`
-  clears orders on the selection.
+- **Right-click again** → *append* a step to the piece's **order queue**. The
+  first right-click on a piece with nothing planned creates the active order;
+  further right-clicks queue `goto`/`attack` steps in sequence, so `move, move,
+  attack` is one plan (a duplicate of the active or last queued step is ignored).
+  Each step runs to completion (one move per turn) before the next promotes; a
+  merely blocked waypoint waits like a single order, while one the piece's
+  geometry can never reach is skipped. The queued remainder is drawn as a dim
+  dashed chain with numbered waypoint markers (a queued attack shows a dim threat
+  line). `c` or `Backspace` clears the active order **and** the queue.
 - **Pulling back mid-attack**: a move issued on a piece with an active attack
   order *suspends* the attack instead of discarding it — the parked enemy is shown
   with an amber dashed chain/ring. The piece travels to the objective, then
@@ -181,7 +188,8 @@ selected pieces to keep the board readable.
 
 Mouse: **drag** to box-select (any cell the box touches; shift-click adds),
 **shift-drag** or middle-drag to pan, **wheel** to zoom, **right-click** to
-order (goto on an empty square; attack on an enemy in Attack mode). Hover shows a per-piece order preview (faint
+order (goto on an empty square; attack on an enemy in Attack mode; repeat to
+queue further steps). Hover shows a per-piece order preview (faint
 ghosts) and the square name. The board is labelled with chess coordinates, and
 the control hints + stance legend live in always-visible side rails (even with
 the HUD hidden). A **Copy position JSON** button captures the full situation.

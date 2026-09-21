@@ -32,6 +32,11 @@ export interface StanceData {
   mode: StanceMode
 }
 
+/** One queued waypoint, planned from the previous step's endpoint. */
+export type OrderStep =
+  | { kind: 'goto'; dest: Vec2; path: Vec2[] }
+  | { kind: 'attack'; target: Entity; path: Vec2[]; goal: Vec2 | null; reachable: boolean }
+
 /** A one-shot instruction that overrides stance until fulfilled. */
 export interface OrderData {
   kind: OrderKind
@@ -43,6 +48,8 @@ export interface OrderData {
   resumeTarget: Entity | null
   /** Turn index at which a suspension may re-engage; -1 while unarmed. */
   resumeTurn: number
+  /** Steps queued behind the active order, executed in sequence. */
+  queue: OrderStep[]
 }
 
 export interface TargetData {

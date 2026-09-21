@@ -2,13 +2,44 @@ import { containsCell, fireCells, moveDestinations } from '../../game/geometry'
 import { makeOccupied } from '../../game/occupancy'
 import { closestEmptyCell, previewFiringCell } from '../../game/approach'
 import { PIECES, WEAPONS } from '../../game/pieces'
+import { reachableCells } from '../../game/pathfind'
+import { promoteNext, rechainQueue } from '../../game/queue'
 import { Cell, Health, Motion, Order, PieceType, Stance, Target, Team } from '../components'
+import type { OrderData } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
 
 const FLEE_HP = 0.3
 const REGROUP_TURNS = 2
+
+/** Re-plan the remaining queue from the piece's current cell after a promotion. */
+function rechain(ctx: SimContext, e: Entity, order: OrderData): void {
+  const kind = ctx.world.get(e, PieceType)?.kind
+  const def = kind ? PIECES[kind] : undefined
+  const cell = ctx.world.get(e, Cell)
+  const team = ctx.world.get(e, Team)
+  if (!def || !cell || !team) return
+  rechainQueue(ctx.board, cell, order.queue, def, team, (target) => ctx.world.get(target, Cell) ?? null)
+}
+
+/**
+ * Whether this piece's movement geometry can ever reach `dest`, ignoring other
+ * pieces (walls still block). A destination that fails this can never be
+ * fulfilled, so a queued waypoint is skipped instead of stalling the queue. A
+ * merely blocked waypoint is reachable here and therefore waits, exactly like a
+ * single goto order.
+ */
+function destReachable(ctx: SimContext, e: Entity, dest: { x: number; y: number }): boolean {
+  const kind = ctx.world.get(e, PieceType)?.kind
+  const def = kind ? PIECES[kind] : undefined
+  const cell = ctx.world.get(e, Cell)
+  const team = ctx.world.get(e, Team)
+  if (!def || !cell || !team) return true
+  const reach = reachableCells(ctx.board, cell, def.move, team)
+  const idx = dest.y * ctx.board.width + dest.x
+  return idx >= 0 && idx < reach.length && reach[idx] === 1
+}
 
 function inFiringGeometry(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'): boolean {
   const kind = ctx.world.require(e, PieceType).kind
@@ -130,11 +161,16 @@ const system: System = {
           motion.goal = pursue(ctx, e, t, team)
           continue
         }
+        // The order is done; the next queued step takes over, else clear. The
+        // stance is kept so the piece stays in Attack either way.
+        if (promoteNext(order, motion)) {
+          rechain(ctx, e, order)
+          continue
+        }
         order.kind = 'none'
         order.target = null
         order.resumeTarget = null
         order.resumeTurn = -1
-        // The order is done; the stance is kept so the piece stays in Attack.
       }
 
       // 2. Goto order: advance toward the objective (best effort if unreachable).
@@ -151,6 +187,17 @@ const system: System = {
           // has had a chance to run, so a transient block does not end the move.
           const stuck =
             !motion.moving && motion.blocked && motion.path.length === 0 && ctx.tick >= motion.replanAt
+          // A fulfilled waypoint yields to the queue. A waypoint this piece's
+          // geometry can never reach is skipped too (best-effort would idle
+          // forever); a waypoint merely blocked by pieces keeps waiting.
+          const unreachable = order.dest !== null && !destReachable(ctx, e, order.dest)
+          if (arrived || (unreachable && order.queue.length > 0)) {
+            if (promoteNext(order, motion)) {
+              rechain(ctx, e, order)
+              if (unreachable && !arrived) ctx.bus.emit('warn', `#${e} skipping unreachable waypoint`)
+              continue
+            }
+          }
           if (!arrived && !(stuck && order.resumeTarget !== null)) {
             motion.goal = order.dest
             continue
