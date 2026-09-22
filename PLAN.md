@@ -57,7 +57,8 @@ from the **piece panel** (left rail), which applies to the whole selection:
   range, so the opening board stays clean.
 - **Move** (`M`, green) — travel and return fire only; never starts an attack.
 - **Attack** (`A`, red) — seek and attack nearby targets, prefer damaged ones,
-  and flee when below 30% HP. Does not chase across the board.
+  and retreat when below 30% HP — but hold and keep firing while the target is
+  already in range. Does not chase across the board.
 
 Orders **never** change a piece's stance. Issuing an attack leaves the stance as
 it was; when the target dies the order simply completes. Set the stance to

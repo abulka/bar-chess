@@ -269,7 +269,11 @@ const system: System = {
         target.entity !== null && ctx.world.isAlive(target.entity) && ctx.world.has(target.entity, Cell)
 
       if (targetValid && hpRatio < FLEE_HP) {
-        motion.goal = fleeCell(ctx, e, team, target.entity as number)
+        const threat = target.entity as number
+        // A low-HP piece that can already hit its target holds and fires rather
+        // than running to a square with no shot; it only retreats when the
+        // target is out of range.
+        motion.goal = inFiringGeometry(ctx, e, threat, team) ? null : fleeCell(ctx, e, team, threat)
         continue
       }
       if (!targetValid) {

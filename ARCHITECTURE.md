@@ -245,13 +245,14 @@ cell/reservation during movement validation and path planning.
 - **orders** — turns stance/order into `Motion.goal` for every piece (human or
   AI): an `attack` order pursues the target (or stops to fire when in geometry);
   a `goto` order advances toward the objective (best effort); autonomous `attack`
-  pursues in a leash, flees below 30% HP, and rallies only for AI teams; anything
-  other than `attack` clears the goal. Pursuit picks a goal with the same chain as
-  `Game.planAttack` (`previewFiringCell` → `closestEmptyCell` → target) so the
-  executed route cannot diverge from the preview; a firing position beats piling
-  onto the occupied target, and a positionally unreachable target (e.g. a bishop
-  on the other colour) still routes to the closest reachable square instead of a
-  straight line to the target.
+  pursues in a leash, retreats below 30% HP only while the target is out of range
+  (an in-geometry target is held and fired on), and rallies only for AI teams;
+  anything other than `attack` clears the goal. Pursuit picks a goal with the
+  same chain as `Game.planAttack` (`previewFiringCell` → `closestEmptyCell` →
+  target) so the executed route cannot diverge from the preview; a firing position
+  beats piling onto the occupied target, and a positionally unreachable target
+  (e.g. a bishop on the other colour) still routes to the closest reachable square
+  instead of a straight line to the target.
   A `goto` that carries a `resumeTarget` is a suspended attack: on arrival (or
   once stalled) it arms `resumeTurn = ctx.turn + 2` and **regroups** — holding, or
   kiting one step back while under fire (`kiteCell`, which raises distance while
