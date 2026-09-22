@@ -116,3 +116,58 @@ describe('orders system — low-HP Attack stance', () => {
     expect(ctx.world.require(attacker, Motion).goal).toBeNull()
   })
 })
+
+describe('orders system — AI king defense', () => {
+  beforeEach(() => clearComponents())
+
+  /** An AI-controlled red team on a flat board with a blue rally lane defined. */
+  function defenseContext(): SimContext {
+    const ctx = makeContext()
+    ctx.teams.red.controller = 'ai'
+    ctx.board.data.lanes.blue = [{ x: 4, y: 7 }]
+    return ctx
+  }
+
+  it('steps the king off a distant shooter\'s firing line', () => {
+    const ctx = defenseContext()
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 4 })
+    createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 0 }) // clear file, 4 cells away
+
+    run(ctx)
+
+    const goal = ctx.world.require(king, Motion).goal
+    expect(goal).not.toBeNull()
+    expect(goal!.x).not.toBe(4)
+  })
+
+  it('reacts to a last attacker even without a current line', () => {
+    const ctx = defenseContext()
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 4 })
+    const rook = createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 0 })
+    createPiece(ctx, 'red', PIECES.pawn, { x: 4, y: 2 }) // screens the king
+    const target = ctx.world.require(king, Target)
+    target.lastAttacker = rook
+    target.underFireUntil = ctx.tick + 90
+
+    run(ctx)
+
+    const goal = ctx.world.require(king, Motion).goal
+    expect(goal).not.toBeNull()
+    expect(Math.hypot(goal!.x - 4, goal!.y - 0)).toBeGreaterThan(4)
+  })
+
+  it('sends a nearby piece to intercept the king\'s attacker', () => {
+    const ctx = defenseContext()
+    createPiece(ctx, 'red', PIECES.king, { x: 4, y: 0 })
+    const rook = createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 4 })
+    const guard = createPiece(ctx, 'red', PIECES.knight, { x: 2, y: 0 })
+    const far = createPiece(ctx, 'red', PIECES.rook, { x: 7, y: 6 })
+
+    run(ctx)
+
+    expect(ctx.world.require(guard, Motion).goal).not.toBeNull()
+    expect(ctx.world.require(guard, Target).entity).toBe(rook)
+    // The distant piece keeps advancing on the rally lane, not defending.
+    expect(ctx.world.require(far, Motion).goal).toEqual({ x: 4, y: 7 })
+  })
+})

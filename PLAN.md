@@ -173,8 +173,11 @@ across turns). It may skip moves but never exceed yours. AI-vs-AI is unrestricte
 The player's team (default blue) is shown in the `You: Blue · Red ai` badge.
 Human pieces start with **no stance** (no badge) and only act on your orders; AI
 teams rally/engage on their own, except the **AI king**, which guards its back
-rank and retreats from nearby enemies instead of advancing. Both still fire
-autonomously.
+rank instead of advancing. Under fire it steps out of an attacker's firing line
+(reacting to any shooter in line of sight, anyone who recently hit it, and nearby
+enemies), ranking threats by danger. Nearby AI pieces within a few squares become
+**bodyguards** and move to intercept the king's attacker, while the rest of the
+army keeps attacking. Both sides still fire autonomously.
 
 ## Overlays: seeing what is going on
 

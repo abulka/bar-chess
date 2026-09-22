@@ -264,10 +264,18 @@ cell/reservation during movement validation and path planning.
   beats piling onto the occupied target, and a positionally unreachable target
   (e.g. a bishop on the other colour) still routes to the closest reachable square
   instead of a straight line to the target.
-  An **AI king** never rallies: it holds the middle of its own back rank
-  (`homeCell`) and, once an enemy is within `KING_THREAT_RADIUS = 3` cells,
-  steps to the legal cell that opens the gap (ties pulled toward home). It still
-  fires at adjacent enemies through the normal combat system.
+  **AI king defense** (`kingDefense.ts`) never rallies. `kingThreats` ranks every
+  enemy that can currently hit the king (its weapon's `fireCells` cover the
+  king's square, at any range), anyone who hit it while it is still `underFire`,
+  and anyone within `KING_THREAT_RADIUS = 3` — scored can-hit-now → adjacent →
+  damage → closeness, and memoized per team per tick. `aiKingGoal` then steps to
+  the legal square that lowers exposure to those firing lines (ties: greater
+  threat distance, then nearer home), backing off only while a threat is inside
+  `KING_STANDOFF = 5`; it holds rather than shuffling, and returns to the middle
+  of its own back rank once the board is clear. It still fires at adjacent
+  enemies via combat. Nearby AI pieces within `KING_GUARD_RADIUS = 4` of a
+  threatened king become **bodyguards** and `pursue` the top-ranked threat; the
+  rest of the army keeps rallying.
   A `goto` that carries a `resumeTarget` is a suspended attack: on arrival (or
   once stalled) it arms `resumeTurn = ctx.turn + 2` and **regroups** — holding, or
   kiting one step back while under fire (`kiteCell`, which raises distance while

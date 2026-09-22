@@ -1,4 +1,4 @@
-import { containsCell, fireCells, moveDestinations } from '../../game/geometry'
+import { chebyshev, containsCell, fireCells, moveDestinations } from '../../game/geometry'
 import type { OccupiedFn } from '../../game/geometry'
 import { makeOccupied, occupiedExcept } from '../../game/occupancy'
 import { closestEmptyCell, previewFiringCell } from '../../game/approach'
@@ -10,6 +10,8 @@ import type { OrderData } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
+import { aiKingGoal, KING_GUARD_RADIUS, kingOf, kingThreats } from './kingDefense'
+import type { ThreatMemo } from './kingDefense'
 
 const FLEE_HP = 0.3
 const REGROUP_TURNS = 2
@@ -211,79 +213,15 @@ function rally(ctx: SimContext, team: 'red' | 'blue'): { x: number; y: number } 
   return lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
 }
 
-/** How close an enemy must get before the AI king retreats. */
-const KING_THREAT_RADIUS = 3
-
-/** Middle of a team's own back rank, the AI king's safe post. */
-function homeCell(ctx: SimContext, team: 'red' | 'blue'): { x: number; y: number } | null {
-  const lanes = ctx.board.data.lanes[team]
-  return lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
-}
-
-/** Nearest enemy to `cell` within `radius` cells (Chebyshev), or null. */
-function nearestThreat(
-  ctx: SimContext,
-  e: Entity,
-  team: 'red' | 'blue',
-  cell: { x: number; y: number },
-  radius: number,
-): Entity | null {
-  let best: Entity | null = null
-  let bestDist = Infinity
-  for (const other of ctx.world.query(Cell, Team)) {
-    if (other === e) continue
-    if (ctx.world.require(other, Team) === team) continue
-    const oc = ctx.world.require(other, Cell)
-    const d = Math.max(Math.abs(oc.x - cell.x), Math.abs(oc.y - cell.y))
-    if (d > radius || d >= bestDist) continue
-    bestDist = d
-    best = other
-  }
-  return best
-}
-
-/**
- * AI king policy: hold the back-rank post and never join the rally. When an
- * enemy closes in, step to the legal cell that opens the gap (ties broken
- * toward home); otherwise walk back to the post. Fires only when adjacent, via
- * the normal combat system.
- */
-function aiKingGoal(ctx: SimContext, e: Entity, team: 'red' | 'blue'): { x: number; y: number } | null {
-  const kind = ctx.world.get(e, PieceType)?.kind
-  const def = kind ? PIECES[kind] : undefined
-  const cell = ctx.world.get(e, Cell)
-  if (!def || !cell) return null
-  const home = homeCell(ctx, team)
-  const threat = nearestThreat(ctx, e, team, cell, KING_THREAT_RADIUS)
-
-  if (threat !== null) {
-    const tc = ctx.world.get(threat, Cell)
-    if (!tc) return home
-    const occupied = makeOccupied(ctx.board, ctx.occupancy)
-    const currentDist = Math.hypot(cell.x - tc.x, cell.y - tc.y)
-    let best: { x: number; y: number } | null = null
-    let bestScore = -Infinity
-    for (const c of moveDestinations(ctx.board, cell, def.move, team, occupied)) {
-      const dist = Math.hypot(c.x - tc.x, c.y - tc.y)
-      if (dist <= currentDist) continue
-      // Among cells that open the gap, prefer the one nearer to home.
-      const score = dist * 10 - (home ? Math.hypot(c.x - home.x, c.y - home.y) : 0)
-      if (score > bestScore) {
-        bestScore = score
-        best = c
-      }
-    }
-    // Holding beats shuffling when no step actually opens the gap.
-    return best
-  }
-
-  if (home && (cell.x !== home.x || cell.y !== home.y)) return home
-  return null
-}
-
 const system: System = {
   name: 'orders',
   update(ctx) {
+    // Per-tick caches: the king's enemy threat list is shared by every AI piece
+    // so bodyguards do not rescan the board. Rebuilt each update, so undo/redo
+    // and replay never see a stale entry.
+    const threatMemo: ThreatMemo = new Map()
+    const kings = { red: kingOf(ctx, 'red'), blue: kingOf(ctx, 'blue') }
+
     for (const e of ctx.world.query(Stance, Order, Motion, Cell, Team, Target)) {
       const stance = ctx.world.require(e, Stance)
       const order = ctx.world.require(e, Order)
@@ -403,8 +341,26 @@ const system: System = {
 
       // The AI king defends its post instead of charging with the army.
       if (controller === 'ai' && ctx.world.get(e, PieceType)?.kind === 'king') {
-        motion.goal = aiKingGoal(ctx, e, team)
+        motion.goal = aiKingGoal(ctx, e, team, kingThreats(ctx, e, team, threatMemo))
         continue
+      }
+
+      // Nearby AI pieces break off to intercept the king's attackers. Guards
+      // within KING_GUARD_RADIUS engage the most dangerous threat; the rest of
+      // the army keeps pressing the attack.
+      if (controller === 'ai') {
+        const king = kings[team]
+        if (king !== null && king !== e) {
+          const threats = kingThreats(ctx, king, team, threatMemo)
+          const kc = ctx.world.get(king, Cell)
+          if (threats.length > 0 && kc && chebyshev(cell.x, cell.y, kc.x, kc.y) <= KING_GUARD_RADIUS) {
+            const top = threats[0]
+            target.entity = top.entity
+            target.retargetAt = ctx.tick + 12
+            motion.goal = pursue(ctx, e, top.entity, team)
+            continue
+          }
+        }
       }
 
       const hp = ctx.world.get(e, Health)
