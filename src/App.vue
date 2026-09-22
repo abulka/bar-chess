@@ -103,7 +103,7 @@ const turnLabel = computed(() => {
     return `GAME OVER — ${snapshot.value.teams[snapshot.value.winner].name} wins (u to undo)`
   }
   const queued = snapshot.value.queuedTurns > 0 ? ` · +${snapshot.value.queuedTurns} queued` : ''
-  if (snapshot.value.turnActive) return `TURN${queued}`
+  if (snapshot.value.turnActive) return `TURN ${snapshot.value.turn}${queued}`
   if (snapshot.value.replaying) return `REPLAY${queued}`
   return snapshot.value.canReplay ? 'READY — space for next turn' : 'press space for a turn'
 })
