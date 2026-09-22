@@ -271,18 +271,25 @@ cell/reservation during movement validation and path planning.
   drained; a promoted attack clears it.
 - **pathfinding** — budgeted A* (`PATH_BUDGET_PER_TICK`) over the piece's
   movement geometry, with other pieces passed in as blockers (excluding the
-  piece itself). Unreachable goals fall back to the nearest reachable cell. An
-  **attack order** is planned *theoretically*: only the target's own square is
-  avoided, so the route assumes other pieces will move and stays visible even
-  when the piece is boxed in (matching `Game.planAttack`).
+  piece itself). Unreachable goals fall back to the nearest reachable cell.
+  A `goto` route is planned against **live** occupancy. An **attack order's
+  route is re-derived continuously** rather than settled once: because pieces
+  move every turn, a stored route is stale, so on a goal change, an empty or
+  blocked route, or a short cadence the system recomputes from the piece's
+  current cell, live occupancy first. In order of preference it takes a route
+  that reaches the firing goal, else a best-effort partial so the piece still
+  creeps toward it, else a fresh *theoretical* route (only walls and the
+  target's own square avoided) so the intended line stays visible while boxed
+  in. The route is never kept across re-plans.
 - **movement** — consumes `Motion`. `Cell` stays at the **origin** and
   `Motion.reserved` claims the destination while the piece animates into it;
   the origin is only released on arrival. Before each step it re-validates that
   the next route cell is a legal one-move destination for the piece's geometry
   given live occupancy, so slides stop at the first piece/wall and only leaps
-  pass over blockers. A blocked attack-order piece keeps its theoretical route
-  and waits (rather than clearing it and rerouting around friendlies), so the
-  planned line stays on screen. Two pieces can never share a cell, and there is
+  pass over blockers. A blocked attack-order piece keeps its path only until the
+  next re-plan (which overwrites it, typically a live detour), so the planned
+  line stays on screen without ever fossilising behind a friendly that never
+  moves. Two pieces can never share a cell, and there is
   no visual cross-through. During a turn, a piece is skipped once `movedThisTurn` is set
   (one move per turn) **and only one piece may be `moving` at a time**, so turns
   (and replays) read as a sequence of individual moves. Travel time scales with
@@ -489,12 +496,14 @@ command?)` resolves the intent: an explicit `move` always gotos, an explicit
 queued step (a duplicate of the active or last queued step is ignored), and only
 pieces under human control can be commanded. Orders never change stance; the
 piece stays whatever the **piece panel** set (red **A** = Attack stance badge).
-The attack navigation is theoretical: a gold dashed route planned as if the board
-were clear (only walls and the target's square avoided), ending on a genuine
-firing cell or the closest empty reachable cell. The firing line from there to
-the victim is judged against the current board: solid red when the shot is clear;
-solid red up to the blocker and dashed red beyond it when reachable but blocked;
-dashed grey when positionally out of reach. A lock reticle sits on the victim and
+The attack navigation is re-derived from the current board on every re-plan
+(goal change, block, or cadence), live occupancy first: a real route when one
+exists, a best-effort partial that creeps toward the goal when it does not, and a
+theoretical route (walls and the target's square only) as the boxed-in fallback.
+It ends on a genuine firing cell or the closest empty reachable cell. The firing
+line from there to the victim is judged against the current board: solid red when
+the shot is clear; solid red up to the blocker and dashed red beyond it when
+reachable but blocked; dashed grey when positionally out of reach. A lock reticle sits on the victim and
 the legend groups these under "firing lines". When the target dies the order
 clears (stance unchanged), and `planAttack` routes immediately (visible while
 paused) against a fresh occupancy map. Left/right clicks never change the

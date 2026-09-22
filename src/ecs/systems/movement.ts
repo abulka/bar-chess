@@ -83,8 +83,9 @@ const system: System = {
       const canStep = legal.some((c) => c.x === next.x && c.y === next.y)
       if (!canStep || blocked(next.x, next.y)) {
         motion.blocked = true
-        // Keep an attack order's theoretical route intact while it waits for a
-        // friendly to clear the way; only live-occupancy routes replan/clear.
+        // An attack route is re-planned by the pathfinding system (against live
+        // occupancy, then best-effort, then theoretical), so keep it for this
+        // tick rather than blanking it; non-attack routes clear and re-plan here.
         if (order.kind !== 'attack') {
           motion.replanAt = Math.min(motion.replanAt, ctx.tick + 4)
           motion.path = []
