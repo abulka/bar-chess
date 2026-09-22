@@ -6,7 +6,6 @@ import type { GameMode, OverlayFlags } from './game'
 export interface GameSettings {
   overlays: OverlayFlags
   hudVisible: boolean
-  orderMode: 'move' | 'attack'
   speed: number
   gameMode: GameMode
 }
@@ -15,7 +14,6 @@ export interface GameSettings {
 export interface SettingsPatch {
   overlays?: Partial<OverlayFlags>
   hudVisible?: boolean
-  orderMode?: 'move' | 'attack'
   speed?: number
   gameMode?: GameMode
 }
@@ -50,7 +48,6 @@ export function loadSettings(): SettingsPatch | null {
     out.overlays = overlays
   }
   if (typeof parsed.hudVisible === 'boolean') out.hudVisible = parsed.hudVisible
-  if (parsed.orderMode === 'move' || parsed.orderMode === 'attack') out.orderMode = parsed.orderMode
   if (typeof parsed.speed === 'number' && SPEEDS.includes(parsed.speed)) out.speed = parsed.speed
   if (typeof parsed.gameMode === 'string' && GAME_MODES.some((m) => m.id === parsed.gameMode)) {
     out.gameMode = parsed.gameMode as GameMode

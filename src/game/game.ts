@@ -17,6 +17,7 @@ import {
   Stance,
   Target,
   Team,
+  Weapon,
 } from '../ecs/components'
 import type { MotionData, OrderData, OrderStep } from '../ecs/components'
 import { Board } from './board'
@@ -30,7 +31,7 @@ import { closestEmptyCell, firingPositionExists, previewFiringCell } from './app
 import { createPiece } from './factory'
 import { buildOccupancy, occupiedExcept } from './occupancy'
 import type { Occupancy } from './occupancy'
-import type { StanceMode, TeamId, Vec2 } from './types'
+import type { OrderKind, StanceMode, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { findPath } from './pathfind'
 import { anchorFor, planStep } from './queue'
@@ -81,6 +82,61 @@ export interface HoverPreview {
   cells: Vec2[]
   dest: Vec2 | null
   attack: boolean
+}
+
+/** A lightweight reference to a piece, for the inspector panel. */
+export interface PieceRef {
+  entity: Entity
+  kind: string
+  name: string
+  glyph: string
+  team: TeamId
+  color: string
+  coord: string
+  health: { cur: number; max: number; ratio: number } | null
+}
+
+/** Everything the piece properties panel shows for the focused selection. */
+export interface PieceInfo {
+  entity: Entity
+  kind: string
+  name: string
+  glyph: string
+  team: TeamId
+  color: string
+  cell: Vec2
+  coord: string
+  health: { cur: number; max: number; ratio: number }
+  weapon: { key: string; left: number; cooldown: number; ready: boolean } | null
+  stance: StanceMode
+  commandable: boolean
+  target: PieceRef | null
+  underFire: { entity: Entity; coord: string } | null
+  order: {
+    kind: OrderKind
+    dest: Vec2 | null
+    destCoord: string | null
+    target: PieceRef | null
+    reachable: boolean
+    regrouping: boolean
+    parked: PieceRef | null
+    queue: Array<{ kind: OrderStep['kind']; label: string }>
+  }
+  motion: {
+    goal: Vec2 | null
+    goalCoord: string | null
+    pathLength: number
+    blocked: boolean
+    moving: boolean
+    movedThisTurn: boolean
+  }
+}
+
+export interface StanceSummary {
+  none: number
+  move: number
+  attack: number
+  mixed: boolean
 }
 
 export interface OverlayFlags {
@@ -138,6 +194,12 @@ export interface GameSnapshot {
   replaying: boolean
   turnProgress: number
   replayProgress: number
+  /** BAR-style command waiting for the next left-click (`none` = plain select). */
+  pendingCommand: StanceMode
+  selectionCount: number
+  stanceSummary: StanceSummary
+  /** Focused selected piece (first in the selection), for the properties panel. */
+  pieceInfo: PieceInfo | null
   terrainVersion: number
 }
 
@@ -188,8 +250,8 @@ export class Game {
   terrainVersion = 0
   playerTeam: TeamId = 'blue'
   gameMode: GameMode = 'human-vs-ai'
-  /** Global order mode: decides what a right-click issues. */
-  orderMode: 'move' | 'attack' = 'move'
+  /** Transient BAR-style command awaiting the next left-click. */
+  pendingCommand: StanceMode = 'none'
 
   overlays: OverlayFlags = {
     grid: true,
@@ -521,7 +583,6 @@ export class Game {
     return {
       overlays: { ...this.overlays },
       hudVisible: this.hudVisible,
-      orderMode: this.orderMode,
       speed: this.speed,
       gameMode: this.gameMode,
     }
@@ -539,7 +600,6 @@ export class Game {
       }
     }
     if (typeof settings.hudVisible === 'boolean') this.hudVisible = settings.hudVisible
-    if (settings.orderMode === 'move' || settings.orderMode === 'attack') this.orderMode = settings.orderMode
     if (typeof settings.speed === 'number' && SPEEDS.includes(settings.speed)) this.speed = settings.speed
     if (settings.gameMode && GAME_MODES.some((m) => m.id === settings.gameMode)) {
       this.setGameMode(settings.gameMode)
@@ -703,12 +763,11 @@ export class Game {
   }
 
   /**
-   * Set the global order mode (what a right-click issues) and apply the same
-   * policy to the current selection. Active orders are left alone, so the mode
-   * can be set and then reused across many pieces and targets.
+   * Set the persistent stance of every selected commandable piece. Unlike an
+   * order, this survives the order completing — `none` stands ground and only
+   * fires in range, so it is the way to disengage a previously attacking piece.
    */
-  setOrderMode(mode: StanceMode): void {
-    if (mode === 'move' || mode === 'attack') this.orderMode = mode
+  setPieceStance(mode: StanceMode): void {
     let n = 0
     for (const e of this.selected) {
       if (!this.world.isAlive(e)) continue
@@ -718,7 +777,17 @@ export class Game {
       if (stance) stance.mode = mode
       n++
     }
-    this.bus.emit('info', `order mode: ${this.orderMode} (${n} piece(s) stance: ${mode})`)
+    this.bus.emit('info', `${n} piece(s) stance: ${mode}`)
+  }
+
+  /** Arm a BAR-style command prefix for the next left-click. */
+  setPendingCommand(mode: StanceMode): void {
+    this.pendingCommand = mode
+    if (mode !== 'none') this.bus.emit('info', `${mode} command: left-click a target (shift to queue)`)
+  }
+
+  clearPendingCommand(): void {
+    this.pendingCommand = 'none'
   }
 
   /** A piece can be commanded only when its team is under human control. */
@@ -727,16 +796,21 @@ export class Game {
   }
 
   /**
-   * Right-click: create an order for a piece with nothing planned, otherwise
-   * append a step to its queue. In Attack mode an enemy square is an attack
-   * step; otherwise it is a move. A move on an un-queued attacker still
-   * suspends/regroups instead of queueing behind the attack.
+   * Issue an order at `cell` for every selected commandable piece.
+   *
+   * `command` is the resolved intent: an explicit `attack` (from an `a`
+   * prefix or a right-click on an enemy) requires an enemy occupant, an explicit
+   * `move` always creates a goto, and when omitted the square's occupant decides
+   * (enemy → attack, friendly → ignored, empty → move). A piece with nothing
+   * planned starts the order; otherwise the click appends a queued step. A move
+   * on an un-queued attacker suspends/regroups instead of queueing behind it.
    */
-  orderAt(cell: Vec2): void {
+  orderAt(cell: Vec2, command?: 'move' | 'attack'): void {
     if (!this.board.inBounds(cell.x, cell.y)) return
     const occ = buildOccupancy(this.world, this.board)
     const occupant = occ.get(cell.y * this.board.width + cell.x)
     let n = 0
+    let skippedAttack = false
     for (const e of this.selected) {
       if (!this.world.isAlive(e)) continue
       const order = this.world.get(e, Order)
@@ -747,7 +821,15 @@ export class Game {
       const occupantTeam = occupant !== undefined && occupant !== e ? this.world.get(occupant, Team) : undefined
       const enemyOccupied =
         occupant !== undefined && occupant !== e && occupantTeam !== undefined && occupantTeam !== team
-      const attacking = enemyOccupied && this.orderMode === 'attack'
+      const friendlyOccupied = occupant !== undefined && occupant !== e && occupantTeam === team
+      // A context right-click on a friendly square is a no-op (as in BAR).
+      if (command === undefined && friendlyOccupied) continue
+      // An explicit move never attacks; otherwise the occupant decides.
+      const attacking = command === 'move' ? false : enemyOccupied
+      if (command === 'attack' && !enemyOccupied) {
+        skippedAttack = true
+        continue
+      }
       const activeEmpty = order.kind === 'none' && order.queue.length === 0
 
       if (activeEmpty) {
@@ -761,6 +843,10 @@ export class Game {
         this.appendStep(e, order, motion, cell, attacking ? (occupant as Entity) : null, team)
       }
       n++
+    }
+    if (skippedAttack && n === 0) {
+      this.bus.emit('warn', 'attack needs an enemy target')
+      return
     }
     if (occupant !== undefined && this.world.get(occupant, Team) !== undefined) {
       this.bus.emit('info', `orders: ${n} at #${occupant} (${coordName(cell.x, cell.y, this.board.height)})`)
@@ -778,9 +864,6 @@ export class Game {
     motion.goal = null
     motion.path = []
     motion.arrived = true
-    // Ordered to attack, so the piece stays in Attack afterwards.
-    const stance = this.world.get(e, Stance)
-    if (stance) stance.mode = 'attack'
     // Plan the route to a firing position now so it is visible while paused.
     order.reachable = this.planAttack(e, motion, target)
   }
@@ -844,8 +927,6 @@ export class Game {
       const step: OrderStep = { kind: 'attack', target: attackTarget, path: [], goal: null, reachable: true }
       planStep(this.board, anchor, step, def, team, tcell)
       order.queue.push(step)
-      const stance = this.world.get(e, Stance)
-      if (stance) stance.mode = 'attack'
       return
     }
 
@@ -881,9 +962,16 @@ export class Game {
         motion.path = []
         motion.arrived = true
       }
+      // Drop the current engagement too, so the target line clears immediately.
+      // Stance is untouched: set it to `none` in the panel to stop auto-engage.
+      const target = this.world.get(e, Target)
+      if (target) {
+        target.entity = null
+        target.retargetAt = 0
+      }
       n++
     }
-    this.bus.emit('info', `${n} piece(s) orders cleared`)
+    this.bus.emit('info', `${n} piece(s) order${n === 1 ? '' : 's'} cleared`)
   }
 
   /** Hover feedback and per-piece order preview (computed once per hovered cell). */
@@ -1023,7 +1111,7 @@ export class Game {
     this.teams = structuredClone(saved.teams)
     this.gameMode = saved.gameMode
     this.playerTeam = saved.playerTeam
-    this.orderMode = saved.orderMode
+    this.pendingCommand = 'none'
     this.overlays = { ...this.overlays, ...saved.overlays }
 
     this.occupancy.clear()
@@ -1142,6 +1230,10 @@ export class Game {
     const projectiles = this.world.query(Projectile, Position).length
     const fx = this.world.query(Fx).length
 
+    const stanceSummary = this.stanceSummary()
+    const focused = this.selected.find((e) => this.world.isAlive(e))
+    const pieceInfo = focused !== undefined ? this.pieceInfo(focused) : null
+
     const teams = {} as Record<TeamId, TeamSnapshot>
     for (const id of ['red', 'blue'] as TeamId[]) {
       const runtime = this.teams[id]
@@ -1206,7 +1298,110 @@ export class Game {
       replaying: this.replaying,
       turnProgress: this.turnProgress,
       replayProgress: this.replayProgress,
+      pendingCommand: this.pendingCommand,
+      selectionCount: this.selected.filter((e) => this.world.isAlive(e)).length,
+      stanceSummary,
+      pieceInfo,
       terrainVersion: this.terrainVersion,
+    }
+  }
+
+  private stanceSummary(): StanceSummary {
+    const summary: StanceSummary = { none: 0, move: 0, attack: 0, mixed: false }
+    for (const e of this.selected) {
+      if (!this.world.isAlive(e)) continue
+      const mode = this.world.get(e, Stance)?.mode ?? 'none'
+      summary[mode]++
+    }
+    const kinds = (['none', 'move', 'attack'] as const).filter((k) => summary[k] > 0)
+    summary.mixed = kinds.length > 1
+    return summary
+  }
+
+  private pieceRef(e: Entity): PieceRef | null {
+    if (!this.world.isAlive(e)) return null
+    const kind = this.world.get(e, PieceType)?.kind ?? '?'
+    const def = PIECES[kind]
+    const cell = this.world.get(e, Cell)
+    const team = this.world.get(e, Team)
+    if (!cell || !team) return null
+    const hp = this.world.get(e, Health)
+    return {
+      entity: e,
+      kind,
+      name: def?.name ?? kind,
+      glyph: def?.glyph ?? '?',
+      team,
+      color: TEAM_COLORS[team],
+      coord: coordName(cell.x, cell.y, this.board.height),
+      health: hp ? { cur: hp.cur, max: hp.max, ratio: hp.max > 0 ? hp.cur / hp.max : 0 } : null,
+    }
+  }
+
+  /** Curated view of one piece for the properties panel. */
+  private pieceInfo(e: Entity): PieceInfo | null {
+    const ref = this.pieceRef(e)
+    const cell = this.world.get(e, Cell)
+    const kind = this.world.get(e, PieceType)?.kind
+    const def = kind ? PIECES[kind] : undefined
+    if (!ref || !cell || !def) return null
+    const hp = this.world.get(e, Health)
+    const stance = this.world.get(e, Stance)?.mode ?? 'none'
+    const order = this.world.get(e, Order)
+    const motion = this.world.get(e, Motion)
+    const target = this.world.get(e, Target)
+    const weapon = this.world.get(e, Weapon)
+    const wdef = WEAPONS[def.weapon]
+    const team = this.world.get(e, Team)
+    const coord = (c: Vec2 | null | undefined): string | null =>
+      c ? coordName(c.x, c.y, this.board.height) : null
+
+    const queue = (order?.queue ?? []).map((step) => ({
+      kind: step.kind,
+      label:
+        step.kind === 'goto'
+          ? `move ${coord(step.dest) ?? '—'}`
+          : `attack ${this.pieceRef(step.target)?.coord ?? '—'}`,
+    }))
+
+    return {
+      entity: e,
+      kind: ref.kind,
+      name: ref.name,
+      glyph: ref.glyph,
+      team: ref.team,
+      color: ref.color,
+      cell: { x: cell.x, y: cell.y },
+      coord: ref.coord,
+      health: hp ? { cur: hp.cur, max: hp.max, ratio: hp.max > 0 ? hp.cur / hp.max : 0 } : { cur: 0, max: 0, ratio: 0 },
+      weapon: weapon
+        ? { key: wdef.key, left: weapon.left, cooldown: wdef.cooldown, ready: weapon.left <= 0 }
+        : null,
+      stance,
+      commandable: team !== undefined && this.commandable(team),
+      target: target?.entity != null ? this.pieceRef(target.entity) : null,
+      underFire:
+        target?.lastAttacker != null && this.tick < target.underFireUntil && this.world.isAlive(target.lastAttacker)
+          ? { entity: target.lastAttacker, coord: this.pieceRef(target.lastAttacker)?.coord ?? '—' }
+          : null,
+      order: {
+        kind: order?.kind ?? 'none',
+        dest: order?.dest ?? null,
+        destCoord: coord(order?.dest),
+        target: order?.target != null ? this.pieceRef(order.target) : null,
+        reachable: order?.reachable ?? true,
+        regrouping: (order?.resumeTarget ?? null) !== null && (order?.resumeTurn ?? -1) >= 0,
+        parked: order?.resumeTarget != null ? this.pieceRef(order.resumeTarget) : null,
+        queue,
+      },
+      motion: {
+        goal: motion?.goal ?? null,
+        goalCoord: coord(motion?.goal),
+        pathLength: motion?.path.length ?? 0,
+        blocked: motion?.blocked ?? false,
+        moving: motion?.moving ?? false,
+        movedThisTurn: motion?.movedThisTurn ?? false,
+      },
     }
   }
 

@@ -17,7 +17,6 @@ describe('order queue', () => {
     const game = new Game(8)
     const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
     game.selected = [rook]
-    game.orderMode = 'move'
 
     game.orderAt({ x: 0, y: 5 })
     const order = game.world.require(rook, Order)
@@ -30,16 +29,14 @@ describe('order queue', () => {
     expect(order.queue[0]).toMatchObject({ kind: 'goto', dest: { x: 0, y: 3 } })
   })
 
-  it('queues moves then an attack, mode-based', () => {
+  it('queues moves then an attack, context-based', () => {
     const game = new Game(8)
     const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
     const victim = placePiece(game, 'king', 'red', { x: 4, y: 5 })
     game.selected = [attacker]
 
-    game.orderMode = 'move'
     game.orderAt({ x: 4, y: 3 })
     game.orderAt({ x: 3, y: 4 })
-    game.orderMode = 'attack'
     game.orderAt({ x: 4, y: 5 })
 
     const order = game.world.require(attacker, Order)
@@ -55,7 +52,6 @@ describe('order queue', () => {
     const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
     const knight = placePiece(game, 'knight', 'blue', { x: 7, y: 7 })
     game.selected = [rook, knight]
-    game.orderMode = 'move'
 
     game.orderAt({ x: 0, y: 5 })
     game.orderAt({ x: 0, y: 3 })
@@ -73,7 +69,6 @@ describe('order queue', () => {
         (p: any) => p.team === 'blue' && p.kind === 'bishop' && p.cell.x === 5 && p.cell.y === 7,
       ).e as number
     game.selected = [bishop]
-    game.orderMode = 'move'
     game.orderAt({ x: 7, y: 5 })
     game.orderAt({ x: 6, y: 4 })
     runTurn(game)
@@ -88,7 +83,6 @@ describe('order queue', () => {
     const game = new Game(8)
     const queen = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
     game.selected = [queen]
-    game.orderMode = 'move'
 
     game.orderAt({ x: 4, y: 3 })
     game.orderAt({ x: 3, y: 3 })
@@ -104,7 +98,6 @@ describe('order queue', () => {
     const game = new Game(8)
     const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
     game.selected = [rook]
-    game.orderMode = 'move'
     game.orderAt({ x: 0, y: 5 })
     game.orderAt({ x: 0, y: 3 })
 
@@ -118,7 +111,6 @@ describe('order queue', () => {
     const game = new Game(8, 'ai-vs-ai')
     const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
     game.selected = [rook]
-    game.orderMode = 'move'
 
     game.orderAt({ x: 0, y: 5 })
     game.orderAt({ x: 0, y: 3 })
@@ -134,9 +126,7 @@ describe('order queue', () => {
     placePiece(game, 'king', 'red', { x: 4, y: 5 })
     game.selected = [attacker]
 
-    game.orderMode = 'move'
     game.orderAt({ x: 4, y: 3 })
-    game.orderMode = 'attack'
     game.orderAt({ x: 4, y: 5 })
 
     const json = JSON.stringify(game.exportPosition())

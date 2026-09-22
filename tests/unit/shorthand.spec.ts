@@ -36,7 +36,7 @@ describe('position shorthand', () => {
     placePiece(attack, 'king', 'red', { x: 4, y: 5 })
     attack.world.require(queen, Weapon).left = 0
     attack.selected = [queen]
-    attack.orderMode = 'attack'
+    attack.setPieceStance('attack')
     attack.orderAt({ x: 4, y: 5 })
     attack.runTicks(1)
 
@@ -49,7 +49,7 @@ describe('position shorthand', () => {
     const move = new Game(8)
     const rook = placePiece(move, 'rook', 'blue', { x: 0, y: 7 })
     move.selected = [rook]
-    move.setOrderMode('move')
+    move.setPieceStance('move')
     move.orderAt({ x: 0, y: 4 })
     expect(move.shorthand()).toMatch(/bR a1 @M goto=a4 goal=a4 path=a4/)
   })

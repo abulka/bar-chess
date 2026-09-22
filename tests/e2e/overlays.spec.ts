@@ -28,7 +28,6 @@ test('a clear attack draws a solid red firing line between attacker and target',
     setCell(pawn.e, 3, 5)
 
     g.selected = [rook.e]
-    g.orderMode = 'attack'
     g.orderAt({ x: 3, y: 5 })
   })
 

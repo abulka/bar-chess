@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Game } from '../game/game'
-import type { Vec2 } from '../game/types'
+import type { StanceMode, Vec2 } from '../game/types'
 import { Renderer } from '../render/renderer'
 
 const props = defineProps<{
   game: Game
+  /** Pending BAR-style command (`m`/`a`), used for the cursor and click routing. */
+  pending: StanceMode
 }>()
 
 const emit = defineEmits<{ (e: 'changed'): void; (e: 'ordered'): void }>()
@@ -26,6 +28,7 @@ let renderer: Renderer | null = null
 let observer: ResizeObserver | null = null
 let pointerDown = false
 let selecting = false
+let commandClick = false
 let moved = false
 let button = 0
 let shiftDown = false
@@ -68,11 +71,17 @@ function onPointerDown(event: PointerEvent): void {
   moved = false
   shiftDown = event.shiftKey
   pointerDown = true
+  commandClick = false
 
-  const wantsPan = event.button === 1 || event.shiftKey
-  if (wantsPan) {
+  // Middle always pans; while a command prefix is armed, left-click issues the
+  // command (Shift keeps it armed to queue more) instead of selecting/panning.
+  if (button === 1) {
     panning.value = true
-  } else if (event.button === 0) {
+  } else if (button === 0 && props.pending !== 'none') {
+    commandClick = true
+  } else if (event.shiftKey) {
+    panning.value = true
+  } else if (button === 0) {
     selecting = true
     box.value = { x: p.x, y: p.y, w: 0, h: 0 }
   }
@@ -105,6 +114,8 @@ function onPointerUp(event: PointerEvent): void {
   canvasRef.value?.releasePointerCapture(event.pointerId)
   pointerDown = false
   panning.value = false
+  const wasCommand = commandClick
+  commandClick = false
 
   if (button === 2) {
     selecting = false
@@ -113,11 +124,27 @@ function onPointerUp(event: PointerEvent): void {
     return
   }
 
+  if (wasCommand) {
+    if (!moved && button === 0 && props.pending !== 'none') {
+      const command = props.pending === 'attack' ? 'attack' : 'move'
+      props.game.orderAt(cellAt(event), command)
+      // Shift keeps the prefix armed so several commands can be queued.
+      if (!shiftDown) props.game.clearPendingCommand()
+      emit('ordered')
+      emit('changed')
+    }
+    selecting = false
+    box.value = null
+    moved = false
+    return
+  }
+
   const add = additive(event) || shiftDown
   if (!moved) {
-    // A click (even a shift-click that was treated as a pan target) selects.
+    // A plain left-click selects and drops any armed command prefix.
     if (button === 0) {
       const w = worldAt(event)
+      props.game.clearPendingCommand()
       props.game.selectAt(w.x, w.y, add)
       emit('changed')
     }
@@ -137,6 +164,7 @@ function onPointerUp(event: PointerEvent): void {
 
 function onContextMenu(event: MouseEvent): void {
   event.preventDefault()
+  props.game.clearPendingCommand()
   props.game.orderAt(cellAt(event))
   emit('ordered')
   emit('changed')
@@ -189,7 +217,11 @@ onBeforeUnmount(() => {
     <canvas
       ref="canvasRef"
       class="board-canvas"
-      :class="{ panning: panning }"
+      :class="{
+        panning: panning,
+        'pending-move': props.pending === 'move',
+        'pending-attack': props.pending === 'attack',
+      }"
       @pointerdown="onPointerDown"
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"

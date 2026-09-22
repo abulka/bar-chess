@@ -50,41 +50,43 @@ autonomous movement, firing, projectile flight and destruction play out.
 
 Two distinct concepts:
 
-**Stance** is a piece's explicit persistent autonomous policy, shown as a badge
-on the piece and set with the toolbar buttons or `1`/`m` (Move) and `2`/`a`
-(Attack):
+**Stance** is a piece's persistent autonomous policy, shown as a badge and set
+from the **piece panel** (left rail), which applies to the whole selection:
 
-- **No stance** (default, no badge) — stand ground and fire at enemies already in
+- **None** (default, no badge) — stand ground and fire only at enemies already in
   range, so the opening board stays clean.
-- **Move** (`1` or `m`, green) — travel and return fire only; never starts an
-  attack.
-- **Attack** (`2` or `a`, red) — seek and attack nearby targets, prefer damaged
-  ones, and flee when below 30% HP. Does not chase across the board.
+- **Move** (`M`, green) — travel and return fire only; never starts an attack.
+- **Attack** (`A`, red) — seek and attack nearby targets, prefer damaged ones,
+  and flee when below 30% HP. Does not chase across the board.
 
-A **global order mode** (Move / Attack, chosen in the toolbar or with `1`/`m` and
-`2`/`a`) decides what a right-click issues. It persists across selections, so
-attacks can be issued over many pieces and targets.
+Orders **never** change a piece's stance. Issuing an attack leaves the stance as
+it was; when the target dies the order simply completes. Set the stance to
+Attack to have a piece keep engaging on its own, or None to disengage.
 
-**Order** is a one-shot instruction that overrides stance until fulfilled:
+**Order** is a one-shot (or queued) instruction:
 
-- **Right-click an empty square** → *goto* in either mode: move toward it. This is
-  an **objective**, not a strict destination: each selected piece advances as far
+- **Right-click an empty square** → *goto*: move toward it. This is an
+  **objective**, not a strict destination: each selected piece advances as far
   as its own geometry allows, so a pawn ordered to an off-file square still
   marches forward up its own file.
-- **Right-click an enemy piece** → *attack* in **Attack** mode: become glued to
-  that enemy, follow it, and fire when possible. Shown as a **red** tracking chain
-  + a **red ring** around the targeted enemy. In Move mode an occupied square is a
-  plain move (best-effort advance), never a target, and a move order clears any
-  stale target.
-- **Right-click again** → *append* a step to the piece's **order queue**. The
-  first right-click on a piece with nothing planned creates the active order;
-  further right-clicks queue `goto`/`attack` steps in sequence, so `move, move,
-  attack` is one plan (a duplicate of the active or last queued step is ignored).
-  Each step runs to completion (one move per turn) before the next promotes; a
-  merely blocked waypoint waits like a single order, while one the piece's
-  geometry can never reach is skipped. The queued remainder is drawn as a dim
-  dashed chain with numbered waypoint markers (a queued attack shows a dim threat
-  line). `c` or `Backspace` clears the active order **and** the queue.
+- **Right-click an enemy piece** → *attack*: become glued to that enemy, follow
+  it, and fire when possible. Shown as a **red** tracking chain + a **red ring**
+  around the targeted enemy. Once the target is destroyed the order is removed.
+  Right-clicking a friendly square is a no-op (as in BAR).
+- **`m` / `a` then left-click** → force a *move* / *attack* command (BAR-style
+  prefixes). `a` + click on an empty or friendly square is a no-op. The prefix is
+  consumed by the click; hold **Shift** to keep it armed and queue several. A
+  plain left-click selects and clears any armed prefix.
+- **Right-click again** (or Shift+right-click) → *append* a step to
+  the piece's **order queue**. The first right-click on a piece with nothing
+  planned creates the active order; further clicks queue `goto`/`attack` steps in
+  sequence, so `move, move, attack` is one plan (a duplicate of the active or last
+  queued step is ignored). Each step runs to completion (one move per turn) before
+  the next promotes; a merely blocked waypoint waits like a single order, while
+  one the piece's geometry can never reach is skipped. The queued remainder is
+  drawn as a dim dashed chain with numbered waypoint markers (a queued attack
+  shows a dim threat line). `c` or `Backspace` clears the active order **and** the
+  queue (and drops the current target); it does not change the stance.
 - **Pulling back mid-attack**: a move issued on a piece with an active attack
   order *suspends* the attack instead of discarding it — the parked enemy is shown
   with an amber dashed chain/ring. The piece travels to the objective, then
@@ -108,10 +110,9 @@ attacks can be issued over many pieces and targets.
   line, falling back to a friendly-passable plan when the piece is boxed in, and
   always draws a connector from the end of that route to the objective so a
   partial route never dead-ends in mid-air.
-- An attack sets the ordered piece's stance to Attack; when the target dies the
-  order clears but the piece **stays in Attack**, so it keeps engaging nearby
-  enemies until the player changes the stance. The global mode is unchanged by
-  orders, so a follow-up right-click on another enemy attacks again.
+- An attack order never changes the piece's stance. When the target dies the
+  order clears and the piece reverts to its explicit stance (None = stand & fire
+  in range), so it only keeps engaging on its own if the player set Attack.
 - Only pieces whose team is under human control can be commanded: your own team
   in Human-vs-AI, **both** teams in Human-vs-Human, nobody in AI-vs-AI. Enemy
   pieces remain selectable for inspection.
@@ -194,17 +195,19 @@ Scope: the **selection** always shows full detail; `my orders` (`o`) and
 Army scope shows paths/goals/targets; reach, attack and range are reserved for
 selected pieces to keep the board readable.
 
-Mouse: **drag** to box-select (any cell the box touches; shift-click adds),
+Mouse: **left-click** to select (shift-click adds), **drag** to box-select,
 **shift-drag** or middle-drag to pan, **wheel** to zoom, **right-click** to
-order (goto on an empty square; attack on an enemy in Attack mode; repeat to
-queue further steps). Hover shows a per-piece order preview (faint
-ghosts) and the square name. The board is labelled with chess coordinates, and
-the control hints + stance legend live in always-visible side rails (even with
-the HUD hidden). A **Copy position JSON** button captures the full situation.
+order (goto on an empty square, attack on an enemy; repeat or Shift to queue).
+**`m`/`a` then left-click** forces a move/attack command (Shift keeps the prefix
+armed to queue more). Hover shows a per-piece order preview (faint ghosts) and
+the square name. The board is labelled with chess coordinates; the control hints
+and the **piece panel** (properties + stance buttons) live in the left rail, and
+the target legend in the right rail (both always visible, even with the HUD
+hidden). A **Copy position JSON** button captures the full situation.
 
-Keyboard summary: `1/2/3` stance, `space` turn, `p` pause, `s` step, `u`/`r`
-undo/redo, `y` replay, `c`/`Backspace` clear orders, `o` my orders, `e`
-enemy plans, `h` HUD, `Esc` clear selection. Turns and replays both play at 0.5×
+Keyboard summary: `m`/`a` arm move/attack, `space` turn, `p` pause, `s` step,
+`u`/`r` undo/redo, `y` replay, `c`/`Backspace` clear orders, `o` my orders, `e`
+enemy plans, `h` HUD, `Esc` cancel/clear selection. Turns and replays both play at 0.5×
 speed
 (one move at a time), and the wide **turn bar** under the toolbar sweeps the full
 width (same colour for both).

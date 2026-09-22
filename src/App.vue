@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import BoardView from './components/BoardView.vue'
 import EventLog from './components/EventLog.vue'
+import PiecePanel from './components/PiecePanel.vue'
 import ReinforcementBar from './components/ReinforcementBar.vue'
 import StatsBar from './components/StatsBar.vue'
 import Toolbar from './components/Toolbar.vue'
@@ -17,7 +18,6 @@ import type { StanceMode, TeamId } from './game/types'
 const game = new Game(8)
 game.applySettings(loadSettings() ?? {})
 const snapshot = shallowRef<GameSnapshot>(game.snapshot())
-const stance = ref<StanceMode>(game.orderMode)
 const copied = ref('')
 const boardView = ref<InstanceType<typeof BoardView> | null>(null)
 const slots = ref<SlotMeta[]>([])
@@ -52,10 +52,13 @@ function onSetGameMode(mode: GameMode): void {
   refresh()
 }
 
-function onSetStance(mode: StanceMode): void {
-  stance.value = mode
-  game.setOrderMode(mode)
-  persistSettings()
+function onSetPieceStance(mode: StanceMode): void {
+  game.setPieceStance(mode)
+  refresh()
+}
+
+function onClearOrders(): void {
+  game.clearOrders()
   refresh()
 }
 
@@ -234,10 +237,16 @@ function onKey(event: KeyboardEvent): void {
   } else if (event.key === 'e') {
     onToggleOverlay('enemyPlans')
   } else if (event.key === 'Escape') {
-    game.clearSelection()
+    if (game.pendingCommand !== 'none') game.clearPendingCommand()
+    else game.clearSelection()
     refresh()
-  } else if (event.key === '1' || event.key === 'm') onSetStance('move')
-  else if (event.key === '2' || event.key === 'a') onSetStance('attack')
+  } else if (event.key === 'm') {
+    game.setPendingCommand('move')
+    refresh()
+  } else if (event.key === 'a') {
+    game.setPendingCommand('attack')
+    refresh()
+  }
 }
 
 onMounted(() => {
@@ -261,7 +270,6 @@ onBeforeUnmount(() => {
   <div class="app" :class="{ 'hud-hidden': !snapshot.hudVisible }">
     <Toolbar
       :snapshot="snapshot"
-      :stance="stance"
       @select-size="onSelectSize"
       @set-game-mode="onSetGameMode"
       @toggle-pause="game.togglePause(); refresh()"
@@ -271,7 +279,6 @@ onBeforeUnmount(() => {
       @redo="onRedo"
       @replay="onReplay"
       @set-speed="onSetSpeed"
-      @set-stance="onSetStance"
       @toggle-overlay="onToggleOverlay"
       @reset="onReset"
       @toggle-hud="onToggleHud"
@@ -297,22 +304,34 @@ onBeforeUnmount(() => {
                 : 'press space for a turn'
         }}
       </span>
+      <span
+        v-if="snapshot.pendingCommand !== 'none'"
+        class="pending-command"
+        :class="snapshot.pendingCommand"
+      >
+        {{ snapshot.pendingCommand === 'attack' ? 'ATTACK — left-click a target' : 'MOVE — left-click a square' }}
+        · shift to queue · esc to cancel
+      </span>
     </div>
 
     <div class="stage" :class="{ 'no-rosters': !snapshot.hudVisible }">
       <aside class="rail left">
         <div class="rail-title">controls</div>
         <ul class="hints">
-          <li><b>drag</b> select box · <b>shift-click</b> add</li>
+          <li><b>left-click</b> select · <b>shift-click</b> add · <b>drag</b> box</li>
+          <li><b>right-click</b> empty → move · enemy → attack</li>
+          <li><b>right-click</b> again (or shift) → queue next step</li>
+          <li><b>m</b>/<b>a</b> then left-click → move / attack · shift to queue</li>
           <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
-          <li><b>right-click</b> empty → move</li>
-          <li><b>right-click</b> again → queue next move</li>
-          <li><b>right-click</b> enemy → attack (Attack stance)</li>
-          <li><b>1</b>/<b>m</b> Move · <b>2</b>/<b>a</b> Attack stance</li>
           <li><b>space</b> turn · <b>p</b> pause · <b>s</b> step</li>
           <li><b>u</b> undo · <b>r</b> redo · <b>y</b> replay · <b>c</b>/<b>Backspace</b> clear orders</li>
-          <li><b>o</b> my orders · <b>e</b> enemy · <b>h</b> HUD</li>
+          <li><b>o</b> my orders · <b>e</b> enemy · <b>h</b> HUD · <b>esc</b> cancel</li>
         </ul>
+        <PiecePanel
+          :snapshot="snapshot"
+          @set-stance="onSetPieceStance"
+          @clear-orders="onClearOrders"
+        />
       </aside>
 
       <ReinforcementBar
@@ -324,7 +343,13 @@ onBeforeUnmount(() => {
 
       <div class="center">
         <div class="board-area">
-          <BoardView ref="boardView" :game="game" @changed="refresh" @ordered="onOrdered" />
+          <BoardView
+            ref="boardView"
+            :game="game"
+            :pending="snapshot.pendingCommand"
+            @changed="refresh"
+            @ordered="onOrdered"
+          />
         </div>
       </div>
 

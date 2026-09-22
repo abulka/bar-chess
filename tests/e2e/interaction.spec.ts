@@ -60,7 +60,6 @@ test('a second right-click queues a move behind the active order', async ({ page
     const g = (window as any).game
     const rook = g.toDebugJson().pieces.find((p: any) => p.team === 'blue' && p.kind === 'rook')
     g.selected = [rook.e]
-    g.orderMode = 'move'
     return rook.e as number
   })
 
@@ -82,12 +81,11 @@ test('a second right-click queues a move behind the active order', async ({ page
   expect(state.queue).toEqual(['goto'])
 })
 
-test('right-click on an enemy issues an attack order in attack mode', async ({ page }) => {
+test('right-click on an enemy issues an attack order (context-sensitive)', async ({ page }) => {
   const attacker = await page.evaluate(() => {
     const g = (window as any).game
     const rook = g.toDebugJson().pieces.find((p: any) => p.team === 'blue' && p.kind === 'rook')
     g.selected = [rook.e]
-    g.orderMode = 'attack'
     return rook.e as number
   })
 

@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { SPEEDS } from '../game/constants'
 import type { GameMode, GameSnapshot, OverlayFlags } from '../game/game'
-import type { StanceMode } from '../game/types'
 
 const props = defineProps<{
   snapshot: GameSnapshot
-  stance: StanceMode
 }>()
 
 const emit = defineEmits<{
@@ -18,17 +16,12 @@ const emit = defineEmits<{
   (e: 'redo'): void
   (e: 'replay'): void
   (e: 'set-speed', speed: number): void
-  (e: 'set-stance', mode: StanceMode): void
   (e: 'toggle-overlay', key: keyof OverlayFlags): void
   (e: 'reset'): void
   (e: 'toggle-hud'): void
 }>()
 
 const speeds = SPEEDS
-const stances: Array<{ id: StanceMode; label: string; keys: string; title: string }> = [
-  { id: 'move', label: 'Move', keys: '1/m', title: 'Move stance: travel, only return fire' },
-  { id: 'attack', label: 'Attack', keys: '2/a', title: 'Attack stance: engage nearby, flee when low' },
-]
 const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
   { key: 'myOrders', label: 'my orders (o)' },
   { key: 'enemyPlans', label: 'enemy plans' },
@@ -111,20 +104,6 @@ function onOverlayChange(key: keyof OverlayFlags, event: Event): void {
         @click="emit('set-speed', s)"
       >
         {{ s }}x
-      </button>
-    </div>
-
-    <div class="speed-group order-modes" title="stance for the selected pieces">
-      <span class="stance-label">stance</span>
-      <button
-        v-for="m in stances"
-        :key="m.id"
-        class="ctl small"
-        :class="{ active: props.stance === m.id }"
-        :title="m.title"
-        @click="emit('set-stance', m.id)"
-      >
-        {{ m.label }} <span class="key">{{ m.keys }}</span>
       </button>
     </div>
 

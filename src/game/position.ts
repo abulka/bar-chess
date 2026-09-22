@@ -36,7 +36,6 @@ export interface SavedPosition {
   teams: Record<TeamId, TeamRuntime>
   gameMode: GameMode
   playerTeam: TeamId
-  orderMode: 'move' | 'attack'
   overlays: OverlayFlags
 }
 
@@ -94,7 +93,6 @@ export function serializePosition(game: {
   teams: Record<TeamId, TeamRuntime>
   gameMode: GameMode
   playerTeam: TeamId
-  orderMode: 'move' | 'attack'
   overlays: OverlayFlags
 }): SavedPosition {
   const captured = game.world.capture()
@@ -113,7 +111,6 @@ export function serializePosition(game: {
     teams: structuredClone(game.teams),
     gameMode: game.gameMode,
     playerTeam: game.playerTeam,
-    orderMode: game.orderMode,
     overlays: { ...game.overlays },
   }
 }

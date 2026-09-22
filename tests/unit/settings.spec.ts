@@ -15,7 +15,6 @@ describe('settings persistence', () => {
     game.applySettings({
       overlays: { rangeArcs: true, grid: false, myOrders: false, reload: false },
       hudVisible: true,
-      orderMode: 'attack',
       speed: 2,
       gameMode: 'ai-vs-ai',
     })
@@ -30,7 +29,6 @@ describe('settings persistence', () => {
     expect(restored.overlays.reload).toBe(false)
     expect(restored.overlays.moveCells).toBe(true)
     expect(restored.hudVisible).toBe(true)
-    expect(restored.orderMode).toBe('attack')
     expect(restored.speed).toBe(2)
     expect(restored.gameMode).toBe('ai-vs-ai')
     expect(restored.teams.red.controller).toBe('ai')
@@ -50,7 +48,6 @@ describe('settings persistence', () => {
       JSON.stringify({
         overlays: { rangeArcs: true, bogus: 'yes', grid: 3 },
         hudVisible: 'true',
-        orderMode: 'sideways',
         speed: 99,
         gameMode: 'nonsense',
       }),
@@ -59,16 +56,14 @@ describe('settings persistence', () => {
     expect(loaded).not.toBeNull()
     expect(loaded?.overlays).toEqual({ rangeArcs: true })
     expect(loaded?.hudVisible).toBeUndefined()
-    expect(loaded?.orderMode).toBeUndefined()
     expect(loaded?.speed).toBeUndefined()
     expect(loaded?.gameMode).toBeUndefined()
   })
 
   it('ignores invalid values in applySettings', () => {
     const game = new Game(8)
-    game.applySettings({ speed: 99, orderMode: 'sideways' as never, gameMode: 'nope' as never })
+    game.applySettings({ speed: 99, gameMode: 'nope' as never })
     expect(game.speed).toBe(1)
-    expect(game.orderMode).toBe('move')
     expect(game.gameMode).toBe('human-vs-ai')
   })
 

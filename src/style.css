@@ -78,6 +78,23 @@ input {
   color: var(--accent);
 }
 
+.pending-command {
+  position: absolute;
+  right: 8px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: #0b0f16;
+  background: #ffd166;
+  border-radius: 3px;
+  padding: 1px 6px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.pending-command.attack {
+  background: #ff6b5a;
+}
+
 /* ---------- toolbar ---------- */
 .toolbar {
   display: flex;
@@ -121,16 +138,6 @@ input {
 .speed-group {
   display: flex;
   gap: 3px;
-}
-
-.order-modes {
-  border-left: 1px solid var(--border);
-  padding-left: 6px;
-}
-
-.order-modes .key {
-  opacity: 0.6;
-  font-size: 0.85em;
 }
 
 .spacer {
@@ -356,12 +363,6 @@ input {
   color: #e3b341;
 }
 
-.stance-label {
-  color: var(--muted);
-  align-self: center;
-  margin-right: 2px;
-}
-
 .center {
   position: relative;
   min-height: 0;
@@ -386,6 +387,14 @@ input {
   width: 100%;
   height: 100%;
   touch-action: none;
+  cursor: crosshair;
+}
+
+.board-canvas.pending-move {
+  cursor: copy;
+}
+
+.board-canvas.pending-attack {
   cursor: crosshair;
 }
 

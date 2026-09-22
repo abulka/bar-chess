@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Motion, Order } from '../../src/ecs/components'
+import { Motion, Order, Stance, Target } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
 import { clearComponents, orderAttack, placePiece } from '../helpers'
 
@@ -33,26 +33,32 @@ describe('Game integration', () => {
     expect(game.teams.blue.alive.pawn).toBe(before + 1)
   })
 
-  it('orderAt issues a goto in move mode and an attack in attack mode', () => {
+  it('orderAt honors an explicit move/attack and is context-sensitive by default', () => {
     const game = new Game(8)
     const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
     const victim = placePiece(game, 'king', 'red', { x: 4, y: 5 })
     game.selected = [attacker]
     const order = game.world.require(attacker, Order)
 
-    game.orderMode = 'move'
-    game.orderAt({ x: 4, y: 5 })
+    game.orderAt({ x: 4, y: 5 }, 'move')
     expect(order.kind).toBe('goto')
     expect(order.dest).toEqual({ x: 4, y: 5 })
     expect(order.queue).toEqual([])
 
     game.clearOrders()
-    game.orderMode = 'attack'
     game.orderAt({ x: 4, y: 5 })
     expect(order.kind).toBe('attack')
     expect(order.target).toBe(victim)
     expect(order.reachable).toBe(true)
     expect(game.world.require(attacker, Motion).path).toEqual([])
+  })
+
+  it('an attack command needs an enemy target', () => {
+    const game = new Game(8)
+    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
+    game.selected = [attacker]
+    game.orderAt({ x: 3, y: 3 }, 'attack')
+    expect(game.world.require(attacker, Order).kind).toBe('none')
   })
 
   it('does not command AI-controlled pieces', () => {
@@ -61,8 +67,7 @@ describe('Game integration', () => {
     placePiece(game, 'king', 'red', { x: 4, y: 5 })
     game.selected = [attacker]
 
-    game.orderMode = 'attack'
-    game.orderAt({ x: 4, y: 5 })
+    game.orderAt({ x: 4, y: 5 }, 'attack')
     expect(game.world.require(attacker, Order).kind).toBe('none')
   })
 
@@ -132,6 +137,85 @@ describe('Game integration', () => {
     runTurn(game)
     expect(game.snapshot().canRedo).toBe(false)
     expect(game.snapshot().canUndo).toBe(true)
+  })
+
+  it('an attack order does not change the piece stance', () => {
+    const game = new Game(8)
+    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
+    placePiece(game, 'king', 'red', { x: 4, y: 5 })
+    game.selected = [attacker]
+    expect(game.world.require(attacker, Stance).mode).toBe('none')
+
+    game.orderAt({ x: 4, y: 5 }, 'attack')
+    expect(game.world.require(attacker, Order).kind).toBe('attack')
+    expect(game.world.require(attacker, Stance).mode).toBe('none')
+  })
+
+  it('setPieceStance applies to the selection, including none', () => {
+    const game = new Game(8)
+    const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
+    const knight = placePiece(game, 'knight', 'blue', { x: 7, y: 7 })
+    game.selected = [rook, knight]
+
+    game.setPieceStance('attack')
+    expect(game.world.require(rook, Stance).mode).toBe('attack')
+    expect(game.world.require(knight, Stance).mode).toBe('attack')
+
+    game.setPieceStance('none')
+    expect(game.world.require(rook, Stance).mode).toBe('none')
+    expect(game.world.require(knight, Stance).mode).toBe('none')
+  })
+
+  it('right-clicking a friendly square is a no-op', () => {
+    const game = new Game(8)
+    const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
+    const friend = placePiece(game, 'knight', 'blue', { x: 0, y: 5 })
+    game.selected = [rook]
+
+    game.orderAt({ x: 0, y: 5 })
+    expect(game.world.require(rook, Order).kind).toBe('none')
+    expect(game.world.require(rook, Order).target).toBeNull()
+    expect(friend).toBeGreaterThan(0)
+  })
+
+  it('clearOrders drops the current target so the piece stops engaging', () => {
+    const game = new Game(8)
+    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
+    const victim = placePiece(game, 'king', 'red', { x: 4, y: 5 })
+    game.selected = [attacker]
+    game.orderAt({ x: 4, y: 5 }, 'attack')
+    game.world.require(attacker, Target).entity = victim
+
+    game.clearOrders()
+    expect(game.world.require(attacker, Target).entity).toBeNull()
+  })
+
+  it('exposes focused piece info for the properties panel', () => {
+    const game = new Game(8)
+    const queen = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
+    game.selected = [queen]
+    game.setPieceStance('attack')
+    game.orderAt({ x: 5, y: 4 }, 'move')
+
+    const info = game.snapshot().pieceInfo
+    expect(info).not.toBeNull()
+    expect(info!.entity).toBe(queen)
+    expect(info!.kind).toBe('queen')
+    expect(info!.stance).toBe('attack')
+    expect(info!.commandable).toBe(true)
+    expect(info!.order.kind).toBe('goto')
+    expect(info!.order.destCoord).toBe('f4')
+    expect(info!.health.max).toBeGreaterThan(0)
+    expect(game.snapshot().selectionCount).toBe(1)
+  })
+
+  it('tracks a pending BAR-style command', () => {
+    const game = new Game(8)
+    expect(game.snapshot().pendingCommand).toBe('none')
+    game.setPendingCommand('attack')
+    expect(game.snapshot().pendingCommand).toBe('attack')
+    game.clearPendingCommand()
+    expect(game.snapshot().pendingCommand).toBe('none')
   })
 
   it('orderAttack helper marks a clear shot as reachable', () => {

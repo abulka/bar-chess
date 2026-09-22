@@ -21,7 +21,7 @@ See `PLAN.md` for the design intent and roadmap.
               ┌─────────────────────┼──────────────────────────┐
               ▼                     ▼                          ▼
         Toolbar.vue         ReinforcementBar.vue          EventLog.vue
-        StatsBar.vue        BoardView.vue ──renders──▶ canvas
+        StatsBar.vue        PiecePanel.vue               BoardView.vue ──renders──▶ canvas
                                     │
               user input (pan / zoom / select / order)
                                     ▼
@@ -157,9 +157,10 @@ requestAnimationFrame(frame):
 system turns stance/orders into movement for **every** piece; for AI teams it
 also auto-manages behaviour (rally/engage). Human pieces start with no stance
 (`none`, no badge) and act solely on player orders, while still
-firing autonomously via combat. A piece is commandable only when its team's
-controller is `human`. The toolbar shows the mode and a `You: Blue · Red ai`
-badge.
+firing autonomously via combat. A piece's stance is changed only from the piece
+panel (`setPieceStance`), never implicitly by an order. A piece is commandable
+only when its team's controller is `human`. The toolbar shows the mode drop-down
+and a `You: Blue · Red ai` badge.
 
 `SimContext` (`src/ecs/types.ts`) is the shared mutable context passed to every
 system: `world`, `bus`, `board`, `rng`, `tick`, `turn`, `dt`, `cmds`, `teams`,
@@ -239,8 +240,8 @@ cell/reservation during movement validation and path planning.
   nearest enemy already in firing geometry; `attack` auto-acquires the nearest
   enemy within `weaponVision`, biased toward damaged ones; `move` only targets
   its `lastAttacker` while `underFire`. AI-controlled teams always behave as
-  `attack`. When an attack order ends (target gone) the order clears but the
-  stance is kept, so the piece stays in Attack.
+  `attack`. When an attack order ends (target gone) the order clears; the stance
+  is never changed by orders, so the piece reverts to its explicit policy.
 - **orders** — turns stance/order into `Motion.goal` for every piece (human or
   AI): an `attack` order pursues the target (or stops to fire when in geometry);
   a `goto` order advances toward the objective (best effort); autonomous `attack`
@@ -350,7 +351,7 @@ large displays. `zoomAt` is cursor-anchored; wheel zoom is exponential on
 `App.vue` constructs one `Game` (which starts **paused**), starts the frame loop,
 and copies `game.snapshot()` into a `shallowRef` every
 `SNAPSHOT_INTERVAL_MS = 120`. The simulation never depends on Vue reactivity.
-Control hints + stance legend + hover readout live in always-visible side rails
+Control hints + the piece panel + hover readout live in always-visible side rails
 (left/right), independent of the HUD toggle, so they never cover the board. The
 HUD starts hidden; `h` toggles it.
 
@@ -358,12 +359,13 @@ HUD starts hidden; `h` toggles it.
 boardId boardSize boardSizes teams timings events eventCount shots kills
 warnings selected selectedLines counts winner overlays hudVisible playerTeam
 turnActive canReplay canUndo canRedo replaying turnProgress replayProgress
-terrainVersion`.
+pendingCommand selectionCount stanceSummary pieceInfo terrainVersion`.
 
 | Component | Responsibility |
 | --------- | -------------- |
-| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, order mode, overlay toggles, HUD toggle, reset |
-| `BoardView.vue` | canvas + Renderer; drag box-select (any touched cell; shift-click adds), shift/middle-drag pan, wheel zoom, right-click order; draws the selection rectangle |
+| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, overlay toggles, HUD toggle, reset |
+| `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle |
+| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, queue, movement) with selection-wide stance buttons and clear-orders |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
 | `StatsBar.vue` | tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Inspector for the selection |
@@ -397,25 +399,29 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
 drawn for selected pieces only; the health and recharge bars are drawn for every
 piece (each gated by its toggle), and army scopes show paths/goals/targets.
 
-The toolbar sets a **global order mode** (Move / Attack) with `1`/`m` and
-`2`/`a`; it also stamps that policy onto the current selection. Right-click then
-issues an order for every selected piece: in Move mode a target square is a goto
-(enemy or not), in Attack mode an enemy square is an attack order. If the piece
-already has an active order, the click **appends** a queued step instead
-(`Game.appendStep`), so `move, move, attack` can be planned with repeated
-right-clicks; only the first right-click on an unplanned piece replaces/creates
-the active order, and `c` clears the whole plan. A move on an un-queued attacker
-still suspends/regroups rather than queueing behind the attack. The queued
-remainder is drawn by the renderer as a dim dashed chain with numbered waypoint
-markers (`queueMarkers`), and a queued attack shows a dim threat line to its
-target. The mode persists, so attacks can be issued across many pieces and
-targets. Pieces start
-with no stance and show no badge; only an explicit stance or an active attack
-order draws one. Toolbar selects/checkboxes blur after
-use so the global shortcuts always reach the window. Drag box-selection selects
-any piece whose cell the box touches (`Game.selectRect`), shift-click adds,
-shift/middle-drag pans. Hovering computes a per-selected-piece order preview
-(`Game.setHover`, drawn as faint ghosts) and a cell readout.
+Ordering is BAR-style and **context-sensitive** — there is no global order mode:
+
+- **Left-click** selects; shift-click adds; a drag box-selects (`Game.selectRect`).
+- **Right-click** issues an order for every selected commandable piece:
+  enemy square → attack, empty square → goto, friendly square → no-op. A repeat
+  click (or Shift+right-click) **appends** a queued step (`Game.appendStep`), so
+  `move, move, attack` can be planned with repeated right-clicks; only the first
+  click on an unplanned piece replaces/creates the active order, and `c` clears
+  the whole plan. A move on an un-queued attacker still suspends/regroups rather
+  than queueing behind the attack.
+- **`m` / `a` + left-click** arms a transient **pending command**
+  (`Game.pendingCommand`) to force a move/attack: `Game.orderAt(cell, command)`.
+  The prefix is consumed by the click unless **Shift** is held (kept armed to
+  queue several); a plain left-click selects and clears it. `a` on an empty or
+  friendly square is a no-op (a warning is emitted).
+- The queued remainder is drawn by the renderer as a dim dashed chain with
+  numbered waypoint markers (`queueMarkers`), and a queued attack shows a dim
+  threat line to its target.
+- Pieces start with no stance and show no badge; only an explicit stance or an
+  active attack order draws one. Toolbar selects/checkboxes blur after use so the
+  global shortcuts always reach the window.
+- Hovering computes a per-selected-piece order preview (`Game.setHover`, drawn as
+  faint ghosts) and a cell readout.
 Chess coordinates (`coordName`) label the board margins.
 
 ### Position save / load / export
@@ -447,8 +453,8 @@ byte-identical stream (see §10).
 UI/session preferences survive a reload (and a dev-server restart) via
 `src/game/settings.ts`: `Game.settings()` snapshots them and `Game.applySettings`
 applies a validated patch. Stored under `bar-chess.settings`:
-`overlays` (all flags), `hudVisible`, `orderMode` (Move/Attack stance), `speed`
-and `gameMode`. `loadSettings` drops malformed or out-of-range fields (unknown
+`overlays` (all flags), `hudVisible`, `speed` and `gameMode` (per-piece stance
+lives in the world, not here). `loadSettings` drops malformed or out-of-range fields (unknown
 overlay keys, non-boolean flags, speeds outside `SPEEDS`, unknown modes), and
 `saveSettings` swallows storage failures (private mode, quota) so persistence can
 never break the game. `App.vue` applies the patch once at startup and re-saves on
@@ -473,25 +479,27 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   `window.game` in dev. The shorthand is read-only — `SavedPosition` JSON stays
   the import/round-trip format.
 
-Keyboard: `1`/`m` Move and `2`/`a` Attack order mode, `space` turn, `p` pause,
-`s` step, `u`/`r` undo/redo, `y` replay, `c`/`Backspace` clear orders, `o` my
-orders, `e` enemy plans, `h` HUD, `Esc` clear selection. `Game.orderAt` makes a goto on any square
-in Move mode and an attack on an enemy in Attack mode (`Game.orderMode`);
-re-issuing the same order appends a queued step (a duplicate of the active or
-last queued step is ignored), and only pieces under human control can be
-commanded. An attack sets the ordered piece to Attack (red **A** badge) and it
-stays in Attack after the order clears. The
-attack navigation is theoretical: a gold dashed route planned as if the board
+Keyboard: `m`/`a` arm a move/attack command (then left-click; Shift keeps it
+armed), `space` turn, `p` pause, `s` step, `u`/`r` undo/redo, `y` replay,
+`c`/`Backspace` clear orders, `o` my orders, `e` enemy plans, `h` HUD, `Esc`
+cancel the pending command else clear the selection. `Game.orderAt(cell,
+command?)` resolves the intent: an explicit `move` always gotos, an explicit
+`attack` requires an enemy occupant, and omitted is context-sensitive
+(enemy→attack, friendly→no-op, empty→goto). Re-issuing the same order appends a
+queued step (a duplicate of the active or last queued step is ignored), and only
+pieces under human control can be commanded. Orders never change stance; the
+piece stays whatever the **piece panel** set (red **A** = Attack stance badge).
+The attack navigation is theoretical: a gold dashed route planned as if the board
 were clear (only walls and the target's square avoided), ending on a genuine
 firing cell or the closest empty reachable cell. The firing line from there to
 the victim is judged against the current board: solid red when the shot is clear;
 solid red up to the blocker and dashed red beyond it when reachable but blocked;
 dashed grey when positionally out of reach. A lock reticle sits on the victim and
 the legend groups these under "firing lines". When the target dies the order
-clears but the stance is kept (the piece stays in Attack), and `planAttack`
-routes immediately (visible while paused) against a fresh occupancy map. A
-right-click never changes the selection. `space` is ignored while a turn/replay
-is running; `u`/`r` undo/redo completed turns.
+clears (stance unchanged), and `planAttack` routes immediately (visible while
+paused) against a fresh occupancy map. Left/right clicks never change the
+selection. `space` is ignored while a turn/replay is running; `u`/`r` undo/redo
+completed turns.
 
 Team colour is Orange vs Blue; **red marks an ordered attack**: the firing chain,
 the Attack stance badge, and the ring around a piece targeted by an explicit
@@ -606,7 +614,7 @@ src/
     overlays.ts                pure firingLine/routePolyline segment data
     renderer.ts                canvas draw pipeline + overlays
   components/
-    Toolbar.vue BoardView.vue ReinforcementBar.vue StatsBar.vue EventLog.vue
+    Toolbar.vue BoardView.vue PiecePanel.vue ReinforcementBar.vue StatsBar.vue EventLog.vue
 tests/
   unit/                        logic, systems, Game integration, perf guards
   render/                      overlays + mock-2D-context renderer strokes
