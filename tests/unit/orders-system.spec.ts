@@ -44,79 +44,100 @@ function makeContext(): SimContext {
   }
 }
 
-/**
- * A low-HP (30/165) blue piece in Attack stance, auto-targeting a red threat.
- * Ignores the normal HP/geometry of the attacker so the low-HP rule is hit.
- */
-function lowHp(
-  attackerKind: string,
-  attackerCell: { x: number; y: number },
-  threatKind: string,
-  threatCell: { x: number; y: number },
-) {
-  const ctx = makeContext()
-  // These exercise the Attack-stance fallback, not the auto-preserve pass.
-  ctx.autoPreserve = false
-  const attacker = createPiece(ctx, 'blue', PIECES[attackerKind], attackerCell)
-  const threat = createPiece(ctx, 'red', PIECES[threatKind], threatCell)
-  ctx.world.require(attacker, Stance).mode = 'attack'
-  ctx.world.require(attacker, Health).cur = 30
-  ctx.world.require(attacker, Target).entity = threat
-  ctx.world.require(attacker, Order).kind = 'none'
-  return { ctx, attacker, threat }
-}
-
 function run(ctx: SimContext): void {
   ctx.occupancy = buildOccupancy(ctx.world, ctx.board)
   orders.update(ctx)
 }
 
-/** Rook-style coverage: an orthogonal line from `from` to `to`. */
-function ortho(from: { x: number; y: number }, to: { x: number; y: number }): boolean {
-  return from.x === to.x || from.y === to.y
-}
-
-describe('orders system — low-HP Attack stance', () => {
+describe('orders system — low-HP retreat (auto-preserve off)', () => {
   beforeEach(() => clearComponents())
 
-  it('holds and fires when the target is already in firing geometry', () => {
-    const { ctx, attacker } = lowHp('queen', { x: 3, y: 3 }, 'knight', { x: 4, y: 4 })
-    run(ctx)
-    expect(ctx.world.require(attacker, Motion).goal).toBeNull()
-  })
+  /** A flat board with back ranks so `retreatHome` has a target. */
+  function context(): SimContext {
+    const ctx = makeContext()
+    ctx.autoPreserve = false
+    ctx.board.data.lanes.red = [{ x: 3, y: 0 }]
+    ctx.board.data.lanes.blue = [{ x: 3, y: 7 }]
+    return ctx
+  }
 
-  it('retreats when the target is out of range', () => {
-    const { ctx, attacker } = lowHp('queen', { x: 3, y: 3 }, 'knight', { x: 0, y: 1 })
+  it('escapes the shooter covering it, not just the target', () => {
+    const ctx = context()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 3, y: 3 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 3, y: 0 }) // c-file
+    ctx.world.require(queen, Stance).mode = 'attack'
+    ctx.world.require(queen, Health).cur = 20
+    ctx.world.require(queen, Target).entity = rook
+
     run(ctx)
-    const goal = ctx.world.require(attacker, Motion).goal
+
+    const goal = ctx.world.require(queen, Motion).goal
     expect(goal).not.toBeNull()
-    expect(Math.hypot(goal!.x - 0, goal!.y - 1)).toBeGreaterThan(Math.hypot(3 - 0, 3 - 1))
+    // Steps off the file the rook covers.
+    expect(goal!.x).not.toBe(3)
   })
 
-  it('steps to the nearest cell that keeps the shot but escapes a rook threat', () => {
-    // Red rook on the c-file can hit the queen on c4; a diagonal square cannot
-    // be hit by the rook yet still fires back along a line.
-    const { ctx, attacker } = lowHp('queen', { x: 3, y: 3 }, 'rook', { x: 3, y: 0 })
+  it('seeks nearby cover instead of charging or fleeing home (h5 regression)', () => {
+    const ctx = context()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 7, y: 4 }) // h5
+    const bishop = createPiece(ctx, 'red', PIECES.bishop, { x: 2, y: 3 }) // far, not shooting
+    createPiece(ctx, 'red', PIECES.king, { x: 7, y: 6 }) // near, but cannot reach the queen
+    ctx.world.require(queen, Stance).mode = 'attack'
+    ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.33)
+    ctx.world.require(queen, Target).entity = bishop
+
     run(ctx)
 
-    const goal = ctx.world.require(attacker, Motion).goal
+    const goal = ctx.world.require(queen, Motion).goal
     expect(goal).not.toBeNull()
-    // Escapes the rook's orthogonal lines...
-    expect(ortho(goal!, { x: 3, y: 0 })).toBe(false)
-    // ...while staying on a line that still fires at it.
-    const aligned = goal!.x === 3 || goal!.y === 0 || Math.abs(goal!.x - 3) === Math.abs(goal!.y - 0)
-    expect(aligned).toBe(true)
-    // Nearest safe firing squares on this board.
-    expect([
-      { x: 0, y: 3 },
-      { x: 6, y: 3 },
-    ]).toContainEqual(goal)
+    // Never the old h6 blunder; it backs away from the nearby king.
+    expect(goal).not.toEqual({ x: 7, y: 5 })
+    const before = Math.hypot(7 - 7, 4 - 6)
+    expect(Math.hypot(goal!.x - 7, goal!.y - 6)).toBeGreaterThan(before)
   })
 
-  it('holds when no safer firing cell exists (symmetric rook duel)', () => {
-    const { ctx, attacker } = lowHp('rook', { x: 3, y: 3 }, 'rook', { x: 3, y: 0 })
+  it('does not step into a nearby enemy\'s firing line', () => {
+    const ctx = context()
+    const pawn = createPiece(ctx, 'blue', PIECES.pawn, { x: 4, y: 4 })
+    // The knight cannot hit the pawn where it stands, but it does cover the
+    // pawn's only forward square (4,3).
+    const knight = createPiece(ctx, 'red', PIECES.knight, { x: 6, y: 4 })
+    ctx.world.require(pawn, Stance).mode = 'attack'
+    ctx.world.require(pawn, Health).cur = 10
+    ctx.world.require(pawn, Target).entity = knight
+
     run(ctx)
-    expect(ctx.world.require(attacker, Motion).goal).toBeNull()
+
+    expect(ctx.world.require(pawn, Motion).goal).toBeNull()
+  })
+
+  it('holds when hurt with no enemy nearby', () => {
+    const ctx = context()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 7, y: 0 })
+    const knight = createPiece(ctx, 'red', PIECES.knight, { x: 0, y: 7 }) // far, short reach
+    ctx.world.require(queen, Stance).mode = 'attack'
+    ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.33)
+    ctx.world.require(queen, Target).entity = knight
+
+    run(ctx)
+
+    expect(ctx.world.require(queen, Motion).goal).toBeNull()
+  })
+
+  it('steps out of an actual shooter\'s line when one is present', () => {
+    const ctx = context()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 7, y: 4 }) // h5
+    createPiece(ctx, 'red', PIECES.rook, { x: 7, y: 0 }) // h-file, covers h5
+    const bishop = createPiece(ctx, 'red', PIECES.bishop, { x: 2, y: 3 })
+    ctx.world.require(queen, Stance).mode = 'attack'
+    ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.33)
+    ctx.world.require(queen, Target).entity = bishop
+
+    run(ctx)
+
+    const goal = ctx.world.require(queen, Motion).goal
+    expect(goal).not.toBeNull()
+    expect(goal!.x).not.toBe(7) // steps off the rook's file
   })
 })
 
@@ -322,5 +343,38 @@ describe('orders system — automatic self-preservation', () => {
     // It retreats from the attacker rather than charging it.
     const before = Math.hypot(4 - 5, 4 - 6)
     expect(Math.hypot(goal!.x - 5, goal!.y - 6)).toBeGreaterThan(before)
+  })
+})
+
+describe('orders system — attack orders', () => {
+  beforeEach(() => clearComponents())
+
+  it('holds instead of chasing a positionally unreachable target', () => {
+    const ctx = makeContext()
+    const bishop = createPiece(ctx, 'blue', PIECES.bishop, { x: 5, y: 3 }) // f5 (light)
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 3, y: 0 }) // d8 (dark)
+    const order = ctx.world.require(bishop, Order)
+    order.kind = 'attack'
+    order.target = king
+    order.reachable = false
+
+    run(ctx)
+
+    // Would otherwise route to the nearest reachable square — deep in enemy lines.
+    expect(ctx.world.require(bishop, Motion).goal).toBeNull()
+  })
+
+  it('still pursues a reachable attack target', () => {
+    const ctx = makeContext()
+    const bishop = createPiece(ctx, 'blue', PIECES.bishop, { x: 5, y: 3 })
+    const queen = createPiece(ctx, 'red', PIECES.queen, { x: 1, y: 5 })
+    const order = ctx.world.require(bishop, Order)
+    order.kind = 'attack'
+    order.target = queen
+    order.reachable = true
+
+    run(ctx)
+
+    expect(ctx.world.require(bishop, Motion).goal).not.toBeNull()
   })
 })

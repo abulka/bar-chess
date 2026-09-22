@@ -1,4 +1,5 @@
 import { firingPositionExists } from '../../game/approach'
+import { ATTACK_LEASH } from '../../game/constants'
 import { fireCells } from '../../game/geometry'
 import { buildOccupancy, makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS, weaponVision } from '../../game/pieces'
@@ -33,10 +34,14 @@ function nearestInFireGeometry(
   return best
 }
 
-/** Attack acquisition: nearest enemy within vision, biased toward damaged ones. */
+/**
+ * Attack acquisition: nearest enemy within vision, biased toward damaged ones.
+ * Sliders have board-wide vision, so the leash keeps Attack from chasing a
+ * target clear across the map; the piece fights locally instead.
+ */
 function acquireAttack(ctx: SimContext, e: Entity, team: 'red' | 'blue', weaponKey: string): Entity | null {
   const cell = ctx.world.require(e, Cell)
-  const vision = weaponVision(WEAPONS[weaponKey].geometry)
+  const vision = Math.min(weaponVision(WEAPONS[weaponKey].geometry), ATTACK_LEASH)
   const maxDist2 = vision * vision
   let best: Entity | null = null
   let bestScore = Infinity

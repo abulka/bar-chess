@@ -246,19 +246,25 @@ cell/reservation during movement validation and path planning.
 - **targeting** — rebuilds occupancy, then sets the engagement target from
   stance + order: an `attack` order is sticky on its enemy; `none` picks the
   nearest enemy already in firing geometry; `attack` auto-acquires the nearest
-  enemy within `weaponVision`, biased toward damaged ones; `move` only targets
-  its `lastAttacker` while `underFire`. AI-controlled teams always behave as
-  `attack`. When an attack order ends (target gone) the order clears; the stance
-  is never changed by orders, so the piece reverts to its explicit policy.
+  enemy within `min(weaponVision, ATTACK_LEASH)` (so sliders fight locally instead
+  of chasing board-wide), biased toward damaged ones; `move` only targets its
+  `lastAttacker` while `underFire`. AI-controlled teams always behave as `attack`.
+  When an attack order ends (target gone) the order clears; the stance is never
+  changed by orders, so the piece reverts to its explicit policy. The `orders`
+  leash guard also holds a piece that drifts beyond `ATTACK_LEASH` and is not in
+  firing geometry.
 - **orders** — turns stance/order into `Motion.goal` for every piece (human or
-  AI): an `attack` order pursues the target (or stops to fire when in geometry);
+  AI): an `attack` order pursues the target (or stops to fire when in geometry),
+  but a **positionally unreachable** order (`order.reachable === false`, e.g. a
+  bishop ordered onto the opposite colour) is held pending rather than chased —
+  otherwise `pursue` would route the piece to the nearest reachable square, often
+  deep in enemy lines. Targeting recomputes `reachable` each tick, so it resumes
+  if the target moves onto a coverable line;
   a `goto` order advances toward the objective (best effort); autonomous `attack`
-  pursues in a leash, and rallies only for AI teams; a low-HP attacker keeps its
-  shot — it holds when it can already hit the target and is safe, steps to the
-  nearest firing cell that escapes the current threats' fire geometry (the target
-  and its last attacker) when that reduces incoming damage, and only retreats
-  outright when the target is out of range. Anything other than `attack` clears
-  the goal. Pursuit picks a goal with the
+  pursues in a leash, and rallies only for AI teams; a low-HP piece retreats via
+  `preservation.ts` (escape the shooters that actually cover it, else seek nearby
+  cover — see the self-preservation note below). Anything other than
+  `attack` clears the goal. Pursuit picks a goal with the
   same chain as `Game.planAttack` (`previewFiringCell` → `closestEmptyCell` →
   target) so the executed route cannot diverge from the preview; a firing position
   beats piling onto the occupied target, and a positionally unreachable target
@@ -286,20 +292,26 @@ cell/reservation during movement validation and path planning.
   `preservation.ts` supplies the shared core: `coverageThreats` (every enemy
   whose `fireCells` cover the piece, plus its recent attacker; the king widens
   this with `KING_THREAT_RADIUS`), `outgunned` (one-volley damage ≥ remaining
-  HP), and   `escapeGoal`, which scores each legal step by the **total** damage
-  covering it (plus a small adjacency penalty, below the weakest weapon's damage),
-  then whether it keeps the current target in range, then distance — so a piece
-  dodges *all* shooters, not just the last one, and otherwise picks the
-  lowest-exposure square that still fires. It triggers when the piece is below a
+  HP), and `escapeGoal`, which scores each legal step by the **total** damage
+  covering it (every threat's firing geometry counts — including a nearby enemy
+  that cannot hit the piece yet but can hit the square it is about to enter — plus
+  a small adjacency penalty, below the weakest weapon's damage), then whether it
+  keeps the current target in range, then distance — so a piece dodges *all*
+  shooters, not just the last one, and otherwise picks the lowest-exposure square
+  that still fires. It triggers when the piece is below a
   per-kind HP threshold (`preserveThreshold`: queen/king 0.5, rook 0.45,
   bishop/knight 0.4, else 0.3) **or** outgunned **or** — for queen/rook/bishop/
   knight/king — covered by two or more shooters, even above the HP gate. Valuable
   pieces run this scan every tick so they can bail before taking damage; cheap
   pieces only scan once hurt or actually under fire, and `coverageThreats` skips
   any enemy beyond its weapon's reach, keeping the cost bounded. It runs even with
-  an explicit order, which stays queued and resumes when the piece is safe. Gated
-  by `ctx.autoPreserve`, the persisted **auto-preserve** toolbar toggle; with it
-  off, the older Attack-stance `safeRetreat` fallback still runs.
+  an explicit order, which stays queued and resumes when the piece is safe. When
+  hurt, the scan widens to `COVER_RADIUS = 6` so nearby enemies count even before
+  they can shoot; it then steps to the least-exposed nearby square (keeping its
+  shot as a tie-break) and holds there rather than chasing or trekking home. Gated by
+  `ctx.autoPreserve`, the persisted **auto-preserve** toolbar toggle; with it off
+  the same coverage-based retreat still runs for a low-HP Attack-stance piece
+  (there is no longer a single-target `fleeCell` path).
   A `goto` that carries a `resumeTarget` is a suspended attack: on arrival (or
   once stalled) it arms `resumeTurn = ctx.turn + 2` and **regroups** — holding, or
   kiting one step back while under fire (`kiteCell`, which raises distance while

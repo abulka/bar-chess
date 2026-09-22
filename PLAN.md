@@ -184,12 +184,22 @@ autonomously.
 **Self-preservation** runs for every piece, human or AI: once it is badly hurt
 and still under fire it steps off the firing line on its own — even with an
 explicit order, which resumes when it is safe. It judges the escape against
-**every** shooter covering it (not just the last one). Valuable pieces
+**every** shooter covering it (not just the last one); if nothing covers it while
+it is hurt, it seeks cover from any nearby enemy and holds, firing when it can,
+rather than chasing or blindly fleeing its target. Valuable pieces
 (queen/rook/bishop/knight) watch for crossfire every moment and back off before
-they are hit once they are outgunned or focused by two or more attackers; cheaper
-pieces only react once they are hurt. Costlier pieces bail earlier (queen/king at
-50% health, rook 45%, bishop/knight 40%, pawn 30%). A persisted **auto-preserve**
-checkbox in the toolbar turns the behaviour off.
+they are hit once they are outgunned or focused
+by two or more attackers; cheaper pieces only react once they are hurt. Costlier
+pieces bail earlier (queen/king at 50% health, rook 45%, bishop/knight 40%, pawn
+30%). A persisted **auto-preserve** checkbox in the toolbar turns the behaviour
+off.
+
+**Attack leash.** Autonomous Attack only acquires targets within `ATTACK_LEASH`
+(8 squares) instead of a slider's board-wide vision, so pieces fight locally
+rather than wandering across the map to an out-of-range enemy. An attack order on
+a **positionally impossible** target (e.g. a bishop ordered onto the opposite
+colour square) is held pending instead of chasing the nearest reachable square,
+which used to walk the piece into enemy lines.
 
 ## Overlays: seeing what is going on
 

@@ -120,6 +120,18 @@ export function isValuable(kind: string): boolean {
   return kind === 'queen' || kind === 'rook' || kind === 'bishop' || kind === 'knight' || kind === 'king'
 }
 
+/** Middle of a team's own back rank — the AI king's post. */
+export function homeCell(ctx: SimContext, team: TeamId): Vec2 | null {
+  const lanes = ctx.board.data.lanes[team]
+  return lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
+}
+
+/**
+ * How far a hurt piece still watches for enemies while it is holding ground. It
+ * backs away from anything inside this ring even if nothing can shoot it yet.
+ */
+export const COVER_RADIUS = 6
+
 // Kept small: a square merely beside a threat is still safer than one inside its
 // actual firing line (lowest weapon damage is 7).
 const ADJACENT_PENALTY = 5
@@ -144,13 +156,14 @@ export function escapeGoal(
   if (!def || !cell || threats.length === 0) return null
 
   const selfFree = occupiedExcept(ctx.board, ctx.occupancy, piece)
-  const coverages = threats
-    .filter((t) => t.canHitNow)
-    .map((t) => {
-      const od = PIECES[ctx.world.require(t.entity, PieceType).kind]
-      const cells = od ? fireCells(ctx.board, t.cell, WEAPONS[od.weapon].geometry, t.team, selfFree) : []
-      return { cells, weight: t.damage }
-    })
+  // Every threat's firing geometry counts, not only the ones already covering
+  // the piece: a nearby enemy that cannot hit it *yet* can still hit the square
+  // it is about to step into.
+  const coverages = threats.map((t) => {
+    const od = PIECES[ctx.world.require(t.entity, PieceType).kind]
+    const cells = od ? fireCells(ctx.board, t.cell, WEAPONS[od.weapon].geometry, t.team, selfFree) : []
+    return { cells, weight: t.damage }
+  })
 
   const dangerAt = (x: number, y: number): number => {
     let danger = 0

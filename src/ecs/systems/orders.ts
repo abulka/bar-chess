@@ -1,6 +1,6 @@
+import { ATTACK_LEASH } from '../../game/constants'
 import { chebyshev, containsCell, fireCells, moveDestinations } from '../../game/geometry'
-import type { OccupiedFn } from '../../game/geometry'
-import { makeOccupied, occupiedExcept } from '../../game/occupancy'
+import { makeOccupied } from '../../game/occupancy'
 import { closestEmptyCell, previewFiringCell } from '../../game/approach'
 import { PIECES, WEAPONS } from '../../game/pieces'
 import { reachableCells } from '../../game/pathfind'
@@ -11,7 +11,7 @@ import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
 import { aiKingGoal, isScreening, KING_GUARD_RADIUS, kingOf, kingThreats, screenPlan } from './kingDefense'
-import { coverageThreats, escapeGoal, isValuable, outgunned } from './preservation'
+import { COVER_RADIUS, coverageThreats, escapeGoal, isValuable, outgunned } from './preservation'
 import type { ThreatMemo } from './preservation'
 
 const REGROUP_TURNS = 2
@@ -92,95 +92,6 @@ function pursue(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'
     closestEmptyCell(ctx.board, cell, tcell, def.move, team, occupied) ??
     { x: tcell.x, y: tcell.y }
   )
-}
-
-/** Best one-move cell that increases distance from the threat. */
-function fleeCell(ctx: SimContext, e: Entity, team: 'red' | 'blue', threat: Entity): { x: number; y: number } | null {
-  const kind = ctx.world.require(e, PieceType).kind
-  const def = PIECES[kind]
-  if (!def) return null
-  const cell = ctx.world.require(e, Cell)
-  const tc = ctx.world.get(threat, Cell)
-  if (!tc) return null
-  const occupied = makeOccupied(ctx.board, ctx.occupancy)
-  const options = moveDestinations(ctx.board, cell, def.move, team, occupied)
-  let best: { x: number; y: number } | null = null
-  let bestDist = -Infinity
-  for (const c of options) {
-    const d = Math.hypot(c.x - tc.x, c.y - tc.y)
-    if (d > bestDist) {
-      bestDist = d
-      best = c
-    }
-  }
-  return best
-}
-
-/** Cells `attacker` could hit with its weapon from `fromCell` (LOS included). */
-function fireCoverage(
-  ctx: SimContext,
-  attacker: Entity,
-  fromCell: { x: number; y: number },
-  occupied: OccupiedFn,
-): { x: number; y: number }[] {
-  const kind = ctx.world.get(attacker, PieceType)?.kind
-  const team = ctx.world.get(attacker, Team)
-  const def = kind ? PIECES[kind] : undefined
-  if (!def || !team) return []
-  return fireCells(ctx.board, fromCell, WEAPONS[def.weapon].geometry, team, occupied)
-}
-
-/**
- * A low-HP attacker that can already hit its target holds the shot instead of
- * running off. It only steps aside when it can find a cell that still fires on
- * the target but is outside the firing geometry of the threats (the target and
- * whoever last hit it), so backing off actually lowers incoming damage. The
- * nearest such cell is chosen to avoid drifting out of the fight. Returns null
- * (hold) when no safer firing cell exists.
- */
-function safeRetreat(
-  ctx: SimContext,
-  e: Entity,
-  team: 'red' | 'blue',
-  target: Entity,
-  lastAttacker: Entity | null,
-): { x: number; y: number } | null {
-  const def = PIECES[ctx.world.require(e, PieceType).kind]
-  const cell = ctx.world.require(e, Cell)
-  if (!def) return null
-  // If the target is out of reach there is no shot to keep: retreat outright.
-  if (!inFiringGeometry(ctx, e, target, team)) return fleeCell(ctx, e, team, target)
-
-  const tcell = ctx.world.require(target, Cell)
-  const occupied = occupiedExcept(ctx.board, ctx.occupancy, e)
-  const coverage = [target]
-    .concat(
-      lastAttacker !== null &&
-        lastAttacker !== target &&
-        ctx.world.isAlive(lastAttacker) &&
-        ctx.world.has(lastAttacker, Cell)
-        ? [lastAttacker]
-        : [],
-    )
-    .map((t) => fireCoverage(ctx, t, ctx.world.require(t, Cell), occupied))
-  const exposed = (x: number, y: number) => coverage.some((cells) => containsCell(cells, x, y))
-
-  // Already outside every threat's reach: hold and fire.
-  if (!exposed(cell.x, cell.y)) return null
-
-  const weapon = WEAPONS[def.weapon].geometry
-  let best: { x: number; y: number } | null = null
-  let bestDist = Infinity
-  for (const c of moveDestinations(ctx.board, cell, def.move, team, occupied)) {
-    if (exposed(c.x, c.y)) continue
-    if (!containsCell(fireCells(ctx.board, c, weapon, team, occupied), tcell.x, tcell.y)) continue
-    const d = (c.x - cell.x) ** 2 + (c.y - cell.y) ** 2
-    if (d < bestDist) {
-      bestDist = d
-      best = c
-    }
-  }
-  return best
 }
 
 /**
@@ -276,10 +187,14 @@ const system: System = {
         // Judge the escape against every enemy currently covering this piece, not
         // just the last one to shoot. Valuable pieces also bail when outgunned or
         // focused by two or more shooters, before their HP drops.
-        const threats = coverageThreats(ctx, e, team, pieceThreatMemo)
+        // Wide scan: even enemies not yet shooting count as cover pressure, so a
+        // hurt piece backs away from the danger instead of standing in it.
+        const threats = coverageThreats(ctx, e, team, pieceThreatMemo, { proximityRadius: COVER_RADIUS })
         const shooters = threats.reduce((n, t) => n + (t.canHitNow ? 1 : 0), 0)
         const pressured = outgunned(ctx, e, threats) || (valuable && shooters >= 2)
-        if (threats.length > 0 && (hpRatio < preserve || pressured)) {
+        if (hpRatio < preserve || pressured) {
+          // Seek cover: step to the least-exposed nearby square, keeping a shot
+          // when free; hold when every step is no safer (or nobody is near).
           const keepShot =
             targetValid && (order.kind === 'attack' || stance.mode === 'attack') ? (target.entity as number) : null
           motion.goal = escapeGoal(ctx, e, team, threats, keepShot)
@@ -291,7 +206,13 @@ const system: System = {
       if (order.kind === 'attack') {
         const t = order.target
         if (t !== null && ctx.world.isAlive(t) && ctx.world.has(t, Cell)) {
-          motion.goal = pursue(ctx, e, t, team)
+          // A positionally impossible target (e.g. a bishop on the wrong colour
+          // square) is kept pending but not chased: marching to the nearest
+          // reachable square would mean walking into the enemy and dying for
+          // nothing. Targeting recomputes `reachable`, so it resumes if the
+          // target moves onto a line this piece can cover.
+          if (order.reachable) motion.goal = pursue(ctx, e, t, team)
+          else motion.goal = null
           continue
         }
         // The order is done; the next queued step takes over, else clear. The
@@ -430,9 +351,9 @@ const system: System = {
       }
 
       if (targetValid && hpRatio < preserveThreshold(kind ?? '')) {
-        // Low HP: keep firing. Hold if already safe, step to a safer firing cell
-        // when one exists, otherwise retreat or hold (see safeRetreat).
-        motion.goal = safeRetreat(ctx, e, team, target.entity as number, target.lastAttacker)
+        // Low HP (auto-preserve off): seek nearby cover, keeping the shot if free.
+        const threats = coverageThreats(ctx, e, team, pieceThreatMemo, { proximityRadius: COVER_RADIUS })
+        motion.goal = escapeGoal(ctx, e, team, threats, target.entity as number)
         continue
       }
       if (!targetValid) {
@@ -440,7 +361,13 @@ const system: System = {
         motion.goal = controller === 'ai' ? rally(ctx, team) : null
         continue
       }
-      motion.goal = pursue(ctx, e, target.entity as number, team)
+      // Leash: don't chase an auto-acquired target clear across the board.
+      const tcell = ctx.world.get(target.entity as number, Cell)
+      const beyondLeash =
+        tcell !== undefined &&
+        chebyshev(cell.x, cell.y, tcell.x, tcell.y) > ATTACK_LEASH &&
+        !inFiringGeometry(ctx, e, target.entity as number, team)
+      motion.goal = beyondLeash ? null : pursue(ctx, e, target.entity as number, team)
     }
   },
 }

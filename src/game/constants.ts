@@ -17,3 +17,5 @@ export const MAX_STEPS_PER_FRAME = 6
 export const SNAPSHOT_INTERVAL_MS = 120
 export const PATH_BUDGET_PER_TICK = 8
 export const SPEEDS = [0.5, 1, 2, 4]
+/** How far an autonomous Attack piece will look for a target (cells). */
+export const ATTACK_LEASH = 8

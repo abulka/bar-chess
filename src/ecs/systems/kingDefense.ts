@@ -6,7 +6,7 @@ import type { TeamId, Vec2 } from '../../game/types'
 import { Cell, PieceType, Team } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
-import { coverageThreats } from './preservation'
+import { coverageThreats, homeCell } from './preservation'
 import type { Threat, ThreatMemo } from './preservation'
 
 /** How close an enemy must get before the AI king reacts even without a shot. */
@@ -108,12 +108,6 @@ export function isScreening(ctx: SimContext, guard: Entity, team: TeamId, kingCe
   return false
 }
 
-/** Middle of a team's own back rank, the AI king's safe post. */
-function homeCell(ctx: SimContext, team: TeamId): Vec2 | null {
-  const lanes = ctx.board.data.lanes[team]
-  return lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
-}
-
 /**
  * AI king policy: hold the back-rank post and never join the rally. When
  * threatened, step to the legal square that lowers exposure to enemy fire
@@ -133,10 +127,10 @@ export function aiKingGoal(ctx: SimContext, king: Entity, team: TeamId, threats:
     return home && (cell.x !== home.x || cell.y !== home.y) ? home : null
   }
 
-  // Threat weight = damage, for every enemy that can currently hit the king.
+  // Threat weight = damage, for every threat's firing geometry — including a
+  // nearby enemy that cannot hit the king yet but can hit its escape square.
   const selfFree = occupiedExcept(ctx.board, ctx.occupancy, king)
   const coverages = threats
-    .filter((t) => t.canHitNow)
     .map((t) => {
       const od = PIECES[ctx.world.require(t.entity, PieceType).kind]
       const cells = od ? fireCells(ctx.board, t.cell, WEAPONS[od.weapon].geometry, t.team, selfFree) : []
