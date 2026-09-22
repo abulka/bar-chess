@@ -213,10 +213,14 @@ Scope: the **selection** always shows full detail; `my orders` (`o`) and
   along each firing line (rook/bishop/queen/king), forward half-disc for pawn,
   8 dots for knight. **Off by default** (enable with the `range` toggle) so
   targeting circles don't clutter the board.
-- **Health + reload bars**: every piece shows a thin health bar and a **plain
-  red** weapon reload bar (tile-relative, so it stays inside the square), making
-  it clear how hurt a piece is and whether it can fire. Both are toggleable
-  (`health`, and `firing recharge` for the reload bar) and the choices persist.
+- **Health + recharge bars** (BAR-style): a damaged piece shows a thin health
+  bar that fills left-to-right with remaining HP and interpolates
+  **green→red (solid red at ≤40%)**; a long-cooldown weapon that has fired shows a **teal**
+  recharge bar filling left-to-right. Both vanish when effectively full (so an
+  undamaged piece, a ready weapon, and the whole opening position show nothing),
+  stack top-down, and are tile-relative so they stay inside the square. Both are
+  toggleable (`health`, and `firing recharge` for the recharge bar) and the
+  choices persist.
   All pieces render at a uniform size. Projectiles are small and distinct per piece (dot / shell /
   lance / tumbling bomb) and travel and rotate in flight.
 - A wide **turn bar** under the toolbar fills as a turn (gold) or replay
@@ -273,6 +277,22 @@ width to 100% and holds it (same colour for both).
 - [x] **Phase 6.6 — Movement correctness & clarity.** Reservation-based
       occupancy (one piece per square, only knights leap), turn settling, team
       controllers/game modes, and the overlay scope/legend overhaul.
+- [x] **Phase 6.7 — Combat audio.** Procedural WebAudio SFX (per-weapon fire,
+      target-scaled hits, blasts, miss fizzles) driven by the event bus, with a
+      persisted, off-by-default toolbar toggle and a **Sound** config tab that
+      catalogs every cue (fire / hit-from-each-attacker / death / miss) with a
+      play button plus each piece's combat stats.
+- [x] **Phase 6.8 — Synth editor & resizable HUD.** Voices are data
+      (`VoiceSpec` in `src/audio/voices.ts`, overridable via `VOICE_OVERRIDES`);
+      the Sound tab opens a per-cue synth editor (waveform picker, oscillator/
+      envelope/filter knobs, live JSON, Play/Copy) so sounds can be tweaked and
+      the JSON pasted back into code. The HUD bottom panel gained a draggable
+      splitter (persisted as `bottomFraction`).
+- [x] **Phase 6.9 — Live sound overrides.** Editor edits accumulate in
+      `localStorage` (`src/audio/overrides.ts`), apply to the game immediately,
+      and reload into the editor (with a badge + panel markers). The editor adds
+      per-layer `×`, a **loop** preview, and **Copy entry / Copy all** that emit
+      valid `VOICE_OVERRIDES` TypeScript for a one-shot commit.
 - [ ] **Phase 7 — AI controllers & observer.** Intent-based AI, human-vs-AI,
       AI-vs-AI, camera follow, auto-pause triggers.
 - [ ] **Phase 8 — Strategy overlays.** LOS, threat/influence, projected movement,

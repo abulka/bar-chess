@@ -16,6 +16,7 @@ import {
 import type { Entity } from '../ecs/world'
 import { buildOccupancy, makeOccupied } from '../game/occupancy'
 import { fireCells, moveDestinations } from '../game/geometry'
+import type { OccupiedFn } from '../game/geometry'
 import { PIECES, WEAPONS } from '../game/pieces'
 import { queueMarkers } from '../game/queue'
 import { resolveGeometry } from '../game/types'
@@ -23,6 +24,7 @@ import { coordName, fileLabel } from '../game/coords'
 import type { Game } from '../game/game'
 import { Camera } from './camera'
 import { firingLine, routePolyline, type FiringLine } from './overlays'
+import { BAR_BG, BAR_HIDE_THRESHOLD, RELOAD_FILL, RELOAD_MIN_COOLDOWN, healthColor } from './palette'
 import { bakeTerrain } from './terrain'
 
 const STANCE_COLORS: Record<string, string> = {
@@ -44,6 +46,7 @@ export class Renderer {
   private canvas: HTMLCanvasElement
   private worldW = 0
   private worldH = 0
+  private lastFrameTime = 0
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas
@@ -66,7 +69,11 @@ export class Renderer {
   }
 
   draw(game: Game): void {
-    this.time += 1 / 60
+    const now = performance.now()
+    const dt = this.lastFrameTime > 0 ? Math.min(0.05, (now - this.lastFrameTime) / 1000) : 1 / 60
+    this.lastFrameTime = now
+    this.time += dt
+    this.camera.update(dt)
     const ctx = this.canvas.getContext('2d')
     if (!ctx) return
     const dpr = window.devicePixelRatio || 1
@@ -106,7 +113,7 @@ export class Renderer {
     this.drawPieces(ctx, game, scoped)
     this.drawProjectiles(ctx, game)
     this.drawFx(ctx, game)
-    this.drawHoverCursor(ctx, game)
+    this.drawHoverCursor(ctx, game, occupied)
     ctx.restore()
 
     this.drawCoords(ctx, game)
@@ -485,7 +492,7 @@ export class Renderer {
   }
 
   /** Hover outline + square name under the cursor. */
-  private drawHoverCursor(ctx: CanvasRenderingContext2D, game: Game): void {
+  private drawHoverCursor(ctx: CanvasRenderingContext2D, game: Game, occupied: OccupiedFn): void {
     const cell = game.hoverCell
     if (!cell || !game.board.inBounds(cell.x, cell.y)) return
     const t = game.board.tile
@@ -498,11 +505,24 @@ export class Renderer {
     ctx.strokeStyle = color
     ctx.lineWidth = 2 / this.camera.zoom
     ctx.strokeRect(cell.x * t + 1, cell.y * t + 1, t - 2, t - 2)
-    ctx.fillStyle = color
     ctx.font = `${t * 0.26}px ui-monospace, monospace`
     ctx.textAlign = 'left'
     ctx.textBaseline = 'top'
-    ctx.fillText(coordName(cell.x, cell.y, game.board.height), cell.x * t + t * 0.08, cell.y * t + t * 0.06)
+    const label = coordName(cell.x, cell.y, game.board.height)
+    const x = cell.x * t + t * 0.08
+    const y = cell.y * t + t * 0.06
+    // Only the occupied square gets a solid backing: it keeps the label legible
+    // over a piece glyph, while empty squares stay unobscured.
+    if (occupied(cell.x, cell.y)) {
+      const padX = t * 0.05
+      const padY = t * 0.04
+      const boxW = ctx.measureText(label).width + padX * 2
+      const boxH = t * 0.26 + padY * 2
+      ctx.fillStyle = '#0b0f16'
+      ctx.fillRect(x - padX, y - padY, boxW, boxH)
+    }
+    ctx.fillStyle = color
+    ctx.fillText(label, x, y)
   }
 
   /** Chess coordinates in the margin around the board (screen space). */
@@ -677,25 +697,32 @@ export class Renderer {
       ctx.textBaseline = 'middle'
       ctx.fillText(render.glyph, pos.x, pos.y + size * 0.04)
 
-      // Two stacked bars: health (team-tinted) and weapon reload (cyan), so it
-      // is always clear both how hurt a piece is and whether it can fire.
-      // Thin, uniform bars anchored near the top of the square (tile-relative,
-      // so big pieces don't push them outside the cell).
+      // Bars stack top-down, skipping any that are effectively full so a lone
+      // recharge bar sits in the top slot instead of leaving a gap. Health is a
+      // green->red fill (team-tinted outline), recharge a teal left-to-right
+      // fill. Thin and tile-relative, so big pieces don't push them outside the
+      // cell.
       const barW = t * 0.46
       const barH = Math.max(1, t * 0.035)
       const barY = pos.y - t * 0.4
+      let barSlot = 0
       if (game.overlays.health) {
         const ratio = health.cur / health.max
-        const fill = ratio > 0.5 ? '#5ad469' : ratio > 0.25 ? '#e3b341' : '#e8503a'
-        this.drawBar(ctx, pos.x, barY, barW, barH, ratio, fill, render.tint)
+        if (ratio < BAR_HIDE_THRESHOLD) {
+          this.drawBar(ctx, pos.x, barY, barW, barH, ratio, healthColor(ratio))
+          barSlot++
+        }
       }
       const weapon = game.world.get(e, Weapon)
       const kind = game.world.get(e, PieceType)?.kind
       const def = kind ? PIECES[kind] : undefined
       if (weapon && def && game.overlays.reload) {
         const cd = WEAPONS[def.weapon].cooldown
-        if (cd > 0) {
-          this.drawBar(ctx, pos.x, barY + barH + 1, barW, barH, 1 - weapon.left / cd, '#e0503a', 'rgba(140,40,25,0.9)')
+        const ratio = cd > 0 ? 1 - weapon.left / cd : 1
+        // Like BAR, the bar only appears once the weapon has actually fired, so
+        // a ready piece (including at the opening position) shows nothing.
+        if (weapon.fired && cd >= RELOAD_MIN_COOLDOWN && ratio < BAR_HIDE_THRESHOLD) {
+          this.drawBar(ctx, pos.x, barY + (barH + 1) * barSlot, barW, barH, ratio, RELOAD_FILL)
         }
       }
 
@@ -739,17 +766,17 @@ export class Renderer {
     h: number,
     ratio: number,
     fill: string,
-    stroke: string,
   ): void {
     const left = x - w / 2
     const r = Math.max(0, Math.min(1, ratio))
-    ctx.fillStyle = 'rgba(0,0,0,0.6)'
+    // A fixed dark frame is always drawn full width; the coloured portion grows
+    // inside it. No outline stroke — the frame itself is the container, as in BAR.
+    ctx.fillStyle = BAR_BG
     ctx.fillRect(left, y, w, h)
-    ctx.fillStyle = fill
-    ctx.fillRect(left, y, w * r, h)
-    ctx.strokeStyle = stroke
-    ctx.lineWidth = 1 / this.camera.zoom
-    ctx.strokeRect(left, y, w, h)
+    if (r > 0) {
+      ctx.fillStyle = fill
+      ctx.fillRect(left, y, w * r, h)
+    }
   }
 
   private drawProjectiles(ctx: CanvasRenderingContext2D, game: Game): void {

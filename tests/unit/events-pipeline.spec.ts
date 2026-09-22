@@ -23,6 +23,28 @@ describe('EventBus', () => {
     expect(bus.total).toBe(5)
     expect(bus.tail().map((e) => e.msg)).toEqual(['c', 'd', 'e'])
   })
+
+  it('notifies subscribers and stops after unsubscribe', () => {
+    const bus = new EventBus()
+    const seen: string[] = []
+    const off = bus.subscribe((e) => seen.push(e.msg))
+    bus.emit('info', 'a')
+    bus.emit('shot', 'b')
+    off()
+    bus.emit('info', 'c')
+    expect(seen).toEqual(['a', 'b'])
+  })
+
+  it('isolates a throwing subscriber from the simulation', () => {
+    const bus = new EventBus()
+    const seen: string[] = []
+    bus.subscribe(() => {
+      throw new Error('boom')
+    })
+    bus.subscribe((e) => seen.push(e.msg))
+    expect(() => bus.emit('info', 'a')).not.toThrow()
+    expect(seen).toEqual(['a'])
+  })
 })
 
 describe('Pipeline', () => {

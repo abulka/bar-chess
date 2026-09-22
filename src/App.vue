@@ -7,7 +7,14 @@ import ReinforcementBar from './components/ReinforcementBar.vue'
 import StatsBar from './components/StatsBar.vue'
 import Toolbar from './components/Toolbar.vue'
 import type { BoardSize } from './game/boards'
-import { SNAPSHOT_INTERVAL_MS } from './game/constants'
+import { AudioEngine } from './audio/audio'
+import type { VoiceSpec } from './audio/voices'
+import {
+  BOTTOM_FRACTION_DEFAULT,
+  BOTTOM_FRACTION_MAX,
+  BOTTOM_FRACTION_MIN,
+  SNAPSHOT_INTERVAL_MS,
+} from './game/constants'
 import { Game } from './game/game'
 import type { GameMode, GameSnapshot, OverlayFlags } from './game/game'
 import { loadSettings, saveSettings } from './game/settings'
@@ -17,6 +24,8 @@ import type { StanceMode, TeamId } from './game/types'
 
 const game = new Game(8)
 game.applySettings(loadSettings() ?? {})
+const audio = new AudioEngine({ enabled: game.soundEnabled })
+const unsubscribeAudio = game.bus.subscribe((event) => audio.handle(event))
 const snapshot = shallowRef<GameSnapshot>(game.snapshot())
 const barProgress = ref(0)
 const barHeld = computed(
@@ -29,7 +38,75 @@ const slotName = ref('')
 const ioMessage = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 
+/** Pixel clamps for the resizable HUD bottom panel. */
+const MIN_BOTTOM_PX = 120
+const MIN_STAGE_PX = 180
+
+const bottomHeight = ref(clampBottomPx(game.bottomFraction * window.innerHeight))
+
+const gridRows = computed(() =>
+  snapshot.value.hudVisible
+    ? `auto auto minmax(${MIN_STAGE_PX}px, 1fr) 6px ${bottomHeight.value}px`
+    : 'auto auto minmax(0, 1fr)',
+)
+
 let timer = 0
+
+function clampBottomPx(px: number): number {
+  return Math.round(Math.max(MIN_BOTTOM_PX, Math.min(px, window.innerHeight - MIN_STAGE_PX)))
+}
+
+let splitterDrag = false
+
+function onSplitterDown(event: PointerEvent): void {
+  splitterDrag = true
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  event.preventDefault()
+}
+
+function onSplitterMove(event: PointerEvent): void {
+  if (!splitterDrag) return
+  bottomHeight.value = clampBottomPx(window.innerHeight - event.clientY)
+}
+
+function onSplitterUp(event: PointerEvent): void {
+  if (!splitterDrag) return
+  splitterDrag = false
+  ;(event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId)
+  persistBottomHeight()
+}
+
+function onSplitterReset(): void {
+  bottomHeight.value = clampBottomPx(window.innerHeight * BOTTOM_FRACTION_DEFAULT)
+  persistBottomHeight()
+}
+
+function persistBottomHeight(): void {
+  const fraction = bottomHeight.value / window.innerHeight
+  game.bottomFraction = Math.max(BOTTOM_FRACTION_MIN, Math.min(BOTTOM_FRACTION_MAX, fraction))
+  persistSettings()
+}
+
+function onWindowResize(): void {
+  bottomHeight.value = clampBottomPx(game.bottomFraction * window.innerHeight)
+}
+
+/** Resume the audio context on the first user gesture (autoplay policy). */
+function unlockAudio(): void {
+  window.removeEventListener('pointerdown', unlockAudio)
+  window.removeEventListener('keydown', unlockAudio)
+  if (game.soundEnabled) void audio.unlock()
+}
+
+const turnLabel = computed(() => {
+  if (snapshot.value.winner) {
+    return `GAME OVER — ${snapshot.value.teams[snapshot.value.winner].name} wins (u to undo)`
+  }
+  const queued = snapshot.value.queuedTurns > 0 ? ` · +${snapshot.value.queuedTurns} queued` : ''
+  if (snapshot.value.turnActive) return `TURN${queued}`
+  if (snapshot.value.replaying) return `REPLAY${queued}`
+  return snapshot.value.canReplay ? 'READY — space for next turn' : 'press space for a turn'
+})
 
 function refresh(): void {
   snapshot.value = game.snapshot()
@@ -82,11 +159,37 @@ function onToggleOverlay(key: keyof OverlayFlags): void {
   refresh()
 }
 
+function onToggleSound(): void {
+  game.soundEnabled = !game.soundEnabled
+  audio.setEnabled(game.soundEnabled)
+  persistSettings()
+  refresh()
+}
+
+function onAudition(id: string): void {
+  audio.audition(id)
+}
+
+function onPreview(spec: VoiceSpec): void {
+  audio.preview(spec)
+}
+
+function onStopPreview(): void {
+  audio.stopPreview()
+}
+
 function onToggleHud(): void {
   game.hudVisible = !game.hudVisible
   persistSettings()
   refresh()
-  nextTick(() => boardView.value?.fit())
+  nextTick(() => boardView.value?.resize())
+}
+
+function onToggleRails(): void {
+  game.railsVisible = !game.railsVisible
+  persistSettings()
+  refresh()
+  nextTick(() => boardView.value?.resize())
 }
 
 function onToggleAutoPreserve(): void {
@@ -102,10 +205,9 @@ function onReset(): void {
 }
 
 function onTurn(): void {
-  // Ignore during an active turn/replay so space always starts the next turn
-  // rather than cancelling the current one, and once the game is over.
-  if (game.turnActive || snapshot.value.replaying || snapshot.value.winner) return
-  game.beginTurn()
+  // Starting while a turn/replay is running buffers the request instead of
+  // dropping it, so a double-tap plays two turns back-to-back.
+  game.queueTurn()
   refresh()
 }
 
@@ -221,7 +323,10 @@ function onKey(event: KeyboardEvent): void {
   const target = event.target
   if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return
   if (event.key === 'h') onToggleHud()
-  else if (event.key === 'p') {
+  else if (event.key === 'Tab') {
+    event.preventDefault()
+    onToggleRails()
+  } else if (event.key === 'p') {
     game.togglePause()
     refresh()
   } else if (event.key === ' ') {
@@ -267,6 +372,9 @@ onMounted(() => {
   refreshSlots()
   timer = window.setInterval(refresh, SNAPSHOT_INTERVAL_MS)
   window.addEventListener('keydown', onKey)
+  window.addEventListener('pointerdown', unlockAudio)
+  window.addEventListener('keydown', unlockAudio)
+  window.addEventListener('resize', onWindowResize)
   if (import.meta.env.DEV) {
     ;(window as unknown as { game: Game }).game = game
   }
@@ -276,12 +384,17 @@ onBeforeUnmount(() => {
   window.clearInterval(timer)
   window.removeEventListener('keydown', onKey)
   game.onProgress = null
+  window.removeEventListener('pointerdown', unlockAudio)
+  window.removeEventListener('keydown', unlockAudio)
+  window.removeEventListener('resize', onWindowResize)
+  unsubscribeAudio()
+  audio.dispose()
   game.stop()
 })
 </script>
 
 <template>
-  <div class="app" :class="{ 'hud-hidden': !snapshot.hudVisible }">
+  <div class="app" :class="{ 'hud-hidden': !snapshot.hudVisible }" :style="{ gridTemplateRows: gridRows }">
     <Toolbar
       :snapshot="snapshot"
       @select-size="onSelectSize"
@@ -294,6 +407,7 @@ onBeforeUnmount(() => {
       @replay="onReplay"
       @set-speed="onSetSpeed"
       @toggle-overlay="onToggleOverlay"
+      @toggle-sound="onToggleSound"
       @reset="onReset"
       @toggle-hud="onToggleHud"
       @toggle-auto-preserve="onToggleAutoPreserve"
@@ -309,19 +423,7 @@ onBeforeUnmount(() => {
         :class="{ complete: barHeld }"
         :style="{ width: barProgress * 100 + '%' }"
       ></div>
-      <span class="turnbar-label">
-        {{
-          snapshot.winner
-            ? `GAME OVER — ${snapshot.teams[snapshot.winner].name} wins (u to undo)`
-            : snapshot.turnActive
-              ? `playing turn ${snapshot.turn}`
-              : snapshot.replaying
-                ? 'REPLAY'
-                : snapshot.canReplay
-                  ? 'READY — space for next turn'
-                  : 'press space for a turn'
-        }}
-      </span>
+      <span class="turnbar-label">{{ turnLabel }}</span>
       <span
         v-if="snapshot.pendingCommand !== 'none'"
         class="pending-command"
@@ -332,8 +434,11 @@ onBeforeUnmount(() => {
       </span>
     </div>
 
-    <div class="stage" :class="{ 'no-rosters': !snapshot.hudVisible }">
-      <aside class="rail left">
+    <div
+      class="stage"
+      :class="{ 'no-rosters': !snapshot.hudVisible, 'no-rails': !snapshot.railsVisible }"
+    >
+      <aside v-if="snapshot.railsVisible" class="rail left">
         <div class="rail-title">controls</div>
         <ul class="hints">
           <li><b>left-click</b> select · <b>shift-click</b> add · <b>drag</b> box</li>
@@ -343,7 +448,7 @@ onBeforeUnmount(() => {
           <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
           <li><b>space</b> turn · <b>p</b> pause · <b>s</b> step</li>
           <li><b>u</b> undo · <b>r</b> redo · <b>y</b> replay · <b>c</b>/<b>Backspace</b> clear orders</li>
-          <li><b>o</b> my orders · <b>e</b> enemy · <b>h</b> HUD · <b>esc</b> cancel</li>
+          <li><b>o</b> my orders · <b>e</b> enemy · <b>h</b> HUD · <b>tab</b> panels · <b>esc</b> cancel</li>
         </ul>
         <PiecePanel
           :snapshot="snapshot"
@@ -378,7 +483,7 @@ onBeforeUnmount(() => {
         @deploy="onDeploy('blue', $event)"
       />
 
-      <aside class="rail right">
+      <aside v-if="snapshot.railsVisible" class="rail right">
         <div class="rail-title">stance</div>
         <ul class="legend">
           <li><span class="dot" style="background: #4ad991"></span><b>M</b> Move — travel, return fire only</li>
@@ -398,7 +503,7 @@ onBeforeUnmount(() => {
           <li><span class="sw sw-attack"></span> attack cells</li>
           <li><span class="ln ln-route"></span> route / objective</li>
           <li><span class="dot" style="background: #ffd166"></span><b>1·2·3</b> queued waypoints</li>
-          <li><span class="sw sw-bar"></span> health · <span class="sw sw-reload"></span> reload (red)</li>
+          <li><span class="sw sw-bar"></span> health (green→red) · <span class="sw sw-reload"></span> recharge (teal)</li>
         </ul>
         <div class="rail-title">firing lines</div>
         <ul class="legend">
@@ -446,9 +551,19 @@ onBeforeUnmount(() => {
       </aside>
     </div>
 
+    <div
+      v-if="snapshot.hudVisible"
+      class="splitter"
+      title="drag to resize the HUD · double-click to reset"
+      @pointerdown="onSplitterDown"
+      @pointermove="onSplitterMove"
+      @pointerup="onSplitterUp"
+      @dblclick="onSplitterReset"
+    ></div>
+
     <div v-if="snapshot.hudVisible" class="bottom">
       <StatsBar :snapshot="snapshot" />
-      <EventLog :snapshot="snapshot" />
+      <EventLog :snapshot="snapshot" @audition="onAudition" @preview="onPreview" @stop="onStopPreview" />
     </div>
   </div>
 </template>

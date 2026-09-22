@@ -10,6 +10,12 @@ function runTurn(game: Game): void {
   expect(guard).toBeLessThan(2000)
 }
 
+function runUntil(game: Game, pred: () => boolean, max = 4000): void {
+  let guard = 0
+  while (!pred() && guard++ < max) game.runTicks(1)
+  expect(guard).toBeLessThan(max)
+}
+
 describe('Game integration', () => {
   beforeEach(() => clearComponents())
 
@@ -326,5 +332,50 @@ describe('Game integration', () => {
     const before = Math.hypot(4 - 4, 2 - 4)
     const after = Math.hypot(motion.goal!.x - 4, motion.goal!.y - 4)
     expect(after).toBeGreaterThan(before)
+  })
+})
+
+describe('Game queued turns', () => {
+  beforeEach(() => clearComponents())
+
+  it('starts immediately when idle and buffers a second request', () => {
+    const game = new Game(8)
+    game.queueTurn()
+    expect(game.turnActive).toBe(true)
+    expect(game.turn).toBe(1)
+
+    game.queueTurn()
+    expect(game.queuedTurns).toBe(1)
+  })
+
+  it('runs buffered turns back-to-back', () => {
+    const game = new Game(8)
+    game.queueTurn()
+    game.queueTurn()
+
+    // Wait out the first turn, which then auto-starts the second.
+    runUntil(game, () => game.turn === 2 && !game.turnActive)
+    expect(game.turn).toBe(2)
+    expect(game.queuedTurns).toBe(0)
+    expect(game.snapshot().canReplay).toBe(true)
+  })
+
+  it('caps the buffer so a held key cannot queue a runaway', () => {
+    const game = new Game(8)
+    game.queueTurn()
+    for (let i = 0; i < 10; i++) game.queueTurn()
+    expect(game.queuedTurns).toBe(3)
+    expect(game.snapshot().queuedTurns).toBe(3)
+  })
+
+  it('clears buffered turns when the active turn is cancelled', () => {
+    const game = new Game(8)
+    game.queueTurn()
+    game.queueTurn()
+    expect(game.queuedTurns).toBe(1)
+
+    game.togglePause()
+    expect(game.turnActive).toBe(false)
+    expect(game.queuedTurns).toBe(0)
   })
 })

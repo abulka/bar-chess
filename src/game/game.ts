@@ -23,7 +23,17 @@ import type { MotionData, OrderData, OrderStep } from '../ecs/components'
 import { Board } from './board'
 import type { BoardSize, Placement } from './boards'
 import { createBoardData, initialArmy } from './boards'
-import { FIXED_DT, MAX_STEPS_PER_FRAME, PATH_BUDGET_PER_TICK, SPEEDS, TEAM_COLORS, TEAM_NAMES } from './constants'
+import {
+  BOTTOM_FRACTION_DEFAULT,
+  BOTTOM_FRACTION_MAX,
+  BOTTOM_FRACTION_MIN,
+  FIXED_DT,
+  MAX_STEPS_PER_FRAME,
+  PATH_BUDGET_PER_TICK,
+  SPEEDS,
+  TEAM_COLORS,
+  TEAM_NAMES,
+} from './constants'
 import { coordName } from './coords'
 import { containsCell, fireCells } from './geometry'
 import type { OccupiedFn } from './geometry'
@@ -107,7 +117,7 @@ export interface PieceInfo {
   cell: Vec2
   coord: string
   health: { cur: number; max: number; ratio: number }
-  weapon: { key: string; left: number; cooldown: number; ready: boolean } | null
+  weapon: { key: string; left: number; cooldown: number; ready: boolean; fired: boolean } | null
   stance: StanceMode
   commandable: boolean
   target: PieceRef | null
@@ -185,12 +195,18 @@ export interface GameSnapshot {
   overlays: OverlayFlags
   hudVisible: boolean
   autoPreserve: boolean
+  /** Whether combat sound effects are enabled. */
+  soundEnabled: boolean
+  /** Whether the left/right side rails (controls, stance, position) are shown. */
+  railsVisible: boolean
   playerTeam: TeamId
   gameMode: GameMode
   gameModes: Array<{ id: GameMode; label: string }>
   hoverName: string | null
   hoverKind: 'empty' | 'friendly' | 'enemy' | 'blocked' | null
   turnActive: boolean
+  /** Turns buffered by extra space presses, run back-to-back after the current one. */
+  queuedTurns: number
   canReplay: boolean
   canUndo: boolean
   canRedo: boolean
@@ -249,6 +265,10 @@ export class Game {
   running = false
   paused = false
   hudVisible = false
+  railsVisible = true
+  soundEnabled = false
+  /** HUD bottom-panel height as a fraction of the viewport. */
+  bottomFraction = BOTTOM_FRACTION_DEFAULT
   winner: TeamId | null = null
   terrainVersion = 0
   playerTeam: TeamId = 'blue'
@@ -281,6 +301,8 @@ export class Game {
   // Last two tick values for per-frame render interpolation.
   private barPrev = 0
   private barLast = 0
+  /** Extra space-bar turns buffered while a turn/replay is already running. */
+  queuedTurns = 0
 
   private turnSnapshot: TurnState | null = null
   private turnTicks = 0
@@ -305,6 +327,8 @@ export class Game {
   private static readonly BAR_MIN_STEP = 0.004
   /** Rough tick cost of one queued move, for shaping the bar only. */
   private static readonly NOMINAL_MOVE_TICKS = 5
+  /** Cap on buffered space-bar turns, so a held key cannot queue a runaway. */
+  private static readonly MAX_QUEUED_TURNS = 3
 
   fps = 0
   private tps = 0
@@ -388,6 +412,7 @@ export class Game {
   }
 
   togglePause(): void {
+    this.queuedTurns = 0
     if (this.turnActive) {
       this.turnActive = false
       this.paused = true
@@ -403,6 +428,7 @@ export class Game {
 
   stepOnce(): void {
     if (this.winner !== null) return
+    this.queuedTurns = 0
     if (this.turnActive) this.turnActive = false
     if (this.replaying) this.replaying = false
     this.paused = true
@@ -417,6 +443,20 @@ export class Game {
    */
   runTicks(n: number): void {
     for (let i = 0; i < n; i++) this.step()
+  }
+
+  /**
+   * Request a turn: start one immediately when idle, otherwise buffer it so it
+   * runs back-to-back once the current turn/replay finishes. This makes rapid
+   * space presses (a double-tap) queue two turns instead of dropping the second.
+   */
+  queueTurn(): void {
+    if (this.winner) return
+    if (this.turnActive || this.replaying) {
+      this.queuedTurns = Math.min(this.queuedTurns + 1, Game.MAX_QUEUED_TURNS)
+      return
+    }
+    this.beginTurn()
   }
 
   /**
@@ -452,6 +492,7 @@ export class Game {
   /** Step back one completed turn in the history. */
   undoTurn(): void {
     if (this.turnActive || this.replaying || this.cursor <= 0) return
+    this.queuedTurns = 0
     this.restoreTurn(this.history[--this.cursor])
     this.selected = []
     this.barProgress = 0
@@ -463,6 +504,7 @@ export class Game {
   /** Step forward to a turn previously undone. */
   redoTurn(): void {
     if (this.turnActive || this.replaying || this.cursor >= this.history.length - 1) return
+    this.queuedTurns = 0
     this.restoreTurn(this.history[++this.cursor])
     this.selected = []
     this.barProgress = 0
@@ -476,6 +518,7 @@ export class Game {
     // Replay only makes sense from the latest state: rewinding first would let
     // the replayed turn land ahead of the cursor and desync the history.
     if (this.cursor !== this.history.length - 1) return
+    this.queuedTurns = 0
     this.restoreTurn(this.lastTurn.snapshot)
     this.selected = []
     this.replaying = true
@@ -576,6 +619,11 @@ export class Game {
       this.canReplay = true
     }
     this.bus.emit('info', `turn ended after ${this.turnTicks} ticks`)
+    // A buffered space press starts the next turn immediately, back-to-back.
+    if (this.queuedTurns > 0 && !this.winner) {
+      this.queuedTurns--
+      this.beginTurn()
+    }
   }
 
   private captureTurn(): TurnState {
@@ -614,9 +662,12 @@ export class Game {
     return {
       overlays: { ...this.overlays },
       hudVisible: this.hudVisible,
+      railsVisible: this.railsVisible,
       speed: this.speed,
       gameMode: this.gameMode,
       autoPreserve: this.autoPreserve,
+      soundEnabled: this.soundEnabled,
+      bottomFraction: this.bottomFraction,
     }
   }
 
@@ -632,8 +683,18 @@ export class Game {
       }
     }
     if (typeof settings.hudVisible === 'boolean') this.hudVisible = settings.hudVisible
+    if (typeof settings.railsVisible === 'boolean') this.railsVisible = settings.railsVisible
     if (typeof settings.speed === 'number' && SPEEDS.includes(settings.speed)) this.speed = settings.speed
     if (typeof settings.autoPreserve === 'boolean') this.autoPreserve = settings.autoPreserve
+    if (typeof settings.soundEnabled === 'boolean') this.soundEnabled = settings.soundEnabled
+    if (
+      typeof settings.bottomFraction === 'number' &&
+      Number.isFinite(settings.bottomFraction) &&
+      settings.bottomFraction >= BOTTOM_FRACTION_MIN &&
+      settings.bottomFraction <= BOTTOM_FRACTION_MAX
+    ) {
+      this.bottomFraction = settings.bottomFraction
+    }
     if (settings.gameMode && GAME_MODES.some((m) => m.id === settings.gameMode)) {
       this.setGameMode(settings.gameMode)
     }
@@ -724,6 +785,11 @@ export class Game {
         this.barProgress = 1
         this.paused = true
         this.bus.emit('info', 'replay finished')
+        // A space press during the replay starts the queued turn right after it.
+        if (this.queuedTurns > 0 && !this.winner) {
+          this.queuedTurns--
+          this.beginTurn()
+        }
       }
       return
     }
@@ -782,6 +848,7 @@ export class Game {
     this.canReplay = false
     this.lastTurn = null
     this.turnSnapshot = null
+    this.queuedTurns = 0
     this.paused = true
     this.ctx = this.buildContext()
     this.placeArmy(initialArmy(size))
@@ -1216,6 +1283,7 @@ export class Game {
     this.turnActive = false
     this.replaying = false
     this.canReplay = false
+    this.queuedTurns = 0
     this.turnSnapshot = null
     this.lastTurn = null
     this.turnTicks = 0
@@ -1377,12 +1445,15 @@ export class Game {
       overlays: { ...this.overlays },
       hudVisible: this.hudVisible,
       autoPreserve: this.autoPreserve,
+      soundEnabled: this.soundEnabled,
+      railsVisible: this.railsVisible,
       playerTeam: this.playerTeam,
       gameMode: this.gameMode,
       gameModes: GAME_MODES,
       hoverName: this.hoverCell ? coordName(this.hoverCell.x, this.hoverCell.y, this.board.height) : null,
       hoverKind: this.hoverKind(),
       turnActive: this.turnActive,
+      queuedTurns: this.queuedTurns,
       canReplay: this.canReplay,
       canUndo: this.cursor > 0 && !this.turnActive && !this.replaying,
       canRedo: this.cursor < this.history.length - 1 && !this.turnActive && !this.replaying,
@@ -1465,7 +1536,7 @@ export class Game {
       coord: ref.coord,
       health: hp ? { cur: hp.cur, max: hp.max, ratio: hp.max > 0 ? hp.cur / hp.max : 0 } : { cur: 0, max: 0, ratio: 0 },
       weapon: weapon
-        ? { key: wdef.key, left: weapon.left, cooldown: wdef.cooldown, ready: weapon.left <= 0 }
+        ? { key: wdef.key, left: weapon.left, cooldown: wdef.cooldown, ready: weapon.left <= 0, fired: weapon.fired }
         : null,
       stance,
       commandable: team !== undefined && this.commandable(team),

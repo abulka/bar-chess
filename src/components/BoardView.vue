@@ -191,7 +191,15 @@ function fit(): void {
   }
 }
 
-defineExpose({ fit })
+/**
+ * Recompute the viewport after a layout change (panels/HUD toggled) without
+ * re-fitting the board, so the player's current zoom and centre are preserved.
+ */
+function resize(): void {
+  renderer?.resize()
+}
+
+defineExpose({ fit, resize })
 
 onMounted(() => {
   const canvas = canvasRef.value

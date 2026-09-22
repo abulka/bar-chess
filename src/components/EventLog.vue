@@ -2,13 +2,22 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import type { EventRecord, EventType } from '../ecs/events'
 import type { GameSnapshot } from '../game/game'
+import type { VoiceSpec } from '../audio/voices'
+import SoundPanel from './SoundPanel.vue'
 
 const props = defineProps<{ snapshot: GameSnapshot }>()
 
-type Tab = 'events' | 'systems' | 'inspector'
+const emit = defineEmits<{
+  (e: 'audition', id: string): void
+  (e: 'preview', spec: VoiceSpec): void
+  (e: 'stop'): void
+}>()
+
+type Tab = 'events' | 'systems' | 'sound' | 'inspector'
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'events', label: 'Event stream' },
   { id: 'systems', label: 'Systems' },
+  { id: 'sound', label: 'Sound' },
   { id: 'inspector', label: 'Inspector' },
 ]
 const tab = ref<Tab>('events')
@@ -110,6 +119,13 @@ function rowClass(event: EventRecord): string {
         <span class="system-ms">{{ t.ema.toFixed(3) }} ms</span>
       </div>
     </div>
+
+    <SoundPanel
+      v-else-if="tab === 'sound'"
+      @audition="emit('audition', $event)"
+      @preview="emit('preview', $event)"
+      @stop="emit('stop')"
+    />
 
     <div v-else class="inspector">
       <div v-if="snapshot.selected.length === 0" class="log-empty">

@@ -61,6 +61,8 @@ export interface TargetData {
 
 export interface WeaponData {
   left: number
+  /** True once the weapon has fired at least once; gates the recharge bar. */
+  fired: boolean
 }
 
 export interface MotionData {

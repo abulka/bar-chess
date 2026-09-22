@@ -15,9 +15,12 @@ describe('settings persistence', () => {
     game.applySettings({
       overlays: { rangeArcs: true, grid: false, myOrders: false, reload: false },
       hudVisible: true,
+      railsVisible: false,
       speed: 2,
       gameMode: 'ai-vs-ai',
       autoPreserve: false,
+      soundEnabled: true,
+      bottomFraction: 0.4,
     })
     saveSettings(game.settings())
 
@@ -30,9 +33,12 @@ describe('settings persistence', () => {
     expect(restored.overlays.reload).toBe(false)
     expect(restored.overlays.moveCells).toBe(true)
     expect(restored.hudVisible).toBe(true)
+    expect(restored.railsVisible).toBe(false)
     expect(restored.speed).toBe(2)
     expect(restored.gameMode).toBe('ai-vs-ai')
     expect(restored.autoPreserve).toBe(false)
+    expect(restored.soundEnabled).toBe(true)
+    expect(restored.bottomFraction).toBe(0.4)
     expect(restored.teams.red.controller).toBe('ai')
   })
 
@@ -50,18 +56,24 @@ describe('settings persistence', () => {
       JSON.stringify({
         overlays: { rangeArcs: true, bogus: 'yes', grid: 3 },
         hudVisible: 'true',
+        railsVisible: 'yes',
         speed: 99,
         gameMode: 'nonsense',
         autoPreserve: 'yes',
+        soundEnabled: 'yes',
+        bottomFraction: 2,
       }),
     )
     const loaded = loadSettings()
     expect(loaded).not.toBeNull()
     expect(loaded?.overlays).toEqual({ rangeArcs: true })
     expect(loaded?.hudVisible).toBeUndefined()
+    expect(loaded?.railsVisible).toBeUndefined()
     expect(loaded?.speed).toBeUndefined()
     expect(loaded?.gameMode).toBeUndefined()
     expect(loaded?.autoPreserve).toBeUndefined()
+    expect(loaded?.soundEnabled).toBeUndefined()
+    expect(loaded?.bottomFraction).toBeUndefined()
   })
 
   it('defaults auto-preserve on and honors an explicit off', () => {

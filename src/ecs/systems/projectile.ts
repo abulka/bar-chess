@@ -1,4 +1,5 @@
-import { Cell, Position, Projectile } from '../components'
+import { PIECES } from '../../game/pieces'
+import { Cell, PieceType, Position, Projectile } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
@@ -7,6 +8,7 @@ function impact(ctx: SimContext, e: Entity, pos: { x: number; y: number }): void
   const proj = ctx.world.require(e, Projectile)
   const cell = ctx.board.worldToCell(pos.x, pos.y)
   let hits = 0
+  let directKind = 'pawn'
 
   for (const other of ctx.world.query(Cell)) {
     if (other === proj.owner) continue
@@ -17,17 +19,23 @@ function impact(ctx: SimContext, e: Entity, pos: { x: number; y: number }): void
     const direct = d2 === 0
     const splash = proj.splash > 0 && d2 <= proj.splash * proj.splash
     if (!direct && !splash) continue
+    if (direct) directKind = ctx.world.get(other, PieceType)?.kind ?? directKind
     ctx.cmds.damage.push({ target: other, source: proj.owner, amount: proj.damage, kind: 'projectile' })
     hits++
   }
 
   if (hits > 0) {
+    const ownerKind = proj.owner !== null ? ctx.world.get(proj.owner, PieceType)?.kind : undefined
+    const attackerWeapon = ownerKind ? PIECES[ownerKind]?.weapon : undefined
     ctx.bus.emit('hit', `#${e} impacted (${hits} hit)`, {
       team: proj.team,
-      data: { cell, hits },
+      data: { cell, hits, kind: directKind, shape: proj.shape, damage: proj.damage, weapon: attackerWeapon },
     })
   } else {
-    ctx.bus.emit('miss', `#${e} impacted empty ground`, { team: proj.team, data: { cell } })
+    ctx.bus.emit('miss', `#${e} impacted empty ground`, {
+      team: proj.team,
+      data: { cell, cause: 'ground' },
+    })
   }
 }
 
@@ -40,7 +48,7 @@ const system: System = {
       const pos = ctx.world.require(e, Position)
       proj.ttl -= ctx.dt
       if (proj.ttl <= 0) {
-        ctx.bus.emit('miss', `#${e} expired`, { team: proj.team })
+        ctx.bus.emit('miss', `#${e} expired`, { team: proj.team, data: { cause: 'expired' } })
         ctx.cmds.destroy.push(e)
         continue
       }
@@ -51,7 +59,7 @@ const system: System = {
         const target = proj.target
         const tp = target !== null ? ctx.world.get(target, Position) : undefined
         if (!target || !ctx.world.isAlive(target) || !tp) {
-          ctx.bus.emit('miss', `#${e} lost its target`, { team: proj.team })
+          ctx.bus.emit('miss', `#${e} lost its target`, { team: proj.team, data: { cause: 'target-lost' } })
           ctx.cmds.destroy.push(e)
           continue
         }
@@ -73,7 +81,7 @@ const system: System = {
 
       const wp = proj.waypoints[proj.waypointIndex]
       if (!wp) {
-        ctx.bus.emit('miss', `#${e} had no path`, { team: proj.team })
+        ctx.bus.emit('miss', `#${e} had no path`, { team: proj.team, data: { cause: 'target-lost' } })
         ctx.cmds.destroy.push(e)
         continue
       }
@@ -99,7 +107,7 @@ const system: System = {
       if (proj.trajectory === 'line') {
         const cell = board.worldToCell(nx, ny)
         if (board.blocksProjectile(cell.x, cell.y)) {
-          ctx.bus.emit('miss', `#${e} struck a wall`, { team: proj.team, data: { cell } })
+          ctx.bus.emit('miss', `#${e} struck a wall`, { team: proj.team, data: { cell, cause: 'wall' } })
           ctx.cmds.destroy.push(e)
           continue
         }

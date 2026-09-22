@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { GameSnapshot } from '../game/game'
 import type { StanceMode } from '../game/types'
+import { healthColor } from '../render/palette'
 
 const props = defineProps<{
   snapshot: GameSnapshot
@@ -27,6 +28,12 @@ const activeStance = computed<StanceMode | null>(() =>
 function pct(ratio: number): string {
   return `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`
 }
+
+/** A weapon that has never fired is simply ready; otherwise show its recharge. */
+function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): number {
+  if (!w.fired || w.cooldown <= 0) return 1
+  return 1 - w.left / w.cooldown
+}
 </script>
 
 <template>
@@ -46,19 +53,18 @@ function pct(ratio: number): string {
 
       <div class="stat">
         <span class="stat-label">health</span>
-        <div class="bar"><div class="fill hp" :style="{ width: pct(info.health.ratio) }"></div></div>
+        <div class="bar">
+          <div class="fill hp" :style="{ width: pct(info.health.ratio), background: healthColor(info.health.ratio) }"></div>
+        </div>
         <span class="num">{{ info.health.cur }}/{{ info.health.max }}</span>
       </div>
 
       <div v-if="info.weapon" class="stat">
         <span class="stat-label">reload</span>
         <div class="bar">
-          <div
-            class="fill reload"
-            :style="{ width: pct(info.weapon.cooldown > 0 ? 1 - info.weapon.left / info.weapon.cooldown : 1) }"
-          ></div>
+          <div class="fill reload" :style="{ width: pct(reloadRatio(info.weapon)) }"></div>
         </div>
-        <span class="num">{{ info.weapon.ready ? 'ready' : info.weapon.left.toFixed(1) + 's' }}</span>
+        <span class="num">{{ !info.weapon.fired || info.weapon.ready ? 'ready' : info.weapon.left.toFixed(1) + 's' }}</span>
       </div>
 
       <div class="sub">stance</div>
@@ -162,10 +168,9 @@ function pct(ratio: number): string {
 }
 
 .bar {
-  height: 7px;
-  background: #0006;
-  border: 1px solid var(--border);
-  border-radius: 3px;
+  height: 8px;
+  background: rgba(8, 10, 14, 0.82);
+  border-radius: 2px;
   overflow: hidden;
 }
 
@@ -174,11 +179,11 @@ function pct(ratio: number): string {
 }
 
 .fill.hp {
-  background: linear-gradient(90deg, #e8503a, #e3b341 40%, #5ad469);
+  background: #4cd964;
 }
 
 .fill.reload {
-  background: #e0503a;
+  background: #15c2b6;
 }
 
 .num {
@@ -187,10 +192,11 @@ function pct(ratio: number): string {
 }
 
 .sub {
-  margin: 8px 0 2px;
-  color: var(--accent);
+  margin: 10px 0 2px;
+  color: var(--heading);
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
 }
 
 .line {

@@ -87,10 +87,11 @@ const system: System = {
 
       const projectile = spawnProjectile(ctx, e, team, def.weapon, target, tcell)
       weapon.left = wdef.cooldown
+      weapon.fired = true
       ctx.bus.emit('shot', `#${e} fired ${wdef.key} at #${target}`, {
         entity: e,
         team,
-        data: { projectile, target, weapon: wdef.key },
+        data: { projectile, target, weapon: wdef.key, piece: kind, projectileKind: wdef.projectile },
       })
     }
   },

@@ -5,8 +5,11 @@ vi.mock('../../src/render/terrain', () => ({
   bakeTerrain: () => ({ width: 0, height: 0 }),
 }))
 
-import { Health, Motion, PieceType, Position, Render, Target } from '../../src/ecs/components'
+import { Health, Motion, PieceType, Position, Render, Target, Weapon } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
+import { buildOccupancy } from '../../src/game/occupancy'
+import { WEAPONS } from '../../src/game/pieces'
+import { BAR_BG, RELOAD_FILL, healthColor } from '../../src/render/palette'
 import { Renderer } from '../../src/render/renderer'
 import { orderAttack, placePiece } from '../helpers'
 
@@ -34,6 +37,7 @@ interface Rect {
 class RecordingContext {
   strokes: Stroke[] = []
   rects: Rect[] = []
+  fills: Rect[] = []
   strokeStyle = ''
   fillStyle = ''
   lineWidth = 1
@@ -75,11 +79,16 @@ class RecordingContext {
       points: [...this.points],
     })
   }
-  fillRect(): void {}
+  fillRect(x: number, y: number, w: number, h: number): void {
+    this.fills.push({ x, y, w, h, style: this.fillStyle })
+  }
   strokeRect(x: number, y: number, w: number, h: number): void {
     this.rects.push({ x, y, w, h, style: this.strokeStyle })
   }
   fillText(): void {}
+  measureText(text: string): { width: number } {
+    return { width: text.length * 8 }
+  }
   drawImage(): void {}
   setLineDash(dash: number[]): void {
     this.dash = dash
@@ -109,6 +118,11 @@ function setup(): { renderer: Renderer; ctx: RecordingContext; game: Game } {
 }
 
 const firingStrokes = (ctx: RecordingContext) => ctx.strokes.filter((s) => s.points.length === 2)
+
+/** The in-world bar frames (dark backgrounds), one per visible bar. */
+const barFrames = (ctx: RecordingContext) => ctx.fills.filter((f) => f.style === BAR_BG)
+/** Any bar-sized outline strokes; the BAR-style bars must not draw one. */
+const barOutlines = (ctx: RecordingContext) => ctx.rects.filter((r) => Math.abs(r.w - TILE * 0.46) < 0.01)
 
 describe('Renderer firing-line overlay', () => {
   let s: ReturnType<typeof setup>
@@ -288,22 +302,133 @@ describe('Renderer range arc', () => {
   })
 })
 
-describe('Renderer reload overlay', () => {
-  it('draws one firing-recharge bar per piece only when enabled', () => {
+describe('Renderer hover coordinate label', () => {
+  it('backs the label over a piece and leaves an empty square clear', () => {
     const { renderer, ctx, game } = setup()
-    const pieces = game.world.query(Position, Render, Health, PieceType).length
-    expect(pieces).toBeGreaterThan(0)
+    const pieceCell = { x: 3, y: 3 }
+    placePiece(game, 'rook', 'blue', pieceCell)
 
-    ctx.rects = []
-    game.overlays.reload = true
+    game.hoverCell = pieceCell
+    ctx.fills = []
     renderer.draw(game)
-    const withReload = ctx.rects.length
+    const overPiece = ctx.fills.filter((f) => f.style === '#0b0f16' && f.w < TILE)
+    expect(overPiece).toHaveLength(1)
+    expect(overPiece[0].x).toBeCloseTo(pieceCell.x * TILE + TILE * 0.08 - TILE * 0.05)
 
-    ctx.rects = []
+    const occ = buildOccupancy(game.world, game.board)
+    let empty: { x: number; y: number } | null = null
+    for (let y = 0; y < game.board.height && !empty; y++) {
+      for (let x = 0; x < game.board.width; x++) {
+        if (!occ.has(y * game.board.width + x)) {
+          empty = { x, y }
+          break
+        }
+      }
+    }
+    expect(empty).not.toBeNull()
+    game.hoverCell = empty
+    ctx.fills = []
+    renderer.draw(game)
+    expect(ctx.fills.filter((f) => f.style === '#0b0f16' && f.w < TILE)).toHaveLength(0)
+  })
+})
+
+describe('Renderer health and recharge bars', () => {
+  it('draws a teal recharge bar only for a charging, long-cooldown weapon', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.health = false
+    for (const e of game.world.query(Weapon)) game.world.require(e, Weapon).left = 0
+
+    ctx.fills = []
+    renderer.draw(game)
+    expect(barFrames(ctx)).toHaveLength(0)
+
+    const knight = placePiece(game, 'knight', 'blue', { x: 2, y: 2 })
+    const weapon = game.world.require(knight, Weapon)
+    weapon.left = WEAPONS.knightBomb.cooldown / 2
+    weapon.fired = true
+    ctx.fills = []
+    renderer.draw(game)
+    expect(barFrames(ctx)).toHaveLength(1)
+    expect(ctx.fills.some((f) => f.style === RELOAD_FILL)).toBe(true)
+  })
+
+  it('hides the recharge bar until the weapon has fired', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.health = false
+    for (const e of game.world.query(Weapon)) {
+      const weapon = game.world.require(e, Weapon)
+      weapon.left = 0
+      weapon.fired = false
+    }
+    const knight = placePiece(game, 'knight', 'blue', { x: 2, y: 2 })
+    const weapon = game.world.require(knight, Weapon)
+    weapon.left = WEAPONS.knightBomb.cooldown / 2
+    weapon.fired = false
+
+    ctx.fills = []
+    renderer.draw(game)
+    expect(barFrames(ctx)).toHaveLength(0)
+  })
+
+  it('skips the recharge bar for fast weapons', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.health = false
+    for (const e of game.world.query(Weapon)) game.world.require(e, Weapon).left = 0
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 2, y: 2 })
+    const weapon = game.world.require(pawn, Weapon)
+    weapon.left = WEAPONS.pawnShot.cooldown / 2
+    weapon.fired = true
+
+    ctx.fills = []
+    renderer.draw(game)
+    expect(barFrames(ctx)).toHaveLength(0)
+  })
+
+  it('hides the health bar when full and draws it when damaged', () => {
+    const { renderer, ctx, game } = setup()
     game.overlays.reload = false
-    renderer.draw(game)
-    const withoutReload = ctx.rects.length
 
-    expect(withReload - withoutReload).toBe(pieces)
+    ctx.fills = []
+    renderer.draw(game)
+    expect(barFrames(ctx)).toHaveLength(0)
+
+    const damaged = game.world.query(Health)[0]
+    game.world.require(damaged, Health).cur = game.world.require(damaged, Health).max / 2
+    ctx.fills = []
+    renderer.draw(game)
+    expect(barFrames(ctx)).toHaveLength(1)
+  })
+
+  it('draws a fixed dark frame with no coloured outline', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.reload = false
+    const health = game.world.require(game.world.query(Health)[0], Health)
+    health.cur = health.max / 2
+
+    ctx.fills = []
+    ctx.rects = []
+    renderer.draw(game)
+    expect(barFrames(ctx)).toHaveLength(1)
+    expect(barOutlines(ctx)).toHaveLength(0)
+  })
+
+  it('interpolates the health fill from green to red, red by 40%', () => {
+    expect(healthColor(1)).toBe('rgb(76,217,100)')
+    expect(healthColor(0.7)).toBe('rgb(166,138,74)')
+    expect(healthColor(0.4)).toBe('rgb(255,59,48)')
+    expect(healthColor(0.3)).toBe('rgb(255,59,48)')
+    expect(healthColor(0)).toBe('rgb(255,59,48)')
+  })
+
+  it('uses the interpolated colour for a damaged piece', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.reload = false
+    const health = game.world.require(game.world.query(Health)[0], Health)
+    health.cur = health.max * 0.8
+
+    ctx.fills = []
+    renderer.draw(game)
+    expect(ctx.fills.some((f) => f.style === healthColor(0.8))).toBe(true)
   })
 })

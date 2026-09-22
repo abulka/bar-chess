@@ -17,6 +17,7 @@ const emit = defineEmits<{
   (e: 'replay'): void
   (e: 'set-speed', speed: number): void
   (e: 'toggle-overlay', key: keyof OverlayFlags): void
+  (e: 'toggle-sound'): void
   (e: 'reset'): void
   (e: 'toggle-hud'): void
   (e: 'toggle-auto-preserve'): void
@@ -50,6 +51,11 @@ function onModeChange(event: Event): void {
 
 function onOverlayChange(key: keyof OverlayFlags, event: Event): void {
   emit('toggle-overlay', key)
+  ;(event.target as HTMLInputElement).blur()
+}
+
+function onSoundChange(event: Event): void {
+  emit('toggle-sound')
   ;(event.target as HTMLInputElement).blur()
 }
 </script>
@@ -109,6 +115,15 @@ function onOverlayChange(key: keyof OverlayFlags, event: Event): void {
     </div>
 
     <div class="spacer"></div>
+
+    <label class="toggle sound-toggle">
+      <input
+        type="checkbox"
+        :checked="props.snapshot.soundEnabled"
+        @change="onSoundChange"
+      />
+      sound
+    </label>
 
     <label v-for="o in overlayKeys" :key="o.key" class="toggle">
       <input

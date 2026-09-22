@@ -44,10 +44,13 @@ export interface EmitOptions {
  * The collected records are what the "brain" log panel renders, so systems
  * should emit generously but avoid per-frame noise.
  */
+export type EventListener = (record: EventRecord) => void
+
 export class EventBus {
   private seq = 0
   private buffer: EventRecord[] = []
   private counts = new Map<EventType, number>()
+  private listeners = new Set<EventListener>()
 
   total = 0
   tick = 0
@@ -75,6 +78,26 @@ export class EventBus {
       this.buffer.splice(0, this.buffer.length - this.max)
     }
     this.counts.set(type, (this.counts.get(type) ?? 0) + 1)
+
+    // Observers (audio, metrics, …) are read-only: a throwing listener must never
+    // interrupt the simulation, so each is isolated.
+    for (const listener of this.listeners) {
+      try {
+        listener(record)
+      } catch {
+        // Non-fatal: observability must not break the sim.
+      }
+    }
+  }
+
+  /** Subscribe to every emitted record. Returns an unsubscribe function. */
+  subscribe(listener: EventListener): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  unsubscribe(listener: EventListener): void {
+    this.listeners.delete(listener)
   }
 
   /** Snapshot of the tail of the log. */

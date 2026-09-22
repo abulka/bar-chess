@@ -9,6 +9,8 @@
   --red: #ff9f43;
   --blue: #5ab0ff;
   --accent: #ffd166;
+  /* Section headers, kept off the warm accent so they never read as enemy orange. */
+  --heading: #d6ccf2;
 }
 
 * {
@@ -191,13 +193,20 @@ input {
 /* ---------- stage ---------- */
 .stage {
   display: grid;
-  grid-template-columns: 170px 200px minmax(0, 1fr) 200px 170px;
+  grid-template-columns: 200px 200px minmax(0, 1fr) 200px 200px;
   min-height: 0;
   overflow: hidden;
 }
 
-.stage.no-rosters {
-  grid-template-columns: 170px minmax(0, 1fr) 170px;
+/* Rails-only or rosters-only: a single side column each, board in the middle. */
+.stage.no-rosters,
+.stage.no-rails {
+  grid-template-columns: 200px minmax(0, 1fr) 200px;
+}
+
+/* Both side stacks hidden: the board takes the whole width. */
+.stage.no-rails.no-rosters {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .rail {
@@ -217,10 +226,11 @@ input {
 }
 
 .rail-title {
-  color: var(--accent);
+  color: var(--heading);
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  margin: 8px 0 4px;
+  letter-spacing: 0.06em;
+  margin: 10px 0 4px;
 }
 
 .rail-title:first-child {
@@ -295,11 +305,11 @@ input {
 }
 
 .sw-bar {
-  background: #5ad469;
+  background: #4cd964;
 }
 
 .sw-reload {
-  border: 2px dashed #ff6b4a;
+  background: #15c2b6;
 }
 
 .hover-readout {
@@ -551,6 +561,20 @@ input {
 }
 
 /* ---------- event log ---------- */
+.splitter {
+  height: 6px;
+  cursor: row-resize;
+  background: var(--border);
+  border-top: 1px solid var(--bg);
+  border-bottom: 1px solid var(--bg);
+  touch-action: none;
+}
+
+.splitter:hover,
+.splitter:active {
+  background: var(--blue);
+}
+
 .bottom {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -744,8 +768,10 @@ input {
 }
 
 .inspector-title {
-  color: var(--accent);
+  color: var(--heading);
+  font-size: 13px;
   font-weight: 700;
+  letter-spacing: 0.06em;
   margin-bottom: 4px;
 }
 

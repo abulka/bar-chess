@@ -45,6 +45,10 @@ Two rules keep this clean:
    `Game` methods.
 2. **The renderer only reads.** It never mutates the world.
 
+The only other observer is audio: `App.vue` subscribes to the `EventBus` and
+forwards `shot`/`hit`/`explosion`/`miss` to the `AudioEngine`, which synthesizes
+combat sounds (§11). Audio never reads or mutates the world.
+
 ---
 
 ## 2. ECS core
@@ -73,6 +77,9 @@ Ring-buffered (`max = 6000`) observability log. Every meaningful transition is
 emitted (`spawn`, `target`, `shot`, `hit`, `miss`, `damage`, `kill`, `explosion`,
 `map`, `boot`, `info`, `warn`, `phase`). Events never drive simulation logic —
 they exist for the log, for auto-pause triggers, and for debugging.
+`bus.subscribe(fn)` gives read-only observers (the audio engine) a low-latency
+per-event hook; each listener is called in a `try/catch` so a throwing observer
+can never interrupt the sim.
 
 ### `Pipeline` — `src/ecs/pipeline.ts`
 
@@ -138,6 +145,12 @@ requestAnimationFrame(frame):
   `TURN_MAX_TICKS = 240` is the final ceiling, after which `snapMoves()` lands
   stragglers. `finishTurn()` pauses and stores the snapshot + tick count, then
   appends the resulting state to a bounded undo/redo history.
+- Rapid `space` presses are buffered rather than dropped: `Game.queueTurn()`
+  starts a turn when idle, else increments `queuedTurns` (capped at
+  `MAX_QUEUED_TURNS = 3`). `finishTurn()` — and the end of a replay — starts the
+  next queued turn immediately, so two presses play two turns back-to-back.
+  Cancelling (`p`), stepping (`s`), undo/redo/replay, and load/import clear the
+  buffer. The turnbar shows the pending count (`TURN · +2 queued`).
 - `undoTurn()` (key `u`) and `redoTurn()` (key `r`) step backwards/forwards
   through that history, restoring whole turn-boundary states; beginning a new
   turn replaces any undone branch. `replayTurn()` (key `y`) restores the last
@@ -405,9 +418,13 @@ tumbling bomb) → FX rings → hover cursor → border → chess coordinates.
 Centre-based: `screen = (world − camera) × zoom + viewport/2`. `fit()` computes
 the whole-board zoom and stores it as `fitZoom`; that value is also the
 `minZoom`, so the player can never zoom out past the fitted board. When `zoomAt`
-reaches that floor it snaps `x/y` back to the board centre, so a panned board
-always re-fits cleanly. `resize()` calls `updateLimits` to recompute the floor
-and clamp the current zoom. `maxZoom = 8` gives comfortable close-up range on
+reaches that floor it arms a board-centre target rather than snapping `x/y`; the
+renderer calls `camera.update(dt)` each frame, which eases toward that centre
+(exponential smoothing) so a panned board glides back instead of jumping.
+Panning or zooming back in cancels the pending recentre. `resize()` calls
+`updateLimits` to recompute the floor and clamp the current zoom — a zoomed-in
+view is never reset by a layout change (panel/HUD toggle), only raised if the
+new floor demands it. `maxZoom = 8` gives comfortable close-up range on
 large displays. `zoomAt` is cursor-anchored; wheel zoom is exponential on
 `deltaY` (`exp(-delta * 0.0008)`, clamped 0.7–1.4) for a gentle trackpad feel.
 
@@ -418,25 +435,35 @@ large displays. `zoomAt` is cursor-anchored; wheel zoom is exponential on
 `App.vue` constructs one `Game` (which starts **paused**), starts the frame loop,
 and copies `game.snapshot()` into a `shallowRef` every
 `SNAPSHOT_INTERVAL_MS = 120`. The simulation never depends on Vue reactivity.
-Control hints + the piece panel + hover readout live in always-visible side rails
-(left/right), independent of the HUD toggle, so they never cover the board. The
-HUD starts hidden; `h` toggles it.
+Control hints + the piece panel + hover readout live in side rails (left/right),
+independent of the HUD toggle, so they never cover the board. The HUD starts
+hidden; `h` toggles it, and `tab` toggles the side rails (`railsVisible`). The
+stage grid adapts to which of the two side stacks (rails, reinforcement rosters)
+are shown, giving the board the full width when both are hidden. Toggling either
+resizes the canvas and recomputes the fit floor without re-fitting, so a
+zoomed-in view keeps its zoom and centre (`BoardView.resize()`).
+
+The HUD bottom panel (stats + event log) is resizable: a draggable `.splitter`
+row sits between the stage and the panel, its height driven by `.app`'s inline
+`grid-template-rows` from a local `bottomHeight` ref (clamped to a minimum panel
+and stage size). Dragging sets the height from the pointer, double-click resets,
+and the result is persisted as `bottomFraction` of the viewport.
 
 `GameSnapshot` fields (`src/game/game.ts`): `running paused tick fps tps speed
 boardId boardSize boardSizes teams timings events eventCount shots kills
 warnings selected selectedLines counts winner overlays hudVisible autoPreserve
-playerTeam turnActive canReplay canUndo canRedo replaying turnProgress
-replayProgress pendingCommand selectionCount stanceSummary pieceInfo
-terrainVersion`.
+soundEnabled railsVisible playerTeam turnActive queuedTurns canReplay canUndo
+canRedo replaying barProgress pendingCommand selectionCount stanceSummary
+pieceInfo terrainVersion`.
 
 | Component | Responsibility |
 | --------- | -------------- |
-| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, overlay toggles, HUD toggle, auto-preserve, reset |
+| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, reset |
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle |
 | `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, queue, movement) with selection-wide stance buttons and clear-orders |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
 | `StatsBar.vue` | tick/fps/tps/pieces/shots/kills/entities/selected/winner |
-| `EventLog.vue` | Event stream (filter chips), Systems timings, Inspector for the selection |
+| `EventLog.vue` | Event stream (filter chips), Systems timings, Sound config panel, Inspector for the selection |
 
 ### Overlay scope and legend
 
@@ -465,7 +492,12 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
 `attackCells`, `rangeArcs`, `reload` (firing-recharge bars over pieces).
 `rangeArcs` is off by default; movement cells, attack cells and range arcs are
 drawn for selected pieces only; the health and recharge bars are drawn for every
-piece (each gated by its toggle), and army scopes show paths/goals/targets.
+piece (each gated by its toggle), and army scopes show paths/goals/targets. Bars
+are BAR-style: each draws a fixed dark frame full width (`BAR_BG`) with no
+outline stroke, and a coloured portion growing inside it — a green→red (solid red at ≤40%)
+health fill shown only when damaged, and a teal left-to-right recharge fill shown
+only for a long-cooldown weapon that has fired (`Weapon.fired`); both hide when
+effectively full and stack top-down.
 
 Ordering is BAR-style and **context-sensitive** — there is no global order mode:
 
@@ -489,7 +521,9 @@ Ordering is BAR-style and **context-sensitive** — there is no global order mod
   active attack order draws one. Toolbar selects/checkboxes blur after use so the
   global shortcuts always reach the window.
 - Hovering computes a per-selected-piece order preview (`Game.setHover`, drawn as
-  faint ghosts) and a cell readout.
+  faint ghosts) and a cell readout; the on-canvas coordinate label gets a solid
+  backing only when a piece occupies the hovered square, so it stays legible
+  over a glyph while empty squares remain unobscured.
 Chess coordinates (`coordName`) label the board margins.
 
 ### Position save / load / export
@@ -521,9 +555,11 @@ byte-identical stream (see §10).
 UI/session preferences survive a reload (and a dev-server restart) via
 `src/game/settings.ts`: `Game.settings()` snapshots them and `Game.applySettings`
 applies a validated patch. Stored under `bar-chess.settings`:
-`overlays` (all flags), `hudVisible`, `speed` and `gameMode` (per-piece stance
+`overlays` (all flags), `hudVisible`, `railsVisible`, `speed`, `gameMode`,
+`soundEnabled` and `bottomFraction` (the HUD splitter height; per-piece stance
 lives in the world, not here). `loadSettings` drops malformed or out-of-range fields (unknown
-overlay keys, non-boolean flags, speeds outside `SPEEDS`, unknown modes), and
+overlay keys, non-boolean flags, speeds outside `SPEEDS`, unknown modes,
+`bottomFraction` outside 0.1–0.9), and
 `saveSettings` swallows storage failures (private mode, quota) so persistence can
 never break the game. `App.vue` applies the patch once at startup and re-saves on
 every toolbar/hotkey change. This is separate from `SavedPosition`, which still
@@ -549,8 +585,8 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
 
 Keyboard: `m`/`a` arm a move/attack command (then left-click; Shift keeps it
 armed), `space` turn, `p` pause, `s` step, `u`/`r` undo/redo, `y` replay,
-`c`/`Backspace` clear orders, `o` my orders, `e` enemy plans, `h` HUD, `Esc`
-cancel the pending command else clear the selection. `Game.orderAt(cell,
+`c`/`Backspace` clear orders, `o` my orders, `e` enemy plans, `h` HUD, `tab`
+side rails, `Esc` cancel the pending command else clear the selection. `Game.orderAt(cell,
 command?)` resolves the intent: an explicit `move` always gotos, an explicit
 `attack` requires an enemy occupant, and omitted is context-sensitive
 (enemy→attack, friendly→no-op, empty→goto). Re-issuing the same order appends a
@@ -568,8 +604,8 @@ reachable but blocked; dashed grey when positionally out of reach. A lock reticl
 the legend groups these under "firing lines". When the target dies the order
 clears (stance unchanged), and `planAttack` routes immediately (visible while
 paused) against a fresh occupancy map. Left/right clicks never change the
-selection. `space` is ignored while a turn/replay is running; `u`/`r` undo/redo
-completed turns.
+selection. `space` pressed while a turn/replay is running is buffered (up to 3) and runs
+after it rather than being dropped; `u`/`r` undo/redo completed turns.
 
 Team colour is Orange vs Blue; **red marks an ordered attack**: the firing chain,
 the Attack stance badge, and the ring around a piece targeted by an explicit
@@ -577,10 +613,11 @@ attack order. **Amber marks autonomous engagement**: the ring/line around an
 auto-acquired or retaliation target (Attack stance, return fire, or a suspended
 attack's parked target). Pieces no longer draw a default ring. Target rings/chains
 are computed from **scoped** pieces only (selection + `my orders` / `enemy plans`),
-so they never float permanently. Every piece draws a thin health
-bar and a **plain red** reload bar, each hideable via its `health` / `reload`
-overlay toggle (tile-relative so the bars stay inside the cell); all pieces render
-at a uniform size.
+so they never float permanently. A damaged piece draws a thin
+green→red (solid red at ≤40%) health bar and a long-cooldown weapon that has fired a **teal**
+recharge bar, each hideable via its `health` / `reload` overlay toggle; both hide
+when effectively full and are tile-relative so the bars stay inside the cell; all
+pieces render at a uniform size.
 
 ---
 
@@ -635,13 +672,138 @@ fails on a regression of this magnitude, not on a slow CI machine.
 
 ---
 
-## 11. File index
+## 11. Audio — `src/audio/`
+
+Combat sound effects are **procedurally synthesized** (no audio assets, no
+licensing, works offline) and driven entirely by the event stream. `App.vue`
+subscribes to `game.bus` and forwards each record to `AudioEngine.handle`; the
+engine reads only `EventRecord.type`/`data`, so determinism is untouched.
+
+- `AudioEngine` (`audio.ts`) owns the `AudioContext` lifecycle: it is created
+  lazily and `unlock()`ed from the first user gesture (browser autoplay policy).
+  `setEnabled`/`setVolume`/`dispose` are the public controls; every method is a
+  safe no-op when Web Audio is unavailable (node/tests/old browsers). A
+  0.3 s density window (max 16 voices) plus a per-key minimum gap tames the
+  event flood of a 64×64 AI-vs-AI battle.
+- `Synth` (`synth.ts`) renders `VoiceSpec`s from oscillators, filtered noise and
+  gain envelopes (`play(spec)`); it holds no per-weapon logic.
+- `voices.ts` is the pure, serializable voice data: `fireVoice(weapon)`,
+  `hitVoice(kind, shape, damage)`, `explosionVoice(kind, radius)` and
+  `missVoice(cause)` return a `VoiceSpec` (an ordered list of tone/noise events).
+  `VOICE_OVERRIDES: Record<cueId, VoiceSpec>` wins over the built-in voice, so a
+  JSON blob copied from the editor can be pasted straight in.
+
+The systems were extended to put the needed context in event `data` (events are
+not persisted, so this is additive): `shot` carries `weapon`/`piece`/
+`projectileKind`; `hit` carries `kind`/`shape`/`damage`/`weapon` (the attacker's);
+`explosion` carries `kind`/`radius`; `miss` carries `cause`
+(`ground`/`wall`/`expired`/`target-lost`).
+
+Sound is **off by default** (opt-in), toggled by the toolbar **sound** checkbox,
+and persisted as `soundEnabled` in `GameSettings`.
+
+### Cue registry & sound config panel
+
+`sounds.ts` owns the canonical, data-derived cue ids and their synth parameters,
+so the live engine and the panel can never drift:
+
+```
+shot.<weapon>                 what a piece fires
+hit.<targetKind>.<weapon>     a piece taking a hit from an attacker's weapon
+death.<kind>                  a piece dying
+miss.<cause>                  a shot hitting nothing
+```
+
+`cueIdForEvent` maps an `EventRecord` to an id; `AudioEngine.handle` resolves it
+through the registry (a `hit` with no known attacker weapon falls back to raw
+shape/damage data), and `AudioEngine.audition(id)` plays a single cue on demand —
+bypassing the enabled gate and throttle, so sounds can be previewed with sound
+off. `AudioEngine.preview(spec)` plays an arbitrary edited spec through a
+dedicated preview bus (`stopPreview()` silences it). `catalog.ts` is a pure
+view-model (`pieceAudioCatalog`) exposing each piece's combat stats (hp, move
+geometry/cooldown, weapon damage/rate/reach/vision, projectile
+trajectory/shape/speed/splash/radius) alongside its fire, six hit-from-attacker
+and death cue ids.
+
+### Overrides (editing + persistence)
+
+`overrides.ts` is a runtime layer above the committed `VOICE_OVERRIDES` code.
+Edits are accumulated there, persisted to `localStorage`
+(`bar-chess.soundOverrides`, validated on read), and re-loaded at startup.
+`resolveSpec(id, builtin)` picks **local override → code override → built-in**,
+and `sounds.ts` resolves the effective spec at play time, so saved edits are
+heard in the live game immediately (no code change needed). The store exposes
+`get/set/clear/clearAll/all/overrideCount/subscribe/overrideSource`, plus
+`formatEntry` / `formatAllOverrides` which emit valid, pasteable TypeScript.
+
+#### Voice override workflow
+
+1. Press **`h`** to show the HUD, then open the bottom panel's **Sound** tab.
+2. Expand a piece; each cue row shows `▶` (audition), `∿` (edit) and its **cue id**
+   (`shot.<weapon>`, `hit.<target>.<weapon>`, `death.<kind>`, `miss.<cause>`).
+3. Click `∿` to open the synth editor and tweak the knobs / JSON. Tick **loop** to
+   hear edits continuously. Every change is **saved automatically to
+   `localStorage` and applied to the running game immediately** — no code change
+   needed. The editor badge reads `override loaded (saved)`, and the cue id gets a
+   ◆ marker in the panel.
+4. To **commit to code**, copy and paste into `VOICE_OVERRIDES` in
+   `src/audio/voices.ts`:
+   - **Copy all** → the whole declaration; replace the existing block with it:
+     ```ts
+     export const VOICE_OVERRIDES: Record<string, VoiceSpec> = {
+       "shot.bishopLance": [ { "type": "sawtooth", "from": 1900, /* … */ } ],
+       "hit.pawn.rookShell": [ /* … */ ]
+     }
+     ```
+   - **Copy entry** → a single `"cue.id": [ … ],` line to paste **inside** the
+     braces.
+   The value is always an **array of events**, and the key is a **quoted string**.
+   Pasting a bare array (or omitting the `"cue.id":` key) is invalid TypeScript.
+5. After committing, reload; the local and code copies match. Optionally click
+   **Clear all** in the panel to drop the local copies so the committed code
+   becomes authoritative. **Reset** in the editor clears just that cue's override;
+   **Clear all** drops every saved override.
+
+### Synth editor
+
+`SoundPanel.vue` (the bottom panel's **Sound** tab, hosted by `EventLog.vue`)
+renders the catalog: each cue row has a `▶` audition button, a `∿` button that
+opens `SynthEditor.vue`, and its id/description (with a ◆ marker when the id has
+an override); a header shows the saved-override count with **Copy all saved** /
+**Clear all**, and a miss-cues section lists the four global cues.
+`SynthEditor.vue` is a modal laid out like a synth:
+
+- a per-layer tab strip — each layer has **its own `×`**, plus `+ tone` / `+ noise`;
+- **oscillator** controls (waveform picker + `from`/`to` knobs), **envelope**
+  (`delay`/`attack`/`decay` knobs, level slider, envelope SVG) and **filter**
+  (type, cutoff/sweep, Q);
+- a live, two-way **JSON** view, a **Play** button with a **loop** checkbox
+  (auto-starts, restarts on edit, stops on uncheck/close), and
+  **Copy entry** / **Copy all** / **Reset**.
+
+`Knob.vue` is a reusable rotary dial (vertical drag, Shift for fine, wheel,
+arrow keys, double-click reset, optional log scale) with a numeric input. Edits
+are saved automatically (debounced) and applied live; the header badge shows
+`built-in` / `override (code)` / `override loaded (saved)`. **Reset** clears the
+local override; **Copy all** yields the whole `VOICE_OVERRIDES` block to commit
+in one paste.
+
+---
+
+## 12. File index
 
 ```
 src/
   main.ts                      createApp bootstrap
   App.vue                      owns Game, snapshot polling, layout, HUD, hotkeys
   style.css                    all UI styling
+  audio/
+    audio.ts                   AudioEngine: context lifecycle, event dispatch, throttling
+    synth.ts                   renders VoiceSpecs to Web Audio nodes
+    voices.ts                  VoiceSpec data + fire/hit/explosion/miss voices + VOICE_OVERRIDES
+    overrides.ts               runtime override store (localStorage) + resolveSpec + copy formatters
+    sounds.ts                  canonical cue ids + registry + event->cue mapping
+    catalog.ts                 pure view-model: piece stats + cue ids for the panel
   ecs/
     world.ts                   Entity, defineComponent, World
     components.ts              component interfaces + store handles
@@ -684,9 +846,10 @@ src/
     overlays.ts                pure firingLine/routePolyline segment data
     renderer.ts                canvas draw pipeline + overlays
   components/
-    Toolbar.vue BoardView.vue PiecePanel.vue ReinforcementBar.vue StatsBar.vue EventLog.vue
+    Toolbar.vue BoardView.vue PiecePanel.vue ReinforcementBar.vue StatsBar.vue EventLog.vue SoundPanel.vue SynthEditor.vue Knob.vue
 tests/
-  unit/                        logic, systems, Game integration, perf guards
+  unit/                        logic, systems, Game integration, perf guards,
+                               settings/events + audio (fake AudioContext)
   render/                      overlays + mock-2D-context renderer strokes
   e2e/                         Playwright interaction + canvas pixel probes
 ```
