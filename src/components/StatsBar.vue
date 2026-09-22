@@ -16,7 +16,7 @@ defineProps<{ snapshot: GameSnapshot }>()
     <span class="stat">{{ snapshot.selected.length }} selected</span>
     <span v-if="snapshot.warnings > 0" class="stat warn">{{ snapshot.warnings }} warnings</span>
     <span v-if="snapshot.winner" class="stat winner" :style="{ color: snapshot.teams[snapshot.winner].color }">
-      {{ snapshot.teams[snapshot.winner].name }} wins
+      {{ snapshot.teams[snapshot.winner].name }} wins — press <b>u</b> to undo
     </span>
   </div>
 </template>

@@ -379,12 +379,15 @@ export class Game {
       this.bus.emit('info', 'turn cancelled')
       return
     }
+    // A finished game stays frozen until it is undone.
+    if (this.winner !== null) return
     if (this.replaying) this.replaying = false
     this.paused = !this.paused
     this.bus.emit('info', this.paused ? 'paused' : 'resumed')
   }
 
   stepOnce(): void {
+    if (this.winner !== null) return
     if (this.turnActive) this.turnActive = false
     if (this.replaying) this.replaying = false
     this.paused = true
@@ -408,7 +411,7 @@ export class Game {
    * turns short, readable beats rather than several seconds of real time.
    */
   beginTurn(): void {
-    if (this.turnActive || this.replaying) return
+    if (this.turnActive || this.replaying || this.winner !== null) return
     // Mutate first, then snapshot: replay must start from the exact turn-start
     // state (cooldowns cleared, movedThisTurn set) or it diverges.
     this.turn++
@@ -456,7 +459,7 @@ export class Game {
   }
 
   replayTurn(): void {
-    if (!this.lastTurn || this.replaying || this.turnActive) return
+    if (!this.lastTurn || this.replaying || this.turnActive || this.winner !== null) return
     // Replay only makes sense from the latest state: rewinding first would let
     // the replayed turn land ahead of the cursor and desync the history.
     if (this.cursor !== this.history.length - 1) return
@@ -638,6 +641,9 @@ export class Game {
   }
 
   private step(): void {
+    // Once a winner is decided the battle is frozen; undo (or redo) rewinds it.
+    // A replay is exempt so it can reproduce the fatal turn exactly.
+    if (this.winner !== null && !this.replaying) return
     this.ctx.tick = this.tick
     this.ctx.turn = this.turn
     this.ctx.verbosePhases = this.pipeline.verbose
@@ -648,7 +654,15 @@ export class Game {
     this.pipeline.run(this.ctx)
     this.tick++
     this.ticksThisSecond++
+    const before = this.winner
     this.updateWinner()
+
+    // A king just fell during a live turn: close the turn (so the history
+    // boundary is the pre-fatal state) and freeze. Undo reopens the game.
+    if (this.winner !== null && before === null && !this.replaying) {
+      this.endGame(this.winner)
+      return
+    }
 
     if (this.replaying) {
       this.replayTicks++
@@ -665,12 +679,36 @@ export class Game {
     if (this.turnActive) this.advanceTurn()
   }
 
+  /**
+   * Chess-style decisive condition: a team is defeated the moment it has no
+   * living king. If both kings fall on the same tick the battle is a draw and
+   * play continues. Undo/redo/replay recompute this deterministically.
+   */
   private updateWinner(): void {
-    const red = Object.values(this.teams.red.alive).reduce((a, b) => a + b, 0)
-    const blue = Object.values(this.teams.blue.alive).reduce((a, b) => a + b, 0)
-    if (red === 0 && blue > 0 && this.teams.red.deployed > 0) this.winner = 'blue'
-    else if (blue === 0 && red > 0 && this.teams.blue.deployed > 0) this.winner = 'red'
-    else if (red > 0 || blue > 0) this.winner = null
+    const redKing = this.teams.red.alive.king ?? 0
+    const blueKing = this.teams.blue.alive.king ?? 0
+    if (redKing > 0 && blueKing > 0) this.winner = null
+    else if (redKing === 0 && blueKing > 0) this.winner = 'blue'
+    else if (blueKing === 0 && redKing > 0) this.winner = 'red'
+    else this.winner = null
+  }
+
+  /** Freeze the battle on a victory and record the state it ended on. */
+  private endGame(winner: TeamId): void {
+    if (this.turnActive) {
+      this.finishTurn()
+    } else {
+      // A king can also fall while single-stepping outside a turn; record a
+      // boundary so undo still has somewhere to go.
+      this.history.length = this.cursor + 1
+      this.history.push(this.captureTurn())
+      if (this.history.length > Game.HISTORY_LIMIT) this.history.shift()
+      this.cursor = this.history.length - 1
+    }
+    this.turnActive = false
+    this.replaying = false
+    this.paused = true
+    this.bus.emit('win', `${TEAM_NAMES[winner]} wins \u2014 undo (u) to continue`, { team: winner })
   }
 
   loadSize(size: BoardSize): void {

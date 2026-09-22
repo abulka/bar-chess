@@ -211,6 +211,76 @@ function rally(ctx: SimContext, team: 'red' | 'blue'): { x: number; y: number } 
   return lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
 }
 
+/** How close an enemy must get before the AI king retreats. */
+const KING_THREAT_RADIUS = 3
+
+/** Middle of a team's own back rank, the AI king's safe post. */
+function homeCell(ctx: SimContext, team: 'red' | 'blue'): { x: number; y: number } | null {
+  const lanes = ctx.board.data.lanes[team]
+  return lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
+}
+
+/** Nearest enemy to `cell` within `radius` cells (Chebyshev), or null. */
+function nearestThreat(
+  ctx: SimContext,
+  e: Entity,
+  team: 'red' | 'blue',
+  cell: { x: number; y: number },
+  radius: number,
+): Entity | null {
+  let best: Entity | null = null
+  let bestDist = Infinity
+  for (const other of ctx.world.query(Cell, Team)) {
+    if (other === e) continue
+    if (ctx.world.require(other, Team) === team) continue
+    const oc = ctx.world.require(other, Cell)
+    const d = Math.max(Math.abs(oc.x - cell.x), Math.abs(oc.y - cell.y))
+    if (d > radius || d >= bestDist) continue
+    bestDist = d
+    best = other
+  }
+  return best
+}
+
+/**
+ * AI king policy: hold the back-rank post and never join the rally. When an
+ * enemy closes in, step to the legal cell that opens the gap (ties broken
+ * toward home); otherwise walk back to the post. Fires only when adjacent, via
+ * the normal combat system.
+ */
+function aiKingGoal(ctx: SimContext, e: Entity, team: 'red' | 'blue'): { x: number; y: number } | null {
+  const kind = ctx.world.get(e, PieceType)?.kind
+  const def = kind ? PIECES[kind] : undefined
+  const cell = ctx.world.get(e, Cell)
+  if (!def || !cell) return null
+  const home = homeCell(ctx, team)
+  const threat = nearestThreat(ctx, e, team, cell, KING_THREAT_RADIUS)
+
+  if (threat !== null) {
+    const tc = ctx.world.get(threat, Cell)
+    if (!tc) return home
+    const occupied = makeOccupied(ctx.board, ctx.occupancy)
+    const currentDist = Math.hypot(cell.x - tc.x, cell.y - tc.y)
+    let best: { x: number; y: number } | null = null
+    let bestScore = -Infinity
+    for (const c of moveDestinations(ctx.board, cell, def.move, team, occupied)) {
+      const dist = Math.hypot(c.x - tc.x, c.y - tc.y)
+      if (dist <= currentDist) continue
+      // Among cells that open the gap, prefer the one nearer to home.
+      const score = dist * 10 - (home ? Math.hypot(c.x - home.x, c.y - home.y) : 0)
+      if (score > bestScore) {
+        bestScore = score
+        best = c
+      }
+    }
+    // Holding beats shuffling when no step actually opens the gap.
+    return best
+  }
+
+  if (home && (cell.x !== home.x || cell.y !== home.y)) return home
+  return null
+}
+
 const system: System = {
   name: 'orders',
   update(ctx) {
@@ -328,6 +398,12 @@ const system: System = {
 
       if (mode !== 'attack') {
         motion.goal = null
+        continue
+      }
+
+      // The AI king defends its post instead of charging with the army.
+      if (controller === 'ai' && ctx.world.get(e, PieceType)?.kind === 'king') {
+        motion.goal = aiKingGoal(ctx, e, team)
         continue
       }
 

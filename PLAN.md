@@ -151,6 +151,14 @@ The battle **starts paused**. Give orders, then take a turn:
   the recorded ticks and returns to exactly the same end state. Because turns are
   serialized, replay shows the moves one piece at a time at ~0.5× speed.
 
+## Victory
+
+The game ends when a **king** dies. The defeating team's colour wins, a `win`
+event is logged, and play freezes: turn/pause/step/replay are disabled. Press
+`u` (**Undo**) to step back before the fatal turn and keep playing (or `r` to
+redo it). A team that starts without a king has lost; if both kings fall at once
+it is a draw.
+
 A "move" is one application of the piece's movement geometry, so a pawn advances
 one square while a rook may slide several cells along a rank/file — one move.
 
@@ -164,7 +172,9 @@ across turns). It may skip moves but never exceed yours. AI-vs-AI is unrestricte
 `human-vs-ai` (default), `ai-vs-ai`, `human-vs-human`, chosen in the toolbar.
 The player's team (default blue) is shown in the `You: Blue · Red ai` badge.
 Human pieces start with **no stance** (no badge) and only act on your orders; AI
-teams rally/engage on their own. Both still fire autonomously.
+teams rally/engage on their own, except the **AI king**, which guards its back
+rank and retreats from nearby enemies instead of advancing. Both still fire
+autonomously.
 
 ## Overlays: seeing what is going on
 

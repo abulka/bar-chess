@@ -86,14 +86,14 @@ function onOverlayChange(key: keyof OverlayFlags, event: Event): void {
       {{ props.snapshot.teams[props.snapshot.playerTeam === 'blue' ? 'red' : 'blue'].controller }}
     </span>
 
-    <button class="ctl" :class="{ active: props.snapshot.turnActive }" @click="emit('turn')">
+    <button class="ctl" :class="{ active: props.snapshot.turnActive }" :disabled="!!props.snapshot.winner" @click="emit('turn')">
       {{ props.snapshot.turnActive ? '⏵ Turn…' : '⏵ Turn' }}
     </button>
-    <button class="ctl" @click="emit('toggle-pause')">{{ props.snapshot.paused ? '▶ Play' : '⏸ Pause' }}</button>
-    <button class="ctl" @click="emit('step')">⏭ Step</button>
+    <button class="ctl" :disabled="!!props.snapshot.winner" @click="emit('toggle-pause')">{{ props.snapshot.paused ? '▶ Play' : '⏸ Pause' }}</button>
+    <button class="ctl" :disabled="!!props.snapshot.winner" @click="emit('step')">⏭ Step</button>
     <button class="ctl" :disabled="!props.snapshot.canUndo" @click="emit('undo')">↶ Undo</button>
     <button class="ctl" :disabled="!props.snapshot.canRedo" @click="emit('redo')">↷ Redo</button>
-    <button class="ctl" :disabled="!props.snapshot.canReplay" @click="emit('replay')">↺ Replay</button>
+    <button class="ctl" :disabled="!props.snapshot.canReplay || !!props.snapshot.winner" @click="emit('replay')">↺ Replay</button>
 
     <div class="speed-group">
       <button

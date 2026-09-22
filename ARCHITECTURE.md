@@ -149,6 +149,14 @@ requestAnimationFrame(frame):
   `ctx.turnActive` is forced true so the one-move-per-turn gate matches the
   original turn — otherwise the replay would diverge.
 - `togglePause()` cancels an active turn; `stepOnce()` cancels turn/replay.
+- **Victory** is chess-style: a team is defeated the moment it has no living
+  king (`updateWinner`). When a king falls during a live turn the turn is closed
+  (so the history boundary is the pre-fatal state), a `win` event is emitted and
+  the sim freezes: `beginTurn`/`stepOnce`/`togglePause`/`replayTurn` become
+  no-ops and the toolbar disables those controls. `undo` stays enabled and
+  restores the `winner` (part of `TurnState`) back to `null`, reopening play;
+  `redo` replays the fatal turn. If both kings fall on the same tick it is a
+  draw and play continues.
 
 ### Team control & game modes
 
@@ -256,6 +264,10 @@ cell/reservation during movement validation and path planning.
   beats piling onto the occupied target, and a positionally unreachable target
   (e.g. a bishop on the other colour) still routes to the closest reachable square
   instead of a straight line to the target.
+  An **AI king** never rallies: it holds the middle of its own back rank
+  (`homeCell`) and, once an enemy is within `KING_THREAT_RADIUS = 3` cells,
+  steps to the legal cell that opens the gap (ties pulled toward home). It still
+  fires at adjacent enemies through the normal combat system.
   A `goto` that carries a `resumeTarget` is a suspended attack: on arrival (or
   once stalled) it arms `resumeTurn = ctx.turn + 2` and **regroups** — holding, or
   kiting one step back while under fire (`kiteCell`, which raises distance while

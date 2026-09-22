@@ -93,8 +93,8 @@ function onReset(): void {
 
 function onTurn(): void {
   // Ignore during an active turn/replay so space always starts the next turn
-  // rather than cancelling the current one.
-  if (game.turnActive || snapshot.value.replaying) return
+  // rather than cancelling the current one, and once the game is over.
+  if (game.turnActive || snapshot.value.replaying || snapshot.value.winner) return
   game.beginTurn()
   refresh()
 }
@@ -295,13 +295,15 @@ onBeforeUnmount(() => {
       ></div>
       <span class="turnbar-label">
         {{
-          snapshot.turnActive
-            ? 'TURN'
-            : snapshot.replaying
-              ? 'REPLAY'
-              : snapshot.canReplay
-                ? 'READY — space for next turn'
-                : 'press space for a turn'
+          snapshot.winner
+            ? `GAME OVER — ${snapshot.teams[snapshot.winner].name} wins (u to undo)`
+            : snapshot.turnActive
+              ? 'TURN'
+              : snapshot.replaying
+                ? 'REPLAY'
+                : snapshot.canReplay
+                  ? 'READY — space for next turn'
+                  : 'press space for a turn'
         }}
       </span>
       <span

@@ -225,4 +225,78 @@ describe('Game integration', () => {
     orderAttack(game, attacker, victim, true)
     expect(game.world.require(attacker, Order).target).toBe(victim)
   })
+
+  it('ends the game when a king dies and freezes play', () => {
+    const game = new Game(8)
+    const redKing = placePiece(game, 'king', 'red', { x: 4, y: 4 })
+    game.cmds.damage.push({ target: redKing, source: null, amount: 100000, kind: 'test' })
+
+    game.stepOnce()
+
+    expect(game.winner).toBe('blue')
+    expect(game.snapshot().winner).toBe('blue')
+    expect(game.world.isAlive(redKing)).toBe(false)
+
+    // Play is suspended: beginning a turn does nothing.
+    game.beginTurn()
+    expect(game.turnActive).toBe(false)
+  })
+
+  it('undo reopens a game that ended on a king kill', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    runTurn(game)
+    expect(game.snapshot().canUndo).toBe(true)
+
+    const redKing = placePiece(game, 'king', 'red', { x: 4, y: 4 })
+    game.cmds.damage.push({ target: redKing, source: null, amount: 100000, kind: 'test' })
+    game.stepOnce()
+    expect(game.winner).toBe('blue')
+    expect(game.snapshot().canUndo).toBe(true)
+
+    game.undoTurn()
+
+    expect(game.winner).toBeNull()
+    expect(game.world.isAlive(redKing)).toBe(true)
+    game.beginTurn()
+    expect(game.turnActive).toBe(true)
+  })
+
+  it('closes a live turn the moment the king falls', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    const redKing = placePiece(game, 'king', 'red', { x: 4, y: 4 })
+    game.beginTurn()
+    expect(game.turnActive).toBe(true)
+
+    game.cmds.damage.push({ target: redKing, source: null, amount: 100000, kind: 'test' })
+    game.runTicks(1)
+
+    expect(game.winner).toBe('blue')
+    expect(game.turnActive).toBe(false)
+    expect(game.snapshot().canUndo).toBe(true)
+  })
+
+  it('AI king holds its post instead of charging with the army', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    const redKing = placePiece(game, 'king', 'red', { x: 4, y: 0 })
+
+    game.stepOnce()
+
+    expect(game.world.require(redKing, Motion).goal).toBeNull()
+  })
+
+  it('AI king retreats from a nearby enemy instead of advancing', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    const redKing = placePiece(game, 'king', 'red', { x: 4, y: 2 })
+    placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
+
+    game.stepOnce()
+
+    const motion = game.world.require(redKing, Motion)
+    expect(motion.goal).not.toBeNull()
+    // It must not charge the enemy; it opens the gap instead.
+    expect(motion.goal!.y).toBeLessThanOrEqual(2)
+    const before = Math.hypot(4 - 4, 2 - 4)
+    const after = Math.hypot(motion.goal!.x - 4, motion.goal!.y - 4)
+    expect(after).toBeGreaterThan(before)
+  })
 })

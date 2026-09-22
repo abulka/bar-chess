@@ -18,6 +18,7 @@ export type EventType =
   | 'kill'
   | 'explosion'
   | 'cleanup'
+  | 'win'
   | 'info'
   | 'warn'
 
