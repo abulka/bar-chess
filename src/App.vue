@@ -341,8 +341,8 @@ onBeforeUnmount(() => {
           <li><span class="dot" style="background: #4ad991"></span><b>M</b> Move — travel, return fire only</li>
           <li><span class="dot" style="background: #ff3b30"></span><b>A</b> Attack — engage nearby, flee when low</li>
           <li><b>no badge</b> — no order (stand &amp; fire in range)</li>
-          <li><span class="dot" style="background: #ff2d20"></span><b>red ring</b> target of an attack</li>
-          <li><span class="dot" style="background: #b9c2cc"></span><b>&#9678;</b> tracking an enemy</li>
+          <li><span class="dot" style="background: #ff2d20"></span><b>red ring</b> ordered attack target</li>
+          <li><span class="dot" style="background: #e3b341"></span><b>amber ring</b> auto-acquired / retaliation target</li>
         </ul>
         <div class="rail-title">hover</div>
         <div class="hover-readout">

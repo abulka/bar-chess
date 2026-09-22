@@ -22,7 +22,7 @@ import { resolveGeometry } from '../game/types'
 import { coordName, fileLabel } from '../game/coords'
 import type { Game } from '../game/game'
 import { Camera } from './camera'
-import { firingLine, routePolyline } from './overlays'
+import { firingLine, routePolyline, type FiringLine } from './overlays'
 import { bakeTerrain } from './terrain'
 
 const STANCE_COLORS: Record<string, string> = {
@@ -32,6 +32,8 @@ const STANCE_COLORS: Record<string, string> = {
 const TRACK_COLOR = '#ff2d20'
 const UNREACHABLE_COLOR = '#a0a6ac'
 const REGROUP_COLOR = '#e3b341'
+/** Auto-acquired / retaliation target, distinct from an explicitly ordered one. */
+const ENGAGE_COLOR = '#e3b341'
 
 export class Renderer {
   camera = new Camera()
@@ -256,26 +258,7 @@ export class Renderer {
         }
         ctx.setLineDash([])
 
-        const ang = Math.atan2(line.target.y - line.end.y, line.target.x - line.end.x)
-        const ah = t * 0.2
-        ctx.fillStyle = lineColor
-        ctx.beginPath()
-        ctx.moveTo(line.target.x, line.target.y)
-        ctx.lineTo(line.target.x - Math.cos(ang - 0.4) * ah, line.target.y - Math.sin(ang - 0.4) * ah)
-        ctx.lineTo(line.target.x - Math.cos(ang + 0.4) * ah, line.target.y - Math.sin(ang + 0.4) * ah)
-        ctx.closePath()
-        ctx.fill()
-        ctx.strokeStyle = TRACK_COLOR
-        ctx.lineWidth = (full ? 2.2 : 1.5) / this.camera.zoom
-        ctx.beginPath()
-        ctx.arc(line.target.x, line.target.y, t * 0.24, 0, Math.PI * 2)
-        ctx.stroke()
-        ctx.beginPath()
-        ctx.moveTo(line.target.x - t * 0.33, line.target.y)
-        ctx.lineTo(line.target.x + t * 0.33, line.target.y)
-        ctx.moveTo(line.target.x, line.target.y - t * 0.33)
-        ctx.lineTo(line.target.x, line.target.y + t * 0.33)
-        ctx.stroke()
+        this.drawReticle(ctx, board, line, lineColor, TRACK_COLOR, full)
       }
       return
     }
@@ -299,29 +282,75 @@ export class Renderer {
         ctx.stroke()
       }
       if (partial) ctx.setLineDash([3 / this.camera.zoom, 3 / this.camera.zoom])
+      // A hollow diamond marks the destination, so it can never be mistaken for
+      // a target reticle (a circle + cross, red when ordered / amber when auto).
+      const r = t * 0.28
       ctx.beginPath()
-      ctx.arc(center.x, center.y, t * 0.26, 0, Math.PI * 2)
+      ctx.moveTo(center.x, center.y - r)
+      ctx.lineTo(center.x + r, center.y)
+      ctx.lineTo(center.x, center.y + r)
+      ctx.lineTo(center.x - r, center.y)
+      ctx.closePath()
       ctx.stroke()
       ctx.setLineDash([])
-      ctx.beginPath()
-      ctx.moveTo(center.x - t * 0.16, center.y)
-      ctx.lineTo(center.x + t * 0.16, center.y)
-      ctx.moveTo(center.x, center.y - t * 0.16)
-      ctx.lineTo(center.x, center.y + t * 0.16)
-      ctx.stroke()
     }
 
+    // Auto-acquired / retaliation target (Attack stance, or return fire): an
+    // amber engagement line + reticle, so an autonomous engagement reads as
+    // clearly as an ordered one while staying distinct from its red indicator.
     if (autoTarget === null || !game.world.isAlive(autoTarget)) return
-    const tp = game.world.get(autoTarget, Position)
-    if (!tp) return
-    ctx.strokeStyle = `rgba(255,209,102,${full ? 0.6 : 0.35})`
-    ctx.lineWidth = 1 / this.camera.zoom
+    const tc = game.world.get(autoTarget, Cell)
+    if (!tc) return
+    const endCell = motion && motion.path.length > 0 ? motion.path[motion.path.length - 1] : cell
+    const autoLine = firingLine(board, endCell, tc, WEAPONS[def.weapon].geometry, team, true, occupied)
+    const autoColor = full ? ENGAGE_COLOR : 'rgba(227,179,65,0.6)'
+    ctx.strokeStyle = autoColor
+    ctx.lineWidth = (full ? 1.8 : 1.2) / this.camera.zoom
+    for (const seg of autoLine.segments) {
+      ctx.setLineDash(seg.dashed ? [5 / this.camera.zoom, 4 / this.camera.zoom] : [])
+      ctx.beginPath()
+      ctx.moveTo(seg.from.x, seg.from.y)
+      ctx.lineTo(seg.to.x, seg.to.y)
+      ctx.stroke()
+    }
+    ctx.setLineDash([])
+    this.drawReticle(ctx, board, autoLine, ENGAGE_COLOR, ENGAGE_COLOR, full)
+  }
+
+  /**
+   * Direction arrow + reticle at the target end of a resolved firing line.
+   * Shared by the red ordered indicator and the amber auto-acquired one; the
+   * arrow follows `arrowColor` (grey when out of reach) while the ring uses
+   * `ringColor`, so an unreachable ordered target keeps its red reticle.
+   */
+  private drawReticle(
+    ctx: CanvasRenderingContext2D,
+    board: Game['board'],
+    line: FiringLine,
+    arrowColor: string,
+    ringColor: string,
+    full: boolean,
+  ): void {
+    const t = board.tile
+    const ang = Math.atan2(line.target.y - line.end.y, line.target.x - line.end.x)
+    const ah = t * 0.2
+    ctx.fillStyle = arrowColor
     ctx.beginPath()
-    ctx.moveTo(pos.x, pos.y)
-    ctx.lineTo(tp.x, tp.y)
+    ctx.moveTo(line.target.x, line.target.y)
+    ctx.lineTo(line.target.x - Math.cos(ang - 0.4) * ah, line.target.y - Math.sin(ang - 0.4) * ah)
+    ctx.lineTo(line.target.x - Math.cos(ang + 0.4) * ah, line.target.y - Math.sin(ang + 0.4) * ah)
+    ctx.closePath()
+    ctx.fill()
+    ctx.strokeStyle = ringColor
+    ctx.lineWidth = (full ? 2.2 : 1.5) / this.camera.zoom
+    ctx.beginPath()
+    ctx.arc(line.target.x, line.target.y, t * 0.24, 0, Math.PI * 2)
     ctx.stroke()
     ctx.beginPath()
-    ctx.arc(tp.x, tp.y, t * 0.2, 0, Math.PI * 2)
+    ctx.moveTo(line.target.x - t * 0.33, line.target.y)
+    ctx.lineTo(line.target.x + t * 0.33, line.target.y)
+    ctx.moveTo(line.target.x, line.target.y - t * 0.33)
+    ctx.lineTo(line.target.x, line.target.y + t * 0.33)
     ctx.stroke()
   }
 
@@ -590,14 +619,21 @@ export class Renderer {
     const entities = game.world.query(Position, Render, Health, PieceType)
     const sorted = entities.slice().sort((a, b) => game.world.require(a, Position).y - game.world.require(b, Position).y)
 
-    // Target rings follow the same scope as orders/overlays: only enemies being
-    // tracked by a scoped piece's attack order get a ring.
+    // Target rings follow the same scope as orders/overlays: an explicit attack
+    // order marks its victim red, while an auto-acquired / retaliation target
+    // (Attack stance or return fire) marks it amber so the difference is clear.
     const targeted = new Set<Entity>()
+    const autoTargeted = new Set<Entity>()
     const regrouping = new Set<Entity>()
     for (const { e } of scoped) {
       const od = game.world.get(e, Order)
-      if (od?.kind === 'attack' && od.target !== null) targeted.add(od.target)
+      if (od?.kind === 'attack' && od.target !== null) {
+        targeted.add(od.target)
+        continue
+      }
       if (od?.kind === 'goto' && od.resumeTarget !== null) regrouping.add(od.resumeTarget)
+      const auto = game.world.get(e, Target)?.entity ?? null
+      if (auto !== null && game.world.isAlive(auto) && !targeted.has(auto)) autoTargeted.add(auto)
     }
 
     for (const e of sorted) {
@@ -611,10 +647,17 @@ export class Renderer {
       ctx.ellipse(pos.x, pos.y + size * 0.3, size * 0.4, size * 0.18, 0, 0, Math.PI * 2)
       ctx.fill()
 
-      // Pieces have no default ring; a red ring marks a piece under attack order.
+      // Pieces have no default ring; a red ring marks a piece under attack order,
+      // an amber ring an auto-acquired / retaliation target.
       if (targeted.has(e)) {
         ctx.strokeStyle = TRACK_COLOR
         ctx.lineWidth = 2.5 / this.camera.zoom
+        ctx.beginPath()
+        ctx.arc(pos.x, pos.y, size * 0.62, 0, Math.PI * 2)
+        ctx.stroke()
+      } else if (autoTargeted.has(e)) {
+        ctx.strokeStyle = ENGAGE_COLOR
+        ctx.lineWidth = 2.2 / this.camera.zoom
         ctx.beginPath()
         ctx.arc(pos.x, pos.y, size * 0.62, 0, Math.PI * 2)
         ctx.stroke()

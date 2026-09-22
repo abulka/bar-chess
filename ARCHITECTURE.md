@@ -380,8 +380,14 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
 - **Range arc** — nominal weapon reach for the selected piece: directional bands
   along each firing line (rook files/ranks, bishop diagonals, queen/king all
   eight), a forward half-disc for the pawn, and 8 dots for the knight.
-- **Path** — dashed gold route; **destination** crosshair (red when blocked);
-  **target** thin line + reticle.
+- **Path** — dashed gold route; **destination** a hollow diamond (orange and
+  dashed when blocked). The diamond shape keeps the destination distinct from the
+  target reticle (circle + cross).
+- **Target** — an ordered attack (`order.kind === 'attack'`) draws a red firing
+  line + reticle and rings the victim red; an auto-acquired or retaliation target
+  (`Target.entity` under Attack stance / return fire) draws the same indicator in
+  **amber**, so an autonomous engagement is as legible as an ordered one while
+  staying distinct.
 - Army scope shows paths, destinations and targets; reach/attack shading and
   range arcs are reserved for selected pieces so the board stays readable.
 
@@ -487,11 +493,13 @@ routes immediately (visible while paused) against a fresh occupancy map. A
 right-click never changes the selection. `space` is ignored while a turn/replay
 is running; `u`/`r` undo/redo completed turns.
 
-Team colour is Orange vs Blue; **red is reserved for attack indicators**: the
-tracking chain, the Attack stance badge, and the ring drawn around a piece that is
-the target of an attack order. Pieces no longer draw a default ring. Target
-rings/chains are computed from **scoped** pieces only (selection + `my orders` /
-`enemy plans`), so they never float permanently. Every piece draws a thin health
+Team colour is Orange vs Blue; **red marks an ordered attack**: the firing chain,
+the Attack stance badge, and the ring around a piece targeted by an explicit
+attack order. **Amber marks autonomous engagement**: the ring/line around an
+auto-acquired or retaliation target (Attack stance, return fire, or a suspended
+attack's parked target). Pieces no longer draw a default ring. Target rings/chains
+are computed from **scoped** pieces only (selection + `my orders` / `enemy plans`),
+so they never float permanently. Every piece draws a thin health
 bar and a **plain red** reload bar, each hideable via its `health` / `reload`
 overlay toggle (tile-relative so the bars stay inside the cell); all pieces render
 at a uniform size.

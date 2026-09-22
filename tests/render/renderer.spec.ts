@@ -5,7 +5,7 @@ vi.mock('../../src/render/terrain', () => ({
   bakeTerrain: () => ({ width: 0, height: 0 }),
 }))
 
-import { Health, Motion, PieceType, Position, Render } from '../../src/ecs/components'
+import { Health, Motion, PieceType, Position, Render, Target } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
 import { Renderer } from '../../src/render/renderer'
 import { orderAttack, placePiece } from '../helpers'
@@ -166,6 +166,75 @@ describe('Renderer firing-line overlay', () => {
     expect(route!.dash.length).toBeGreaterThan(0)
     expect(route!.points[0]).toEqual(center(4, 4))
     expect(route!.points[route!.points.length - 1]).toEqual(center(4, 5))
+  })
+})
+
+describe('Renderer autonomous target overlay', () => {
+  const ENGAGE = '#e3b341'
+  let s: ReturnType<typeof setup>
+  let attacker: number
+  let target: number
+
+  beforeEach(() => {
+    s = setup()
+    attacker = placePiece(s.game, 'queen', 'blue', { x: 4, y: 4 })
+    target = placePiece(s.game, 'king', 'red', { x: 4, y: 6 })
+    s.game.selected = [attacker]
+  })
+
+  it('draws an amber line + ring for an auto-acquired target', () => {
+    s.game.world.require(attacker, Target).entity = target
+    s.renderer.draw(s.game)
+
+    const line = firingStrokes(s.ctx).filter((st) => st.style === ENGAGE)
+    expect(line).toHaveLength(1)
+    expect(line[0].dash).toEqual([])
+    expect(line[0].points).toEqual([center(4, 4), center(4, 6)])
+    // The victim is ringed amber (an arc-only stroke) and never red.
+    expect(s.ctx.strokes.some((st) => st.style === ENGAGE && st.points.length === 0)).toBe(true)
+    expect(s.ctx.strokes.some((st) => st.style === TRACK)).toBe(false)
+  })
+
+  it('keeps an ordered attack red and never duplicates it in amber', () => {
+    orderAttack(s.game, attacker, target, true)
+    s.game.world.require(attacker, Target).entity = target
+    s.renderer.draw(s.game)
+
+    expect(firingStrokes(s.ctx).filter((st) => st.style === TRACK)).toHaveLength(1)
+    expect(s.ctx.strokes.some((st) => st.style === ENGAGE)).toBe(false)
+  })
+
+  it('hides an auto-acquired target outside the overlay scope', () => {
+    s.game.selected = []
+    s.game.world.require(attacker, Target).entity = target
+    s.renderer.draw(s.game)
+
+    expect(s.ctx.strokes.some((st) => st.style === ENGAGE)).toBe(false)
+  })
+})
+
+describe('Renderer destination marker', () => {
+  it('draws a hollow diamond (not a cross) at the motion goal', () => {
+    const { renderer, ctx, game } = setup()
+    const piece = placePiece(game, 'rook', 'blue', { x: 2, y: 2 })
+    game.selected = [piece]
+    game.world.require(piece, Motion).goal = { x: 4, y: 2 }
+    renderer.draw(game)
+
+    const c = center(4, 2)
+    const r = TILE * 0.28
+    const diamond = ctx.strokes.find(
+      (st) => st.points.length === 4 && st.points[0].x === c.x && st.points[0].y === c.y - r,
+    )
+    expect(diamond).toBeDefined()
+    expect(diamond!.points).toEqual([
+      { x: c.x, y: c.y - r },
+      { x: c.x + r, y: c.y },
+      { x: c.x, y: c.y + r },
+      { x: c.x - r, y: c.y },
+    ])
+    // A non-goto (autonomous) goal is best-effort, so the diamond is dashed.
+    expect(diamond!.dash.length).toBeGreaterThan(0)
   })
 })
 

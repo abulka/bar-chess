@@ -184,8 +184,12 @@ Scope: the **selection** always shows full detail; `my orders` (`o`) and
   (violet) progresses and reads READY when the next turn can be taken.
 - Pawns fire the **two forward diagonals** (chess capture). A piece directly
   ahead blocks a pawn, exactly as in chess, and is not a target.
-- **Path** — dashed gold route; **destination** crosshair (red if blocked);
-  **target** line + reticle.
+- **Path** — dashed gold route; **destination** a hollow diamond (orange and
+  dashed if blocked), so it never reads as a target reticle.
+- **Target** — an ordered attack draws a red firing line + reticle and rings the
+  victim red; an auto-acquired or retaliation target (Attack stance / return
+  fire) draws the same indicator in **amber**, so you can see what a piece is
+  engaging on its own.
 
 Army scope shows paths/goals/targets; reach, attack and range are reserved for
 selected pieces to keep the board readable.
@@ -245,8 +249,8 @@ to `localStorage`.
 ## Known rough edges
 
 - A piece ordered to a cell its geometry can never reach (e.g. a bishop to the
-  opposite square colour) now walks its best partial route and shows a red
-  destination crosshair.
+  opposite square colour) now walks its best partial route and shows a dashed
+  orange destination diamond.
 - Reinforcement is an instant lane deploy; the production queue is Phase 4.
 - Overlay rendering recomputes geometry every frame; fine at current unit counts
   but worth caching if piece counts grow.
