@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import BoardView from './components/BoardView.vue'
 import EventLog from './components/EventLog.vue'
 import PiecePanel from './components/PiecePanel.vue'
@@ -18,6 +18,10 @@ import type { StanceMode, TeamId } from './game/types'
 const game = new Game(8)
 game.applySettings(loadSettings() ?? {})
 const snapshot = shallowRef<GameSnapshot>(game.snapshot())
+const barProgress = ref(0)
+const barHeld = computed(
+  () => !snapshot.value.turnActive && !snapshot.value.replaying && barProgress.value >= 1,
+)
 const copied = ref('')
 const boardView = ref<InstanceType<typeof BoardView> | null>(null)
 const slots = ref<SlotMeta[]>([])
@@ -257,6 +261,9 @@ function onKey(event: KeyboardEvent): void {
 
 onMounted(() => {
   game.start()
+  game.onProgress = (value) => {
+    barProgress.value = value
+  }
   refreshSlots()
   timer = window.setInterval(refresh, SNAPSHOT_INTERVAL_MS)
   window.addEventListener('keydown', onKey)
@@ -268,6 +275,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.clearInterval(timer)
   window.removeEventListener('keydown', onKey)
+  game.onProgress = null
   game.stop()
 })
 </script>
@@ -298,14 +306,15 @@ onBeforeUnmount(() => {
     >
       <div
         class="turnbar-fill"
-        :style="{ width: (snapshot.turnActive ? snapshot.turnProgress : snapshot.replaying ? snapshot.replayProgress : 0) * 100 + '%' }"
+        :class="{ complete: barHeld }"
+        :style="{ width: barProgress * 100 + '%' }"
       ></div>
       <span class="turnbar-label">
         {{
           snapshot.winner
             ? `GAME OVER — ${snapshot.teams[snapshot.winner].name} wins (u to undo)`
             : snapshot.turnActive
-              ? 'TURN'
+              ? `playing turn ${snapshot.turn}`
               : snapshot.replaying
                 ? 'REPLAY'
                 : snapshot.canReplay

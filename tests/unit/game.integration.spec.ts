@@ -100,6 +100,34 @@ describe('Game integration', () => {
     expect(JSON.stringify(game.toDebugJson())).toBe(end)
   })
 
+  it('the turn bar reaches and holds full, then resets for the next turn', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    game.beginTurn()
+    let guard = 0
+    while (game.turnActive && guard++ < 2000) {
+      game.runTicks(1)
+      if (game.turnActive) expect(game.snapshot().barProgress).toBeLessThan(1)
+    }
+    expect(game.turnActive).toBe(false)
+    expect(game.snapshot().barProgress).toBe(1)
+    // It stays full while waiting for the next turn...
+    game.runTicks(5)
+    expect(game.snapshot().barProgress).toBe(1)
+    // ...and resets to empty when a new turn starts.
+    game.beginTurn()
+    expect(game.snapshot().barProgress).toBe(0)
+  })
+
+  it('the replay bar reaches and holds full', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    runTurn(game)
+    game.replayTurn()
+    let guard = 0
+    while (game.snapshot().replaying && guard++ < 5000) game.runTicks(1)
+    expect(game.snapshot().replaying).toBe(false)
+    expect(game.snapshot().barProgress).toBe(1)
+  })
+
   it('undo and redo walk the turn history step by step', () => {
     const game = new Game(8, 'ai-vs-ai')
     const start = JSON.stringify(game.toDebugJson())

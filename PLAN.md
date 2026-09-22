@@ -220,7 +220,9 @@ Scope: the **selection** always shows full detail; `my orders` (`o`) and
   All pieces render at a uniform size. Projectiles are small and distinct per piece (dot / shell /
   lance / tumbling bomb) and travel and rotate in flight.
 - A wide **turn bar** under the toolbar fills as a turn (gold) or replay
-  (violet) progresses and reads READY when the next turn can be taken.
+  (violet) progresses. It tracks real remaining move work (not a time guess),
+  sweeps smoothly, reaches and **holds 100%** on completion, and reads READY
+  when the next turn can be taken.
 - Pawns fire the **two forward diagonals** (chess capture). A piece directly
   ahead blocks a pawn, exactly as in chess, and is not a target.
 - **Path** — dashed gold route; **destination** a hollow diamond (orange and
@@ -248,7 +250,7 @@ Keyboard summary: `m`/`a` arm move/attack, `space` turn, `p` pause, `s` step,
 enemy plans, `h` HUD, `Esc` cancel/clear selection. Turns and replays both play at 0.5×
 speed
 (one move at a time), and the wide **turn bar** under the toolbar sweeps the full
-width (same colour for both).
+width to 100% and holds it (same colour for both).
 
 ## Roadmap
 

@@ -163,6 +163,8 @@ export interface GameSnapshot {
   running: boolean
   paused: boolean
   tick: number
+  /** Monotonic turn index, matching the game's turn counter. */
+  turn: number
   fps: number
   tps: number
   speed: number
@@ -193,8 +195,8 @@ export interface GameSnapshot {
   canUndo: boolean
   canRedo: boolean
   replaying: boolean
-  turnProgress: number
-  replayProgress: number
+  /** Unified turn/replay bar fill (0..1); holds at 1 until the next action. */
+  barProgress: number
   /** BAR-style command waiting for the next left-click (`none` = plain select). */
   pendingCommand: StanceMode
   selectionCount: number
@@ -274,14 +276,16 @@ export class Game {
 
   turnActive = false
   canReplay = false
-  turnProgress = 0
-  replayProgress = 0
+  /** Unified turn/replay progress (0..1) shown by the wide bar. */
+  barProgress = 0
+  // Last two tick values for per-frame render interpolation.
+  private barPrev = 0
+  private barLast = 0
 
   private turnSnapshot: TurnState | null = null
   private turnTicks = 0
   private turnMovesSeen = 0
   private turnNoProgressTicks = 0
-  private lastTurnTicks = 0
   private lastTurn: { snapshot: TurnState; ticks: number } | null = null
   private replaying = false
   private replayTicks = 0
@@ -296,6 +300,11 @@ export class Game {
   private static readonly TURN_MAX_TICKS = 240
   /** Minimum sim time per turn (~1s) so reloads/fire advance even if nobody moves. */
   private static readonly MIN_TURN_TICKS = 30
+  // Smallest per-tick bar advance so it never visibly freezes on a work plateau;
+  // kept under (just-under-full / TURN_MAX_TICKS) so it can't reach the cap early.
+  private static readonly BAR_MIN_STEP = 0.004
+  /** Rough tick cost of one queued move, for shaping the bar only. */
+  private static readonly NOMINAL_MOVE_TICKS = 5
 
   fps = 0
   private tps = 0
@@ -307,6 +316,8 @@ export class Game {
   private ctx: SimContext
 
   onFrame: ((alpha: number) => void) | null = null
+  /** Per-frame turn/replay bar value (0..1), interpolated for smooth motion. */
+  onProgress: ((value: number) => void) | null = null
 
   constructor(size: BoardSize = 8, mode: GameMode = 'human-vs-ai') {
     this.gameMode = mode
@@ -431,7 +442,7 @@ export class Game {
     this.turnSnapshot = this.captureTurn()
     this.canReplay = false
     this.turnActive = true
-    this.turnProgress = 0
+    this.barProgress = 0
     this.turnMovesSeen = this.teams.red.movesMade + this.teams.blue.movesMade
     this.turnNoProgressTicks = 0
     this.paused = false
@@ -443,8 +454,7 @@ export class Game {
     if (this.turnActive || this.replaying || this.cursor <= 0) return
     this.restoreTurn(this.history[--this.cursor])
     this.selected = []
-    this.turnProgress = 0
-    this.replayProgress = 0
+    this.barProgress = 0
     this.paused = true
     this.canReplay = this.cursor === this.history.length - 1 && this.lastTurn !== null
     this.bus.emit('info', `undo (turn ${this.cursor}/${this.history.length - 1})`)
@@ -455,8 +465,7 @@ export class Game {
     if (this.turnActive || this.replaying || this.cursor >= this.history.length - 1) return
     this.restoreTurn(this.history[++this.cursor])
     this.selected = []
-    this.turnProgress = 0
-    this.replayProgress = 0
+    this.barProgress = 0
     this.paused = true
     this.canReplay = this.cursor === this.history.length - 1 && this.lastTurn !== null
     this.bus.emit('info', `redo (turn ${this.cursor}/${this.history.length - 1})`)
@@ -471,32 +480,35 @@ export class Game {
     this.selected = []
     this.replaying = true
     this.replayTicks = 0
-    this.replayProgress = 0
+    this.barProgress = 0
     this.paused = false
     this.bus.emit('info', `replaying last turn (${this.lastTurn.ticks} ticks)`)
   }
 
   private advanceTurn(): void {
     this.turnTicks++
-    // Pending = pieces still able to make their one move (or mid-move). A piece
-    // with no goal, or blocked with no route, counts as settled.
+    // Pending = pieces still able to make their one move (or mid-move); a piece
+    // with no goal, or blocked with no route, counts as settled. `remaining`
+    // estimates the ticks still needed (mirroring movement.ts travel), so the bar
+    // can be driven by elapsed / (elapsed + remaining): always advancing, never
+    // stalling on blocked pieces, and landing on 100% when the turn really ends.
     let pending = 0
+    let remaining = 0
     for (const e of this.world.query(Motion)) {
       const motion = this.world.get(e, Motion)
       if (!motion) continue
       if (motion.moving) {
         pending++
+        remaining += Math.max(0, (motion.travel - motion.elapsed) / FIXED_DT)
         continue
       }
       if (motion.movedThisTurn) continue
-      if (motion.goal && motion.path.length > 0) pending++
+      if (!motion.goal || motion.path.length === 0) continue
+      pending++
+      // Nominal cost of one move (~0.16s) keeps this cheap: it only needs to
+      // shape the bar, not be exact.
+      remaining += Game.NOMINAL_MOVE_TICKS
     }
-    // Even when everyone is settled, hold the turn open for a minimum beat so
-    // weapon cooldowns and in-range fire actually progress.
-    // Time-based bar, same mechanism as replay: ticks / expected duration
-    // (last turn's length), clamped just under full until the turn really ends.
-    const estimate = this.lastTurnTicks > 0 ? this.lastTurnTicks : Game.MIN_TURN_TICKS
-    this.turnProgress = Math.min(0.98, this.turnTicks / estimate)
 
     // Watch for a stall: blocked pieces can keep reporting a non-empty route
     // forever, so end the turn once no move has started for a while.
@@ -507,6 +519,19 @@ export class Game {
     } else {
       this.turnNoProgressTicks++
     }
+
+    // Keep the minimum beat in the denominator so the bar does not reach full
+    // before the turn's floor; ease the tail out as the stall timer or hard cap
+    // approaches so it still glides to 100% at the end. The work estimate can
+    // rise when pieces replan, so the bar is floored to a small forward step
+    // every tick: it tracks real progress but never freezes.
+    const clamp01 = (n: number): number => Math.max(0, Math.min(1, n))
+    remaining = Math.max(remaining, Game.MIN_TURN_TICKS - this.turnTicks)
+    remaining *= 1 - clamp01(this.turnNoProgressTicks / 45)
+    remaining = Math.min(remaining, Game.TURN_MAX_TICKS - this.turnTicks)
+    remaining = Math.max(0, remaining)
+    const candidate = this.turnTicks / (this.turnTicks + remaining + 1e-6)
+    this.barProgress = Math.min(1, Math.max(this.barProgress + Game.BAR_MIN_STEP, candidate))
 
     const stalled = this.turnNoProgressTicks >= 45
     if ((pending === 0 || stalled) && this.turnTicks >= Game.MIN_TURN_TICKS) {
@@ -538,8 +563,7 @@ export class Game {
 
   private finishTurn(): void {
     this.turnActive = false
-    this.turnProgress = 1
-    this.lastTurnTicks = this.turnTicks
+    this.barProgress = 1
     this.paused = true
     if (this.turnSnapshot) {
       this.lastTurn = { snapshot: this.turnSnapshot, ticks: this.turnTicks }
@@ -634,6 +658,12 @@ export class Game {
       this.secondTimer = 0
     }
 
+    // Absorb out-of-band changes (turn start, undo/redo, reset) as an instant
+    // snap; in-step changes below become the interpolation target.
+    if (this.barProgress !== this.barLast) {
+      this.barPrev = this.barProgress
+      this.barLast = this.barProgress
+    }
     if (!this.paused) {
       // Turns and replays both play at half speed (one move at a time).
       const scale = this.turnActive || this.replaying ? 0.5 : this.speed
@@ -646,9 +676,19 @@ export class Game {
       }
       if (steps === MAX_STEPS_PER_FRAME) this.accumulator = 0
     }
+    if (this.barProgress !== this.barLast) {
+      this.barPrev = this.barLast
+      this.barLast = this.barProgress
+    }
 
     const alpha = Math.min(1, this.accumulator / FIXED_DT)
     this.onFrame?.(alpha)
+    // Interpolate between the last two tick values so the bar sweeps smoothly
+    // rather than stepping at the (half-speed) simulation tick rate. When the
+    // sim is paused (turn/replay over) settle on the latest value so it cannot
+    // freeze a fraction short of full.
+    const barAlpha = this.paused ? 1 : alpha
+    this.onProgress?.(this.barPrev + (this.barLast - this.barPrev) * barAlpha)
   }
 
   private step(): void {
@@ -678,10 +718,10 @@ export class Game {
     if (this.replaying) {
       this.replayTicks++
       const total = this.lastTurn?.ticks ?? 0
-      this.replayProgress = total > 0 ? Math.min(1, this.replayTicks / total) : 1
+      this.barProgress = total > 0 ? Math.min(1, this.replayTicks / total) : 1
       if (this.replayTicks >= total) {
         this.replaying = false
-        this.replayProgress = 1
+        this.barProgress = 1
         this.paused = true
         this.bus.emit('info', 'replay finished')
       }
@@ -718,6 +758,7 @@ export class Game {
     }
     this.turnActive = false
     this.replaying = false
+    this.barProgress = 1
     this.paused = true
     this.bus.emit('win', `${TEAM_NAMES[winner]} wins \u2014 undo (u) to continue`, { team: winner })
   }
@@ -1178,9 +1219,8 @@ export class Game {
     this.turnSnapshot = null
     this.lastTurn = null
     this.turnTicks = 0
-    this.turnProgress = 0
+    this.barProgress = 0
     this.replayTicks = 0
-    this.replayProgress = 0
     this.accumulator = 0
     this.paused = true
 
@@ -1312,6 +1352,7 @@ export class Game {
       running: this.running,
       paused: this.paused,
       tick: this.tick,
+      turn: this.turn,
       fps: this.fps,
       tps: this.tps,
       speed: this.speed,
@@ -1346,8 +1387,7 @@ export class Game {
       canUndo: this.cursor > 0 && !this.turnActive && !this.replaying,
       canRedo: this.cursor < this.history.length - 1 && !this.turnActive && !this.replaying,
       replaying: this.replaying,
-      turnProgress: this.turnProgress,
-      replayProgress: this.replayProgress,
+      barProgress: this.barProgress,
       pendingCommand: this.pendingCommand,
       selectionCount: this.selected.filter((e) => this.world.isAlive(e)).length,
       stanceSummary,

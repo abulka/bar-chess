@@ -63,14 +63,33 @@ input {
   width: 0;
   opacity: 0.5;
   background: linear-gradient(90deg, #ffb347, #ffd166);
-  transition: width 0.1s linear;
+}
+
+.turnbar-fill.complete {
+  animation: turnbar-fill-fade 0.8s ease 3s forwards;
+}
+
+@keyframes turnbar-fill-fade {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turnbar-fill.complete {
+    animation: none;
+  }
 }
 
 .turnbar-label {
   position: relative;
+  z-index: 1;
+  padding: 0 8px;
+  border-radius: 3px;
+  background: rgba(11, 15, 22, 0.85);
   font-size: 10px;
   letter-spacing: 0.08em;
-  color: var(--muted);
+  color: var(--text);
 }
 
 .turnbar.active .turnbar-label,
