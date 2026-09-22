@@ -245,9 +245,12 @@ cell/reservation during movement validation and path planning.
 - **orders** — turns stance/order into `Motion.goal` for every piece (human or
   AI): an `attack` order pursues the target (or stops to fire when in geometry);
   a `goto` order advances toward the objective (best effort); autonomous `attack`
-  pursues in a leash, retreats below 30% HP only while the target is out of range
-  (an in-geometry target is held and fired on), and rallies only for AI teams;
-  anything other than `attack` clears the goal. Pursuit picks a goal with the
+  pursues in a leash, and rallies only for AI teams; a low-HP attacker keeps its
+  shot — it holds when it can already hit the target and is safe, steps to the
+  nearest firing cell that escapes the current threats' fire geometry (the target
+  and its last attacker) when that reduces incoming damage, and only retreats
+  outright when the target is out of range. Anything other than `attack` clears
+  the goal. Pursuit picks a goal with the
   same chain as `Game.planAttack` (`previewFiringCell` → `closestEmptyCell` →
   target) so the executed route cannot diverge from the preview; a firing position
   beats piling onto the occupied target, and a positionally unreachable target

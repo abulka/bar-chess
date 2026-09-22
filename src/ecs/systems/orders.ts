@@ -1,5 +1,6 @@
 import { containsCell, fireCells, moveDestinations } from '../../game/geometry'
-import { makeOccupied } from '../../game/occupancy'
+import type { OccupiedFn } from '../../game/geometry'
+import { makeOccupied, occupiedExcept } from '../../game/occupancy'
 import { closestEmptyCell, previewFiringCell } from '../../game/approach'
 import { PIECES, WEAPONS } from '../../game/pieces'
 import { reachableCells } from '../../game/pathfind'
@@ -90,6 +91,73 @@ function fleeCell(ctx: SimContext, e: Entity, team: 'red' | 'blue', threat: Enti
   for (const c of options) {
     const d = Math.hypot(c.x - tc.x, c.y - tc.y)
     if (d > bestDist) {
+      bestDist = d
+      best = c
+    }
+  }
+  return best
+}
+
+/** Cells `attacker` could hit with its weapon from `fromCell` (LOS included). */
+function fireCoverage(
+  ctx: SimContext,
+  attacker: Entity,
+  fromCell: { x: number; y: number },
+  occupied: OccupiedFn,
+): { x: number; y: number }[] {
+  const kind = ctx.world.get(attacker, PieceType)?.kind
+  const team = ctx.world.get(attacker, Team)
+  const def = kind ? PIECES[kind] : undefined
+  if (!def || !team) return []
+  return fireCells(ctx.board, fromCell, WEAPONS[def.weapon].geometry, team, occupied)
+}
+
+/**
+ * A low-HP attacker that can already hit its target holds the shot instead of
+ * running off. It only steps aside when it can find a cell that still fires on
+ * the target but is outside the firing geometry of the threats (the target and
+ * whoever last hit it), so backing off actually lowers incoming damage. The
+ * nearest such cell is chosen to avoid drifting out of the fight. Returns null
+ * (hold) when no safer firing cell exists.
+ */
+function safeRetreat(
+  ctx: SimContext,
+  e: Entity,
+  team: 'red' | 'blue',
+  target: Entity,
+  lastAttacker: Entity | null,
+): { x: number; y: number } | null {
+  const def = PIECES[ctx.world.require(e, PieceType).kind]
+  const cell = ctx.world.require(e, Cell)
+  if (!def) return null
+  // If the target is out of reach there is no shot to keep: retreat outright.
+  if (!inFiringGeometry(ctx, e, target, team)) return fleeCell(ctx, e, team, target)
+
+  const tcell = ctx.world.require(target, Cell)
+  const occupied = occupiedExcept(ctx.board, ctx.occupancy, e)
+  const coverage = [target]
+    .concat(
+      lastAttacker !== null &&
+        lastAttacker !== target &&
+        ctx.world.isAlive(lastAttacker) &&
+        ctx.world.has(lastAttacker, Cell)
+        ? [lastAttacker]
+        : [],
+    )
+    .map((t) => fireCoverage(ctx, t, ctx.world.require(t, Cell), occupied))
+  const exposed = (x: number, y: number) => coverage.some((cells) => containsCell(cells, x, y))
+
+  // Already outside every threat's reach: hold and fire.
+  if (!exposed(cell.x, cell.y)) return null
+
+  const weapon = WEAPONS[def.weapon].geometry
+  let best: { x: number; y: number } | null = null
+  let bestDist = Infinity
+  for (const c of moveDestinations(ctx.board, cell, def.move, team, occupied)) {
+    if (exposed(c.x, c.y)) continue
+    if (!containsCell(fireCells(ctx.board, c, weapon, team, occupied), tcell.x, tcell.y)) continue
+    const d = (c.x - cell.x) ** 2 + (c.y - cell.y) ** 2
+    if (d < bestDist) {
       bestDist = d
       best = c
     }
@@ -269,11 +337,9 @@ const system: System = {
         target.entity !== null && ctx.world.isAlive(target.entity) && ctx.world.has(target.entity, Cell)
 
       if (targetValid && hpRatio < FLEE_HP) {
-        const threat = target.entity as number
-        // A low-HP piece that can already hit its target holds and fires rather
-        // than running to a square with no shot; it only retreats when the
-        // target is out of range.
-        motion.goal = inFiringGeometry(ctx, e, threat, team) ? null : fleeCell(ctx, e, team, threat)
+        // Low HP: keep firing. Hold if already safe, step to a safer firing cell
+        // when one exists, otherwise retreat or hold (see safeRetreat).
+        motion.goal = safeRetreat(ctx, e, team, target.entity as number, target.lastAttacker)
         continue
       }
       if (!targetValid) {

@@ -56,9 +56,11 @@ from the **piece panel** (left rail), which applies to the whole selection:
 - **None** (default, no badge) — stand ground and fire only at enemies already in
   range, so the opening board stays clean.
 - **Move** (`M`, green) — travel and return fire only; never starts an attack.
-- **Attack** (`A`, red) — seek and attack nearby targets, prefer damaged ones,
-  and retreat when below 30% HP — but hold and keep firing while the target is
-  already in range. Does not chase across the board.
+- **Attack** (`A`, red) — seek and attack nearby targets, prefer damaged ones.
+  Below 30% HP it keeps firing: it holds when already safe, otherwise steps to the
+  nearest square that still hits the target but escapes the fire geometry of the
+  target and its last attacker; it only runs when the target is out of range.
+  Does not chase across the board.
 
 Orders **never** change a piece's stance. Issuing an attack leaves the stance as
 it was; when the target dies the order simply completes. Set the stance to
