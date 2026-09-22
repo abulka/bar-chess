@@ -17,6 +17,7 @@ describe('settings persistence', () => {
       hudVisible: true,
       speed: 2,
       gameMode: 'ai-vs-ai',
+      autoPreserve: false,
     })
     saveSettings(game.settings())
 
@@ -31,6 +32,7 @@ describe('settings persistence', () => {
     expect(restored.hudVisible).toBe(true)
     expect(restored.speed).toBe(2)
     expect(restored.gameMode).toBe('ai-vs-ai')
+    expect(restored.autoPreserve).toBe(false)
     expect(restored.teams.red.controller).toBe('ai')
   })
 
@@ -50,6 +52,7 @@ describe('settings persistence', () => {
         hudVisible: 'true',
         speed: 99,
         gameMode: 'nonsense',
+        autoPreserve: 'yes',
       }),
     )
     const loaded = loadSettings()
@@ -58,6 +61,14 @@ describe('settings persistence', () => {
     expect(loaded?.hudVisible).toBeUndefined()
     expect(loaded?.speed).toBeUndefined()
     expect(loaded?.gameMode).toBeUndefined()
+    expect(loaded?.autoPreserve).toBeUndefined()
+  })
+
+  it('defaults auto-preserve on and honors an explicit off', () => {
+    expect(new Game(8).autoPreserve).toBe(true)
+    const game = new Game(8)
+    game.applySettings({ autoPreserve: false })
+    expect(game.autoPreserve).toBe(false)
   })
 
   it('ignores invalid values in applySettings', () => {

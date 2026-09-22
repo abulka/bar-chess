@@ -176,8 +176,20 @@ teams rally/engage on their own, except the **AI king**, which guards its back
 rank instead of advancing. Under fire it steps out of an attacker's firing line
 (reacting to any shooter in line of sight, anyone who recently hit it, and nearby
 enemies), ranking threats by danger. Nearby AI pieces within a few squares become
-**bodyguards** and move to intercept the king's attacker, while the rest of the
-army keeps attacking. Both sides still fire autonomously.
+**bodyguards**: they step into the line of fire to block the shot when they can
+and stay planted while they are blocking it, otherwise they move to intercept the
+attacker, while the rest of the army keeps attacking. Both sides still fire
+autonomously.
+
+**Self-preservation** runs for every piece, human or AI: once it is badly hurt
+and still under fire it steps off the firing line on its own — even with an
+explicit order, which resumes when it is safe. It judges the escape against
+**every** shooter covering it (not just the last one). Valuable pieces
+(queen/rook/bishop/knight) watch for crossfire every moment and back off before
+they are hit once they are outgunned or focused by two or more attackers; cheaper
+pieces only react once they are hurt. Costlier pieces bail earlier (queen/king at
+50% health, rook 45%, bishop/knight 40%, pawn 30%). A persisted **auto-preserve**
+checkbox in the toolbar turns the behaviour off.
 
 ## Overlays: seeing what is going on
 
@@ -267,6 +279,11 @@ to `localStorage`.
 
 ## Known rough edges
 
+- **AI king pre-emptive evasion (deferred):** the king reacts to shooters that
+  cover it now, its recent attacker, and nearby enemies. It does not yet avoid an
+  enemy that is one move away from a firing position — a cheap approximation
+  would intersect the enemy's `attackApproachCells` with its one-step
+  `moveDestinations`, capped by a scan radius to bound the per-tick cost.
 - A piece ordered to a cell its geometry can never reach (e.g. a bishop to the
   opposite square colour) now walks its best partial route and shows a dashed
   orange destination diamond.

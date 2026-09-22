@@ -40,6 +40,7 @@ function makeContext(): SimContext {
     pathBudget: PATH_BUDGET_PER_TICK,
     verbosePhases: false,
     turnActive: false,
+    autoPreserve: true,
   }
 }
 

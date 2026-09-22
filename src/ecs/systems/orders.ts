@@ -10,11 +10,27 @@ import type { OrderData } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
-import { aiKingGoal, KING_GUARD_RADIUS, kingOf, kingThreats } from './kingDefense'
-import type { ThreatMemo } from './kingDefense'
+import { aiKingGoal, isScreening, KING_GUARD_RADIUS, kingOf, kingThreats, screenPlan } from './kingDefense'
+import { coverageThreats, escapeGoal, isValuable, outgunned } from './preservation'
+import type { ThreatMemo } from './preservation'
 
-const FLEE_HP = 0.3
 const REGROUP_TURNS = 2
+
+/** HP ratio at which a piece starts saving itself, scaled by how costly it is. */
+function preserveThreshold(kind: string): number {
+  switch (kind) {
+    case 'queen':
+    case 'king':
+      return 0.5
+    case 'rook':
+      return 0.45
+    case 'bishop':
+    case 'knight':
+      return 0.4
+    default:
+      return 0.3
+  }
+}
 
 /** Re-plan the remaining queue from the piece's current cell after a promotion. */
 function rechain(ctx: SimContext, e: Entity, order: OrderData): void {
@@ -219,8 +235,11 @@ const system: System = {
     // Per-tick caches: the king's enemy threat list is shared by every AI piece
     // so bodyguards do not rescan the board. Rebuilt each update, so undo/redo
     // and replay never see a stale entry.
-    const threatMemo: ThreatMemo = new Map()
+    const kingThreatMemo: ThreatMemo = new Map()
+    const pieceThreatMemo: ThreatMemo = new Map()
     const kings = { red: kingOf(ctx, 'red'), blue: kingOf(ctx, 'blue') }
+    // Squares already earmarked for screening this turn, so guards spread out.
+    const claimed = new Set<number>()
 
     for (const e of ctx.world.query(Stance, Order, Motion, Cell, Team, Target)) {
       const stance = ctx.world.require(e, Stance)
@@ -229,6 +248,44 @@ const system: System = {
       const cell = ctx.world.require(e, Cell)
       const team = ctx.world.require(e, Team)
       const target = ctx.world.require(e, Target)
+
+      // 0. Self-preservation: a hurt or outgunned piece steps out of the fire on
+      // its own, even with no order or an explicit one. Costly pieces bail
+      // earlier. The active order stays queued and resumes once the piece is safe.
+      const hp = ctx.world.get(e, Health)
+      const hpRatio = hp && hp.max > 0 ? hp.cur / hp.max : 1
+      const attacker = target.lastAttacker
+      const underFire =
+        attacker !== null &&
+        ctx.tick < target.underFireUntil &&
+        ctx.world.isAlive(attacker) &&
+        ctx.world.has(attacker, Cell)
+      const kind = ctx.world.get(e, PieceType)?.kind
+      const targetValid =
+        target.entity !== null && ctx.world.isAlive(target.entity) && ctx.world.has(target.entity, Cell)
+      const preserve = kind ? preserveThreshold(kind) : 0
+      // Valuable pieces scan every tick so they can bail *before* taking damage;
+      // cheap pieces only bother once hurt or actually under fire.
+      const valuable = kind !== undefined && isValuable(kind)
+      if (
+        ctx.autoPreserve &&
+        kind &&
+        !(ctx.teams[team].controller === 'ai' && kind === 'king') &&
+        (valuable || underFire || hpRatio < preserve)
+      ) {
+        // Judge the escape against every enemy currently covering this piece, not
+        // just the last one to shoot. Valuable pieces also bail when outgunned or
+        // focused by two or more shooters, before their HP drops.
+        const threats = coverageThreats(ctx, e, team, pieceThreatMemo)
+        const shooters = threats.reduce((n, t) => n + (t.canHitNow ? 1 : 0), 0)
+        const pressured = outgunned(ctx, e, threats) || (valuable && shooters >= 2)
+        if (threats.length > 0 && (hpRatio < preserve || pressured)) {
+          const keepShot =
+            targetValid && (order.kind === 'attack' || stance.mode === 'attack') ? (target.entity as number) : null
+          motion.goal = escapeGoal(ctx, e, team, threats, keepShot)
+          continue
+        }
+      }
 
       // 1. Explicit attack order: glue to the target until it dies.
       if (order.kind === 'attack') {
@@ -341,34 +398,38 @@ const system: System = {
 
       // The AI king defends its post instead of charging with the army.
       if (controller === 'ai' && ctx.world.get(e, PieceType)?.kind === 'king') {
-        motion.goal = aiKingGoal(ctx, e, team, kingThreats(ctx, e, team, threatMemo))
+        motion.goal = aiKingGoal(ctx, e, team, kingThreats(ctx, e, team, kingThreatMemo))
         continue
       }
 
-      // Nearby AI pieces break off to intercept the king's attackers. Guards
-      // within KING_GUARD_RADIUS engage the most dangerous threat; the rest of
-      // the army keeps pressing the attack.
+      // Nearby AI pieces break off to defend the king. Guards within
+      // KING_GUARD_RADIUS first try to screen the line of fire, else engage the
+      // most dangerous threat; the rest of the army keeps pressing the attack.
       if (controller === 'ai') {
         const king = kings[team]
-        if (king !== null && king !== e) {
-          const threats = kingThreats(ctx, king, team, threatMemo)
-          const kc = ctx.world.get(king, Cell)
-          if (threats.length > 0 && kc && chebyshev(cell.x, cell.y, kc.x, kc.y) <= KING_GUARD_RADIUS) {
+        const kc = king !== null ? ctx.world.get(king, Cell) : null
+        if (king !== null && king !== e && kc && chebyshev(cell.x, cell.y, kc.x, kc.y) <= KING_GUARD_RADIUS) {
+          // Already blocking a shot: stay planted rather than chasing.
+          if (isScreening(ctx, e, team, kc)) {
+            motion.goal = null
+            continue
+          }
+          const threats = kingThreats(ctx, king, team, kingThreatMemo)
+          if (threats.length > 0) {
             const top = threats[0]
             target.entity = top.entity
             target.retargetAt = ctx.tick + 12
-            motion.goal = pursue(ctx, e, top.entity, team)
+            const plan = top.canHitNow
+              ? screenPlan(ctx, e, team, top, kc, makeOccupied(ctx.board, ctx.occupancy), claimed)
+              : { onSegment: false, cell: null }
+            if (plan.onSegment) motion.goal = null
+            else motion.goal = plan.cell ?? pursue(ctx, e, top.entity, team)
             continue
           }
         }
       }
 
-      const hp = ctx.world.get(e, Health)
-      const hpRatio = hp && hp.max > 0 ? hp.cur / hp.max : 1
-      const targetValid =
-        target.entity !== null && ctx.world.isAlive(target.entity) && ctx.world.has(target.entity, Cell)
-
-      if (targetValid && hpRatio < FLEE_HP) {
+      if (targetValid && hpRatio < preserveThreshold(kind ?? '')) {
         // Low HP: keep firing. Hold if already safe, step to a safer firing cell
         // when one exists, otherwise retreat or hold (see safeRetreat).
         motion.goal = safeRetreat(ctx, e, team, target.entity as number, target.lastAttacker)

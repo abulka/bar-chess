@@ -182,6 +182,7 @@ export interface GameSnapshot {
   winner: TeamId | null
   overlays: OverlayFlags
   hudVisible: boolean
+  autoPreserve: boolean
   playerTeam: TeamId
   gameMode: GameMode
   gameModes: Array<{ id: GameMode; label: string }>
@@ -250,6 +251,8 @@ export class Game {
   terrainVersion = 0
   playerTeam: TeamId = 'blue'
   gameMode: GameMode = 'human-vs-ai'
+  /** Hurt pieces step out of fire on their own, even without orders. */
+  autoPreserve = true
   /** Transient BAR-style command awaiting the next left-click. */
   pendingCommand: StanceMode = 'none'
 
@@ -346,6 +349,7 @@ export class Game {
       pathBudget: PATH_BUDGET_PER_TICK,
       verbosePhases: this.pipeline.verbose,
       turnActive: this.turnActive,
+      autoPreserve: this.autoPreserve,
     }
   }
 
@@ -588,6 +592,7 @@ export class Game {
       hudVisible: this.hudVisible,
       speed: this.speed,
       gameMode: this.gameMode,
+      autoPreserve: this.autoPreserve,
     }
   }
 
@@ -604,9 +609,15 @@ export class Game {
     }
     if (typeof settings.hudVisible === 'boolean') this.hudVisible = settings.hudVisible
     if (typeof settings.speed === 'number' && SPEEDS.includes(settings.speed)) this.speed = settings.speed
+    if (typeof settings.autoPreserve === 'boolean') this.autoPreserve = settings.autoPreserve
     if (settings.gameMode && GAME_MODES.some((m) => m.id === settings.gameMode)) {
       this.setGameMode(settings.gameMode)
     }
+  }
+
+  setAutoPreserve(value: boolean): void {
+    this.autoPreserve = value
+    this.bus.emit('info', `auto-preserve ${value ? 'on' : 'off'}`)
   }
 
   private frame = (now: number): void => {
@@ -1324,6 +1335,7 @@ export class Game {
       winner: this.winner,
       overlays: { ...this.overlays },
       hudVisible: this.hudVisible,
+      autoPreserve: this.autoPreserve,
       playerTeam: this.playerTeam,
       gameMode: this.gameMode,
       gameModes: GAME_MODES,

@@ -57,4 +57,6 @@ export interface SimContext {
   verbosePhases: boolean
   /** when true, each piece may make at most one move this turn */
   turnActive: boolean
+  /** when true, hurt pieces step out of fire on their own, even without orders */
+  autoPreserve: boolean
 }

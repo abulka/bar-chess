@@ -1,10 +1,13 @@
-import { chebyshev, containsCell, fireCells, moveDestinations } from '../../game/geometry'
+import { cellsBetween, chebyshev, containsCell, fireCells, moveDestinations } from '../../game/geometry'
+import type { OccupiedFn } from '../../game/geometry'
 import { makeOccupied, occupiedExcept } from '../../game/occupancy'
 import { PIECES, WEAPONS } from '../../game/pieces'
 import type { TeamId, Vec2 } from '../../game/types'
-import { Cell, PieceType, Target, Team } from '../components'
+import { Cell, PieceType, Team } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
+import { coverageThreats } from './preservation'
+import type { Threat, ThreatMemo } from './preservation'
 
 /** How close an enemy must get before the AI king reacts even without a shot. */
 export const KING_THREAT_RADIUS = 3
@@ -12,24 +15,8 @@ export const KING_THREAT_RADIUS = 3
 export const KING_GUARD_RADIUS = 4
 /** The king backs off while a threat is inside this ring, then holds its ground. */
 const KING_STANDOFF = 5
-
-/** A ranked enemy threat to the king, rebuilt once per team per tick. */
-export interface Threat {
-  entity: Entity
-  team: TeamId
-  cell: Vec2
-  damage: number
-  /** The enemy's weapon currently covers the king's square (line of sight). */
-  canHitNow: boolean
-  /** The enemy was the last piece to damage the king. */
-  lastAttacker: boolean
-  /** The enemy is adjacent to the king. */
-  adjacent: boolean
-  distance: number
-  score: number
-}
-
-export type ThreatMemo = Map<TeamId, Threat[]>
+/** Radius within which a guard blocking an enemy's shot counts as screening. */
+const KING_SCREEN_RADIUS = 6
 
 /** The team's living king, or null for a king-less (already lost) side. */
 export function kingOf(ctx: SimContext, team: TeamId): Entity | null {
@@ -41,63 +28,84 @@ export function kingOf(ctx: SimContext, team: TeamId): Entity | null {
 }
 
 /**
- * Rank every enemy that can hurt the AI king this moment: anyone whose weapon
- * covers the king now (any distance, line of sight respected), whoever last hit
- * it, and anyone loitering within `KING_THREAT_RADIUS`. Sorted most dangerous
- * first — can-hit-now, then adjacency, then weapon damage, then closeness.
+ * The king's threats: the shared coverage scan, widened by `KING_THREAT_RADIUS`
+ * so it also reacts to pieces that have closed in without a shot yet.
  */
 export function kingThreats(ctx: SimContext, king: Entity, team: TeamId, memo: ThreatMemo): Threat[] {
-  const cached = memo.get(team)
-  if (cached) return cached
+  return coverageThreats(ctx, king, team, memo, { proximityRadius: KING_THREAT_RADIUS })
+}
 
-  const kingCell = ctx.world.get(king, Cell)
-  const kingTarget = ctx.world.get(king, Target)
-  if (!kingCell) {
-    memo.set(team, [])
-    return []
+/** Outcome of trying to screen the king from one attacker. */
+export interface ScreenPlan {
+  /** The guard already stands on the firing line — hold the post. */
+  onSegment: boolean
+  /** A reachable square on the line to step onto, or null if none is. */
+  cell: Vec2 | null
+}
+
+/**
+ * Try to body-block `threat`'s shot at the king: find the passable cells on the
+ * line between attacker and king, and return the nearest one this guard can step
+ * onto. `onSegment` reports a guard that is already blocking, so it holds rather
+ * than wandering off. Cells go into `claimed` so several guards spread out.
+ */
+export function screenPlan(
+  ctx: SimContext,
+  guard: Entity,
+  team: TeamId,
+  threat: Threat,
+  kingCell: Vec2,
+  occupied: OccupiedFn,
+  claimed: Set<number>,
+): ScreenPlan {
+  const def = PIECES[ctx.world.get(guard, PieceType)?.kind ?? '']
+  const gcell = ctx.world.get(guard, Cell)
+  if (!def || !gcell) return { onSegment: false, cell: null }
+  const width = ctx.board.width
+  const key = (c: Vec2) => c.y * width + c.x
+  const seg = cellsBetween(ctx.board, threat.cell, kingCell).filter((c) => ctx.board.passable(c.x, c.y))
+  if (seg.length === 0) return { onSegment: false, cell: null }
+  if (seg.some((c) => c.x === gcell.x && c.y === gcell.y)) return { onSegment: true, cell: null }
+
+  let best: Vec2 | null = null
+  let bestDist = Infinity
+  for (const c of moveDestinations(ctx.board, gcell, def.move, team, occupied)) {
+    if (claimed.has(key(c))) continue
+    if (!seg.some((s) => s.x === c.x && s.y === c.y)) continue
+    const d = (c.x - gcell.x) ** 2 + (c.y - gcell.y) ** 2
+    if (d < bestDist) {
+      bestDist = d
+      best = c
+    }
   }
-  // Only treat the last hit as a live threat while the king is still "under
-  // fire" (same window targeting/retreat use); otherwise it would flee forever.
-  const lastAttacker =
-    kingTarget && ctx.tick < kingTarget.underFireUntil ? kingTarget.lastAttacker : null
-  // Fire lines are judged with the king itself removed so vacating its square
-  // opens the same shots an escapee would have to dodge.
-  const selfFree = occupiedExcept(ctx.board, ctx.occupancy, king)
+  if (best) claimed.add(key(best))
+  return { onSegment: false, cell: best }
+}
 
-  const threats: Threat[] = []
-  for (const other of ctx.world.query(Cell, Team, PieceType)) {
-    if (other === king) continue
-    const otherTeam = ctx.world.require(other, Team)
-    if (otherTeam === team) continue
-    const kind = ctx.world.require(other, PieceType).kind
-    const def = PIECES[kind]
+/**
+ * Whether `guard` is the reason a nearby enemy cannot currently shoot the king
+ * — i.e. it is standing on that firing line and removing it would open the shot.
+ * Used to keep a bodyguard planted on the line instead of wandering off once the
+ * attacker is blocked (which also drops it out of the threat list).
+ */
+export function isScreening(ctx: SimContext, guard: Entity, team: TeamId, kingCell: Vec2): boolean {
+  const gcell = ctx.world.get(guard, Cell)
+  if (!gcell) return false
+  const withGuard = makeOccupied(ctx.board, ctx.occupancy)
+  const without = occupiedExcept(ctx.board, ctx.occupancy, guard)
+  for (const enemy of ctx.world.query(Cell, Team, PieceType)) {
+    if (enemy === guard) continue
+    const enemyTeam = ctx.world.require(enemy, Team)
+    if (enemyTeam === team) continue
+    const ec = ctx.world.require(enemy, Cell)
+    if (chebyshev(ec.x, ec.y, kingCell.x, kingCell.y) > KING_SCREEN_RADIUS) continue
+    const def = PIECES[ctx.world.require(enemy, PieceType).kind]
     if (!def) continue
-    const oc = ctx.world.require(other, Cell)
-    const gap = chebyshev(oc.x, oc.y, kingCell.x, kingCell.y)
-    const isLast = other === lastAttacker
-    const sweep = fireCells(ctx.board, oc, WEAPONS[def.weapon].geometry, otherTeam, selfFree)
-    const canHitNow = containsCell(sweep, kingCell.x, kingCell.y)
-    // Only react to a distant enemy if it is actually covering the king (a
-    // sniper) or just hit it; otherwise it is not a threat yet.
-    if (!canHitNow && !isLast && gap > KING_THREAT_RADIUS) continue
-    const adjacent = gap <= 1
-    const distance = Math.hypot(oc.x - kingCell.x, oc.y - kingCell.y)
-    const damage = WEAPONS[def.weapon].damage
-    threats.push({
-      entity: other,
-      team: otherTeam,
-      cell: { x: oc.x, y: oc.y },
-      damage,
-      canHitNow,
-      lastAttacker: isLast,
-      adjacent,
-      distance,
-      score: (canHitNow ? 100 : 0) + (isLast ? 15 : 0) + (adjacent ? 25 : 0) + damage - distance,
-    })
+    const geom = WEAPONS[def.weapon].geometry
+    if (containsCell(fireCells(ctx.board, ec, geom, enemyTeam, withGuard), kingCell.x, kingCell.y)) continue
+    if (containsCell(fireCells(ctx.board, ec, geom, enemyTeam, without), kingCell.x, kingCell.y)) return true
   }
-  threats.sort((a, b) => b.score - a.score)
-  memo.set(team, threats)
-  return threats
+  return false
 }
 
 /** Middle of a team's own back rank, the AI king's safe post. */

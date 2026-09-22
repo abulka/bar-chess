@@ -153,6 +153,39 @@ export function lineClear(
 }
 
 /**
+ * Interior cells of the Bresenham line between `a` and `b` (endpoints excluded).
+ * Used to find squares that can physically screen one point from another.
+ */
+export function cellsBetween(board: Board, a: Vec2, b: Vec2): Vec2[] {
+  const out: Vec2[] = []
+  let x0 = a.x
+  let y0 = a.y
+  const x1 = b.x
+  const y1 = b.y
+  const dx = Math.abs(x1 - x0)
+  const dy = Math.abs(y1 - y0)
+  const sx = x0 < x1 ? 1 : -1
+  const sy = y0 < y1 ? 1 : -1
+  let err = dx - dy
+  for (;;) {
+    const isEnd = x0 === x1 && y0 === y1
+    if (isEnd) break
+    const e2 = 2 * err
+    if (e2 > -dy) {
+      err -= dy
+      x0 += sx
+    }
+    if (e2 < dx) {
+      err += dx
+      y0 += sy
+    }
+    if (x0 === x1 && y0 === y1) break
+    if (board.inBounds(x0, y0)) out.push({ x: x0, y: y0 })
+  }
+  return out
+}
+
+/**
  * Empty cells from which `targetCell` sits inside the given firing geometry.
  * Used to pick a firing position (rather than piling onto the occupied target).
  * Computed as `target - dir`, which is correct for asymmetric patterns too

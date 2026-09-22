@@ -8,6 +8,7 @@ export interface GameSettings {
   hudVisible: boolean
   speed: number
   gameMode: GameMode
+  autoPreserve: boolean
 }
 
 /** A validated subset of settings to apply, as read from storage. */
@@ -16,6 +17,7 @@ export interface SettingsPatch {
   hudVisible?: boolean
   speed?: number
   gameMode?: GameMode
+  autoPreserve?: boolean
 }
 
 const SETTINGS_KEY = 'bar-chess.settings'
@@ -48,6 +50,7 @@ export function loadSettings(): SettingsPatch | null {
     out.overlays = overlays
   }
   if (typeof parsed.hudVisible === 'boolean') out.hudVisible = parsed.hudVisible
+  if (typeof parsed.autoPreserve === 'boolean') out.autoPreserve = parsed.autoPreserve
   if (typeof parsed.speed === 'number' && SPEEDS.includes(parsed.speed)) out.speed = parsed.speed
   if (typeof parsed.gameMode === 'string' && GAME_MODES.some((m) => m.id === parsed.gameMode)) {
     out.gameMode = parsed.gameMode as GameMode

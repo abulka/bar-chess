@@ -85,6 +85,12 @@ function onToggleHud(): void {
   nextTick(() => boardView.value?.fit())
 }
 
+function onToggleAutoPreserve(): void {
+  game.setAutoPreserve(!game.autoPreserve)
+  persistSettings()
+  refresh()
+}
+
 function onReset(): void {
   game.reset()
   boardView.value?.fit()
@@ -282,6 +288,7 @@ onBeforeUnmount(() => {
       @toggle-overlay="onToggleOverlay"
       @reset="onReset"
       @toggle-hud="onToggleHud"
+      @toggle-auto-preserve="onToggleAutoPreserve"
     />
 
     <div

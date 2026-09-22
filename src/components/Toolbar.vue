@@ -19,6 +19,7 @@ const emit = defineEmits<{
   (e: 'toggle-overlay', key: keyof OverlayFlags): void
   (e: 'reset'): void
   (e: 'toggle-hud'): void
+  (e: 'toggle-auto-preserve'): void
 }>()
 
 const speeds = SPEEDS
@@ -116,6 +117,11 @@ function onOverlayChange(key: keyof OverlayFlags, event: Event): void {
         @change="onOverlayChange(o.key, $event)"
       />
       {{ o.label }}
+    </label>
+
+    <label class="toggle" title="Hurt pieces step out of fire on their own, even without orders">
+      <input type="checkbox" :checked="props.snapshot.autoPreserve" @change="emit('toggle-auto-preserve')" />
+      auto-preserve
     </label>
 
     <button class="ctl" @click="emit('toggle-hud')">{{ props.snapshot.hudVisible ? 'Hide HUD' : 'Show HUD' }}</button>

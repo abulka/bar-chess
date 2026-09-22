@@ -172,7 +172,7 @@ and a `You: Blue · Red ai` badge.
 
 `SimContext` (`src/ecs/types.ts`) is the shared mutable context passed to every
 system: `world`, `bus`, `board`, `rng`, `tick`, `turn`, `dt`, `cmds`, `teams`,
-`occupancy`, `pathBudget`, `verbosePhases`, `turnActive`.
+`occupancy`, `pathBudget`, `verbosePhases`, `turnActive`, `autoPreserve`.
 
 System order (`createPipeline()` in `src/ecs/systems/index.ts`):
 
@@ -274,8 +274,32 @@ cell/reservation during movement validation and path planning.
   `KING_STANDOFF = 5`; it holds rather than shuffling, and returns to the middle
   of its own back rank once the board is clear. It still fires at adjacent
   enemies via combat. Nearby AI pieces within `KING_GUARD_RADIUS = 4` of a
-  threatened king become **bodyguards** and `pursue` the top-ranked threat; the
-  rest of the army keeps rallying.
+  threatened king become **bodyguards**: they first try to `screenPlan` — step
+  onto a passable square on the Bresenham line between attacker and king
+  (`cellsBetween`) so a slide shot stops on them — and otherwise `pursue` the
+  top-ranked threat; the rest of the army keeps rallying. `isScreening` keeps a
+  guard planted while it is the reason a nearby enemy cannot shoot the king
+  (removing it would open the line), so it does not wander off once the attacker
+  drops out of the threat list. (Knights leap, so they cannot be screened.) A
+  per-update `claimed` set spreads guards across squares.
+  A separate **self-preservation** pass runs first for any piece (human or AI).
+  `preservation.ts` supplies the shared core: `coverageThreats` (every enemy
+  whose `fireCells` cover the piece, plus its recent attacker; the king widens
+  this with `KING_THREAT_RADIUS`), `outgunned` (one-volley damage ≥ remaining
+  HP), and   `escapeGoal`, which scores each legal step by the **total** damage
+  covering it (plus a small adjacency penalty, below the weakest weapon's damage),
+  then whether it keeps the current target in range, then distance — so a piece
+  dodges *all* shooters, not just the last one, and otherwise picks the
+  lowest-exposure square that still fires. It triggers when the piece is below a
+  per-kind HP threshold (`preserveThreshold`: queen/king 0.5, rook 0.45,
+  bishop/knight 0.4, else 0.3) **or** outgunned **or** — for queen/rook/bishop/
+  knight/king — covered by two or more shooters, even above the HP gate. Valuable
+  pieces run this scan every tick so they can bail before taking damage; cheap
+  pieces only scan once hurt or actually under fire, and `coverageThreats` skips
+  any enemy beyond its weapon's reach, keeping the cost bounded. It runs even with
+  an explicit order, which stays queued and resumes when the piece is safe. Gated
+  by `ctx.autoPreserve`, the persisted **auto-preserve** toolbar toggle; with it
+  off, the older Attack-stance `safeRetreat` fallback still runs.
   A `goto` that carries a `resumeTarget` is a suspended attack: on arrival (or
   once stalled) it arms `resumeTurn = ctx.turn + 2` and **regroups** — holding, or
   kiting one step back while under fire (`kiteCell`, which raises distance while
@@ -388,13 +412,14 @@ HUD starts hidden; `h` toggles it.
 
 `GameSnapshot` fields (`src/game/game.ts`): `running paused tick fps tps speed
 boardId boardSize boardSizes teams timings events eventCount shots kills
-warnings selected selectedLines counts winner overlays hudVisible playerTeam
-turnActive canReplay canUndo canRedo replaying turnProgress replayProgress
-pendingCommand selectionCount stanceSummary pieceInfo terrainVersion`.
+warnings selected selectedLines counts winner overlays hudVisible autoPreserve
+playerTeam turnActive canReplay canUndo canRedo replaying turnProgress
+replayProgress pendingCommand selectionCount stanceSummary pieceInfo
+terrainVersion`.
 
 | Component | Responsibility |
 | --------- | -------------- |
-| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, overlay toggles, HUD toggle, reset |
+| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, overlay toggles, HUD toggle, auto-preserve, reset |
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle |
 | `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, queue, movement) with selection-wide stance buttons and clear-orders |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
