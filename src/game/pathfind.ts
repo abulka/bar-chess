@@ -70,9 +70,16 @@ export interface PathResult {
 // team, origin cell), and orders/AI ask the same question for the same piece
 // every tick. Memoize it with a small LRU so the flood fill runs once per
 // (cell, geometry) instead of once per tick. Cleared whenever the board object
-// or its terrain changes.
+// or its terrain changes. The same BFS also records the move *distance* to every
+// cell (hop count), so callers that need "how many moves away" do not pay for a
+// second flood fill.
+interface ReachEntry {
+  seen: Uint8Array
+  /** BFS hop count per cell; -1 when unreachable. */
+  dist: Int32Array
+}
 const REACH_CACHE_LIMIT = 512
-let reachCache = new Map<number, Uint8Array>()
+let reachCache = new Map<number, ReachEntry>()
 let reachCacheBoard: Board | null = null
 let reachCacheVersion = -1
 let nextGeomId = 1
@@ -101,6 +108,26 @@ export function reachableCells(
   geom: Geometry,
   team: TeamId,
 ): Uint8Array {
+  return reachEntry(board, from, geom, team).seen
+}
+
+/**
+ * Number of movement hops from `from` to every cell (BFS over the movement
+ * geometry, ignoring other pieces exactly like `reachableCells`). `-1` marks an
+ * unreachable cell. This is the metric `previewFiringCell` uses to pick the
+ * firing square a piece can actually reach in the fewest moves — Euclidean
+ * distance is a poor proxy for leap (knight) movement.
+ */
+export function moveDistances(
+  board: Board,
+  from: Vec2,
+  geom: Geometry,
+  team: TeamId,
+): Int32Array {
+  return reachEntry(board, from, geom, team).dist
+}
+
+function reachEntry(board: Board, from: Vec2, geom: Geometry, team: TeamId): ReachEntry {
   if (board !== reachCacheBoard || board.terrainVersion !== reachCacheVersion) {
     reachCache = new Map()
     reachCacheBoard = board
@@ -131,20 +158,23 @@ function computeReachable(
   from: Vec2,
   geom: Geometry,
   team: TeamId,
-): Uint8Array {
+): ReachEntry {
   const w = board.width
   const h = board.height
   const seen = new Uint8Array(w * h)
-  if (!board.inBounds(from.x, from.y)) return seen
+  const dist = new Int32Array(w * h).fill(-1)
+  if (!board.inBounds(from.x, from.y)) return { seen, dist }
   const g = resolveGeometry(geom, team)
   const start = from.y * w + from.x
   seen[start] = 1
+  dist[start] = 0
   const queue: number[] = [start]
 
-  const visit = (x: number, y: number): boolean => {
+  const visit = (x: number, y: number, parentIdx: number): boolean => {
     const idx = y * w + x
     if (seen[idx]) return false
     seen[idx] = 1
+    dist[idx] = dist[parentIdx] + 1
     queue.push(idx)
     return true
   }
@@ -160,7 +190,7 @@ function computeReachable(
           const x = cx + dx * k
           const y = cy + dy * k
           if (!board.passable(x, y)) break
-          if (!visit(x, y)) continue
+          if (!visit(x, y, current)) continue
         }
       }
       continue
@@ -170,7 +200,7 @@ function computeReachable(
       for (const [dx, dy] of g.offsets) {
         const x = cx + dx
         const y = cy + dy
-        if (board.passable(x, y)) visit(x, y)
+        if (board.passable(x, y)) visit(x, y, current)
       }
       continue
     }
@@ -181,10 +211,10 @@ function computeReachable(
     for (let k = 1; k <= advance; k++) {
       const y = cy + g.dy * k
       if (!board.passable(cx, y)) break
-      if (!visit(cx, y)) continue
+      if (!visit(cx, y, current)) continue
     }
   }
-  return seen
+  return { seen, dist }
 }
 
 /**

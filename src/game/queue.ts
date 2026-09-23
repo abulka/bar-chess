@@ -10,6 +10,20 @@ import type { Entity } from '../ecs/world'
 
 const NEVER: OccupiedFn = () => false
 
+/** How many recent order transitions a piece keeps for the properties panel. */
+export const MAX_ORDER_LOG = 5
+
+/**
+ * Record an order transition (issued / replaced / completed / abandoned) on the
+ * piece, newest last, capped at `MAX_ORDER_LOG`. Purely descriptive: the panel
+ * reads it to explain *why* the order changed, and it rides along in turn
+ * snapshots so undo/redo and record replay reproduce it exactly.
+ */
+export function noteOrder(order: OrderData, tick: number, text: string): void {
+  order.log.push({ tick, text })
+  if (order.log.length > MAX_ORDER_LOG) order.log.splice(0, order.log.length - MAX_ORDER_LOG)
+}
+
 /** Endpoint of a step's planned path (falls back to its objective). */
 export function stepEnd(step: OrderStep): Vec2 | null {
   const last = step.path[step.path.length - 1]

@@ -5,7 +5,7 @@ import { HEAL_RADIUS } from '../../game/healing'
 import { closestEmptyCell, previewFiringCell } from '../../game/approach'
 import { PIECES, WEAPONS } from '../../game/pieces'
 import { destReachable as canReach } from '../../game/pathfind'
-import { promoteNext, rechainQueue } from '../../game/queue'
+import { noteOrder, promoteNext, rechainQueue } from '../../game/queue'
 import { Cell, Health, Motion, Order, PieceType, Stance, Target, Team } from '../components'
 import type { OrderData } from '../components'
 import type { Entity } from '../world'
@@ -248,9 +248,11 @@ const system: System = {
         // The order is done; the next queued step takes over, else clear. The
         // stance is kept so the piece stays in Attack either way.
         if (promoteNext(order, motion)) {
+          noteOrder(order, ctx.tick, 'attack target lost — executing queued step')
           rechain(ctx, e, order)
           continue
         }
+        noteOrder(order, ctx.tick, 'attack target lost — order complete')
         order.kind = 'none'
         order.target = null
         order.resumeTarget = null
@@ -269,6 +271,11 @@ const system: System = {
         const unreachable = order.dest !== null && !destReachable(ctx, e, order.dest)
         if (arrived || (unreachable && order.queue.length > 0)) {
           if (promoteNext(order, motion)) {
+            noteOrder(
+              order,
+              ctx.tick,
+              unreachable && !arrived ? 'waypoint unreachable — skipped' : 'move complete — executing queued step',
+            )
             rechain(ctx, e, order)
             if (unreachable && !arrived) ctx.bus.emit('warn', `#${e} skipping unreachable waypoint`)
             continue
@@ -283,9 +290,11 @@ const system: System = {
 
         // Arrived: the move is complete; the next queued step takes over, else clear.
         if (promoteNext(order, motion)) {
+          noteOrder(order, ctx.tick, 'move complete — executing queued step')
           rechain(ctx, e, order)
           continue
         }
+        noteOrder(order, ctx.tick, 'move complete')
         order.kind = 'none'
         order.dest = null
         order.resumeTarget = null

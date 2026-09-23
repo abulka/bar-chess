@@ -43,6 +43,7 @@ describe('position shorthand', () => {
     const text = attack.shorthand()
     expect(text).toMatch(/bQ e4 @A atk=#\d+\(e3\)/)
     expect(text).toMatch(/tgt=#\d+\(e3\)/)
+    expect(text).toMatch(/note="attack ordered/)
     expect(text).toContain('# proj:')
     expect(text).toMatch(/# selected #\d+/)
 
@@ -52,6 +53,7 @@ describe('position shorthand', () => {
     move.setPieceStance('move')
     move.orderAt({ x: 0, y: 4 })
     expect(move.shorthand()).toMatch(/bR a1 @M goto=a4 goal=a4 path=a4/)
+    expect(move.shorthand()).toMatch(/note="move ordered/)
   })
 
   it('lists only non-floor terrain by name', () => {

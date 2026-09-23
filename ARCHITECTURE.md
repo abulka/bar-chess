@@ -99,7 +99,7 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Render` | `{ glyph, tint, size }` | unicode glyph + team tint |
 | `Health` | `{ cur, max }` | |
 | `Stance` | `{ mode }` | persistent policy: `none` / `move` / `attack` (`none` stands ground and fires in range, with no badge) |
-| `Order` | `{ kind, dest, target, reachable, resumeTarget, resumeTurn, queue }` | active step is one-shot `none` / `goto` / `attack`; `reachable` marks an attack target that is positionally attainable; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence (`resumeTarget`/`resumeTurn` are retained for save compatibility but unused — a move now replaces an attack) |
+| `Order` | `{ kind, dest, target, reachable, resumeTarget, resumeTurn, queue, log }` | active step is one-shot `none` / `goto` / `attack`; `reachable` marks an attack target that is positionally attainable; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence (`resumeTarget`/`resumeTurn` are retained for save compatibility but unused — a move now replaces an attack); `log` is a bounded list of recent order transitions (`noteOrder`) so the panel can explain why an order was issued, replaced, completed or abandoned |
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping |
 | `Weapon` | `{ left }` | seconds until next shot |
 | `Motion` | `{ goal, intent, holdUntilHp, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn }` | grid movement + render interpolation; `intent` is the goal's source (`order`/`preserve`/`defense`/`engage`/`rally`); `holdUntilHp` is a latched safe-hold until that HP; `reserved` is the cell being entered |
@@ -289,7 +289,11 @@ cell/reservation during movement validation and path planning.
   target) so the executed route cannot diverge from the preview; a firing position
   beats piling onto the occupied target, and a positionally unreachable target
   (e.g. a bishop on the other colour) still routes to the closest reachable square
-  instead of a straight line to the target.
+  instead of a straight line to the target. `previewFiringCell` picks the approach
+  square by **actual movement hops** (`moveDistances`, a BFS alongside
+  `reachableCells`), not Euclidean distance — so a knight heads for the firing
+  square it can reach in the fewest moves instead of a "nearer-looking" one four
+  hops away. Euclidean total is only the tie-break among equally-reachable squares.
   **AI king defense** (`kingDefense.ts`) never rallies. `kingThreats` ranks every
   enemy that can currently hit the king (its weapon's `fireCells` cover the
   king's square, at any range), anyone who hit it while it is still `underFire`,
@@ -511,7 +515,7 @@ pieceInfo terrainVersion`.
 | --------- | -------------- |
 | `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, reset |
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle |
-| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed, `pot shot` when only firing in range), selection-wide stance buttons and clear-orders |
+| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed, `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. The **order changes** list shows the piece's last few order transitions with their tick, so it is clear *why* an order was issued/replaced/completed/abandoned (e.g. `target #16 lost — attack abandoned`) |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
 | `StatsBar.vue` | tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Sound config panel, Inspector for the selection |

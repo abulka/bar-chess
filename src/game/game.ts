@@ -19,7 +19,7 @@ import {
   Team,
   Weapon,
 } from '../ecs/components'
-import type { MotionData, MotionIntent, OrderData, OrderStep } from '../ecs/components'
+import type { MotionData, MotionIntent, OrderData, OrderLogEntry, OrderStep } from '../ecs/components'
 import { Board } from './board'
 import type { BoardSize, Placement } from './boards'
 import { createBoardData, initialArmy } from './boards'
@@ -44,7 +44,7 @@ import type { Occupancy } from './occupancy'
 import type { OrderKind, StanceMode, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { destReachable, findPath } from './pathfind'
-import { anchorFor, planStep } from './queue'
+import { anchorFor, noteOrder, planStep } from './queue'
 import { buildBoard, buildWorldSnapshot, serializePosition, validatePosition } from './position'
 import type { SavedPosition } from './position'
 import { formatForLlm, formatShorthand } from './shorthand'
@@ -132,6 +132,8 @@ export interface PieceInfo {
     regrouping: boolean
     parked: PieceRef | null
     queue: Array<{ kind: OrderStep['kind']; label: string; source: 'manual'; reachable: boolean }>
+    /** Recent order transitions, newest first, for the "why did it change" log. */
+    history: OrderLogEntry[]
   }
   motion: {
     goal: Vec2 | null
@@ -1084,6 +1086,7 @@ export class Game {
 
       if (activeEmpty || settled) {
         if (settled) {
+          noteOrder(order, this.tick, 'replaced settled order')
           order.queue.length = 0
           order.target = null
           order.resumeTarget = null
@@ -1130,6 +1133,9 @@ export class Game {
     motion.arrived = true
     // Plan the route to a firing position now so it is visible while paused.
     order.reachable = this.planAttack(e, motion, target)
+    const tc = this.world.get(target, Cell)
+    const at = tc ? ` (${coordName(tc.x, tc.y, this.board.height)})` : ''
+    noteOrder(order, this.tick, `attack ordered → #${target}${at}${order.reachable ? '' : ' (unreachable)'}`)
   }
 
   private startGoto(
@@ -1143,6 +1149,7 @@ export class Game {
     // A move fully replaces any active attack — it does not park the target and
     // resume later. A piece ordered to a healing square therefore stays there
     // instead of kiting back to its old victim.
+    const replacedAttack = order.kind === 'attack'
     order.kind = 'goto'
     order.dest = { x: cell.x, y: cell.y }
     order.target = null
@@ -1161,6 +1168,11 @@ export class Game {
     // Fall back to a friendly-passable route when boxed in, so a blocked move
     // still shows a path instead of a bare straight line.
     this.planNow(e, motion, cell, occupiedExcept(this.board, occ, e), this.friendlyPass(occ, e, team))
+    noteOrder(
+      order,
+      this.tick,
+      `${replacedAttack ? 'move replaced attack → ' : 'move ordered → '}${coordName(cell.x, cell.y, this.board.height)}`,
+    )
   }
 
   private appendStep(
@@ -1189,6 +1201,8 @@ export class Game {
       const step: OrderStep = { kind: 'attack', target: attackTarget, path: [], goal: null, reachable: true }
       planStep(this.board, anchor, step, def, team, tcell)
       order.queue.push(step)
+      const at = tcell ? ` (${coordName(tcell.x, tcell.y, this.board.height)})` : ''
+      noteOrder(order, this.tick, `queued attack #${attackTarget}${at}`)
       return
     }
 
@@ -1201,6 +1215,7 @@ export class Game {
     const step: OrderStep = { kind: 'goto', dest: { x: cell.x, y: cell.y }, path: [] }
     planStep(this.board, anchor, step, def, team)
     order.queue.push(step)
+    noteOrder(order, this.tick, `queued move ${coordName(cell.x, cell.y, this.board.height)}`)
   }
 
   clearOrders(): void {
@@ -1212,6 +1227,7 @@ export class Game {
       const order = this.world.get(e, Order)
       const motion = this.world.get(e, Motion)
       if (order) {
+        noteOrder(order, this.tick, 'orders cleared (player)')
         order.kind = 'none'
         order.dest = null
         order.target = null
@@ -1308,6 +1324,7 @@ export class Game {
               resumeTarget: order.resumeTarget,
               resumeTurn: order.resumeTurn,
               queue: order.queue,
+              log: order.log,
             }
           : null,
         target: target ? { entity: target.entity, lastAttacker: target.lastAttacker } : null,
@@ -1686,6 +1703,7 @@ export class Game {
         regrouping: (order?.resumeTarget ?? null) !== null && (order?.resumeTurn ?? -1) >= 0,
         parked: order?.resumeTarget != null ? this.pieceRef(order.resumeTarget) : null,
         queue,
+        history: (order?.log ?? []).slice().reverse(),
       },
       motion: {
         goal: motion?.goal ?? null,

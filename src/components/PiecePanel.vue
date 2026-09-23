@@ -145,6 +145,13 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
         <span v-if="info.motion.goalCoord" class="muted"> → {{ info.motion.goalCoord }}</span>
       </p>
 
+      <div v-if="info.order.history.length" class="sub">order changes</div>
+      <ol v-if="info.order.history.length" class="order-log">
+        <li v-for="(h, i) in info.order.history" :key="i">
+          <span class="muted">t{{ h.tick }}</span> {{ h.text }}
+        </li>
+      </ol>
+
       <div class="sub">movement</div>
       <p class="line">
         <span v-if="info.motion.goalCoord">goal {{ info.motion.goalCoord }} · </span>
@@ -283,6 +290,18 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
   padding-left: 18px;
   color: var(--muted);
   line-height: 1.6;
+}
+
+.order-log {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  line-height: 1.5;
+  font-size: 0.92em;
+}
+
+.order-log .muted {
+  color: var(--muted);
 }
 
 .ctl.clear {

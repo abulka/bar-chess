@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Stance, Target } from '../../src/ecs/components'
+import { Order, Stance, Target } from '../../src/ecs/components'
 import { EventBus } from '../../src/ecs/events'
 import type { SimContext, TeamRuntime } from '../../src/ecs/types'
 import { World } from '../../src/ecs/world'
@@ -84,6 +84,22 @@ describe('targeting system — Attack leash', () => {
 
     expect(ctx.world.require(queen, Target).entity).toBe(enemyQueen)
     expect(ctx.world.require(queen, Target).entity).not.toBe(pawn)
+  })
+
+  it('records why an attack order was abandoned when its target disappears', () => {
+    const ctx = makeContext()
+    const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 2, y: 2 })
+    const queen = createPiece(ctx, 'red', PIECES.queen, { x: 3, y: 0 })
+    const order = ctx.world.require(knight, Order)
+    order.kind = 'attack'
+    order.target = queen
+    order.reachable = true
+    ctx.world.destroy(queen)
+
+    run(ctx)
+
+    expect(order.kind).toBe('none')
+    expect(order.log[order.log.length - 1].text).toContain('attack abandoned')
   })
 
   it('returns fire at the enemy shooting it over an equally-shootable one', () => {

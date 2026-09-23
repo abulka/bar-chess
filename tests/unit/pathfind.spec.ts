@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findPath, reachableCells } from '../../src/game/pathfind'
+import { findPath, moveDistances, reachableCells } from '../../src/game/pathfind'
 import { PIECES, WEAPONS } from '../../src/game/pieces'
 import { flatBoard, occupiedCells } from '../helpers'
 
@@ -40,6 +40,21 @@ describe('findPath', () => {
     const result = findPath(board, { x: 0, y: 0 }, { x: 7, y: 0 }, rook, 'blue')
     expect(result.found).toBe(false)
     expect(result.cells[result.cells.length - 1]).toEqual({ x: 2, y: 0 })
+  })
+})
+
+describe('moveDistances', () => {
+  it('counts knight hops, not Euclidean distance', () => {
+    const dist = moveDistances(flatBoard(), { x: 2, y: 5 }, PIECES.knight.move, 'blue') // c3
+    expect(dist[2 * 8 + 1]).toBe(2) // b6: two hops
+    expect(dist[3 * 8 + 4]).toBe(4) // e5: four hops
+    expect(dist[5 * 8 + 2]).toBe(0) // c3 itself
+  })
+
+  it('treats a whole slide as one hop', () => {
+    const dist = moveDistances(flatBoard(), { x: 0, y: 0 }, PIECES.rook.move, 'blue')
+    expect(dist[0 * 8 + 7]).toBe(1) // h8 in one rook move
+    expect(dist[7 * 8 + 7]).toBe(2) // h1 needs two
   })
 })
 

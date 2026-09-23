@@ -4,6 +4,7 @@ import type { SimContext } from '../../src/ecs/types'
 import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
 import { PIECES } from '../../src/game/pieces'
+import { MAX_ORDER_LOG, noteOrder } from '../../src/game/queue'
 import { clearComponents, orderAttack, placePiece } from '../helpers'
 
 function runTurn(game: Game): void {
@@ -108,6 +109,33 @@ describe('Game integration', () => {
     expect(order.target).toBe(victim)
     expect(order.reachable).toBe(true)
     expect(game.world.require(attacker, Motion).path).toEqual([])
+  })
+
+  it('records the reason for each player order change', () => {
+    const game = new Game(8)
+    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
+    placePiece(game, 'king', 'red', { x: 4, y: 5 })
+    game.selected = [attacker]
+    const order = game.world.require(attacker, Order)
+
+    game.orderAt({ x: 4, y: 5 }, 'attack')
+    expect(order.log[order.log.length - 1].text).toContain('attack ordered')
+
+    game.orderAt({ x: 3, y: 4 }, 'move')
+    expect(order.log[order.log.length - 1].text).toContain('move replaced attack')
+
+    game.clearOrders()
+    expect(order.log[order.log.length - 1].text).toContain('orders cleared')
+    expect(order.kind).toBe('none')
+  })
+
+  it('caps the order-change log', () => {
+    const game = new Game(8)
+    const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
+    const order = game.world.require(rook, Order)
+    for (let i = 0; i < 10; i++) noteOrder(order, i, `change ${i}`)
+    expect(order.log).toHaveLength(MAX_ORDER_LOG)
+    expect(order.log[order.log.length - 1].text).toBe('change 9')
   })
 
   it('an attack command needs an enemy target', () => {

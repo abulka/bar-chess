@@ -1,7 +1,7 @@
 import type { Board } from './board'
 import { attackApproachCells } from './geometry'
 import type { OccupiedFn } from './geometry'
-import { reachableCells } from './pathfind'
+import { moveDistances, reachableCells } from './pathfind'
 import type { Geometry, TeamId, Vec2 } from './types'
 
 /**
@@ -28,10 +28,15 @@ export function firingPositionExists(
 
 /**
  * Firing cell to route an attack preview toward: the empty, reachable approach
- * cell that minimises total travel (piece → cell → target). Picking a genuine
- * approach cell keeps the final shooting line aligned with the weapon geometry
- * (a bishop shoots diagonally, a rook straight) instead of the nearest cell,
- * which can sit directly beside the target.
+ * cell that minimises total travel (piece → cell → target). The piece → cell leg
+ * is scored by actual movement hops (`moveDistances`), because Euclidean distance
+ * is a poor proxy for leap (knight) movement — a knight's "nearby" square can be
+ * four hops away while a farther-looking one is two. The cell → target leg is a
+ * single weapon application for every approach cell, so it is only a tie-break
+ * (keeping the chosen square close to the victim). Picking a genuine approach
+ * cell keeps the final shooting line aligned with the weapon geometry (a bishop
+ * shoots diagonally, a rook straight) instead of the nearest cell, which can sit
+ * directly beside the target.
  */
 export function previewFiringCell(
   board: Board,
@@ -43,14 +48,19 @@ export function previewFiringCell(
   occupied: OccupiedFn,
 ): Vec2 | null {
   const reach = reachableCells(board, from, moveGeom, team)
+  const dist = moveDistances(board, from, moveGeom, team)
   const w = board.width
   const scored = attackApproachCells(board, targetCell, weaponGeom, team)
-    .filter((c) => !occupied(c.x, c.y) && reach[c.y * w + c.x])
+    // The piece's own square is never a "move to" candidate (a caller that is
+    // already in firing geometry handles the hold itself).
+    .filter((c) => !(c.x === from.x && c.y === from.y) && !occupied(c.x, c.y) && reach[c.y * w + c.x])
     .map((c) => ({
       c,
+      moves: dist[c.y * w + c.x],
+      // Euclidean total kept as a tie-break among equally-reachable cells.
       s: (c.x - from.x) ** 2 + (c.y - from.y) ** 2 + (c.x - targetCell.x) ** 2 + (c.y - targetCell.y) ** 2,
     }))
-    .sort((a, b) => a.s - b.s)
+    .sort((a, b) => a.moves - b.moves || a.s - b.s)
   return scored.length > 0 ? scored[0].c : null
 }
 

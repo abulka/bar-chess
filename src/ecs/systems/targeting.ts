@@ -3,6 +3,7 @@ import { ATTACK_LEASH } from '../../game/constants'
 import { containsCell, fireCells } from '../../game/geometry'
 import { buildOccupancy, makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS, weaponVision } from '../../game/pieces'
+import { noteOrder } from '../../game/queue'
 import { Cell, Health, Order, PieceType, Stance, Target, Team } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
@@ -115,6 +116,7 @@ const system: System = {
           }
           continue
         }
+        if (t !== null) noteOrder(order, ctx.tick, `target #${t} lost — attack abandoned`)
         order.kind = 'none'
         order.target = null
         order.resumeTarget = null

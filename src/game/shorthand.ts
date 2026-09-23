@@ -46,6 +46,7 @@ const FORMAT_LEGEND =
   'hold=<hp> badly wounded: safe-hold latched until that HP is reached; ' +
   'moving=mid-hop; res=<cell> reserved next cell; ' +
   'q=step>step queued steps after the active order (cell=goto, atk#id(cell)=attack); ' +
+  'note="..." why the order last changed (issued/replaced/completed/abandoned); ' +
   'w=weapon reload seconds; grid red=Upper blue=lower. terrain: . floor : road , sand ~ water # wall'
 
 /**
@@ -68,6 +69,7 @@ Reading a position block:
   goto=<cell>            standing move order
   atk=#id(cell)          standing attack order ('!' = target positionally unreachable, e.g. wrong colour)
   q=a>b>atk#id(cell)     queued steps after the active order (cell=goto, atk#id=attack), run in sequence
+  note="..."             why the order last changed (issued/replaced/completed/abandoned)
   tgt=#id(cell)          current auto-acquired or retaliated target
   goal=<cell>            current motion goal (where the planned path ends)
   intent=<kind>          why the goal was chosen: preserve (self-preservation retreat),
@@ -166,7 +168,6 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
         .join('>')
       flags.push(`q=${steps}`)
     }
-
     if (target.entity !== null && game.world.isAlive(target.entity)) {
       flags.push(`tgt=${refName(game, width, height, target.entity)}`)
     }
@@ -191,6 +192,11 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
     }
     const weapon = game.world.get(e, Weapon)
     if (weapon && weapon.left > 0.05) flags.push(`w=${round1(weapon.left)}`)
+    // Last flag, so the earlier order flags keep their existing shape.
+    if (order.log.length > 0) {
+      const latest = order.log[order.log.length - 1]
+      flags.push(`note="${latest.text.replace(/"/g, "'")}"`)
+    }
 
     const letter = PIECE_LETTER[kind] ?? '?'
     units.push({

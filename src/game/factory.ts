@@ -25,6 +25,7 @@ export function createPiece(ctx: SimContext, team: 'red' | 'blue', def: PieceDef
     resumeTarget: null,
     resumeTurn: -1,
     queue: [],
+    log: [],
   })
   world.add(e, Target, { entity: null, retargetAt: 0, lastAttacker: null, underFireUntil: 0 })
   world.add(e, Weapon, { left: ctx.rng.range(0, 0.5), fired: false })

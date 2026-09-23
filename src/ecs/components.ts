@@ -37,6 +37,12 @@ export type OrderStep =
   | { kind: 'goto'; dest: Vec2; path: Vec2[] }
   | { kind: 'attack'; target: Entity; path: Vec2[]; goal: Vec2 | null; reachable: boolean }
 
+/** One recorded order transition, for the piece panel's "why did it change" log. */
+export interface OrderLogEntry {
+  tick: number
+  text: string
+}
+
 /** A one-shot instruction that overrides stance until fulfilled. */
 export interface OrderData {
   kind: OrderKind
@@ -50,6 +56,9 @@ export interface OrderData {
   resumeTurn: number
   /** Steps queued behind the active order, executed in sequence. */
   queue: OrderStep[]
+  /** Recent order transitions, oldest first (bounded). Lets the panel explain
+   * why an order was issued, replaced, completed or abandoned. */
+  log: OrderLogEntry[]
 }
 
 export interface TargetData {

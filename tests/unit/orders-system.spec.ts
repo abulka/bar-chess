@@ -595,6 +595,39 @@ describe('orders system — attack orders', () => {
 
     expect(ctx.world.require(bishop, Motion).goal).not.toBeNull()
   })
+
+  it('routes a knight to the firing cell it can reach in fewest moves', () => {
+    const ctx = makeContext()
+    const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 2, y: 5 }) // c3
+    const pawn = createPiece(ctx, 'red', PIECES.pawn, { x: 3, y: 1 }) // d7
+    createPiece(ctx, 'blue', PIECES.bishop, { x: 2, y: 3 }) // c5, blocks a firing cell
+    createPiece(ctx, 'red', PIECES.pawn, { x: 5, y: 2 }) // f6, blocks a firing cell
+    const order = ctx.world.require(knight, Order)
+    order.kind = 'attack'
+    order.target = pawn
+    order.reachable = true
+
+    run(ctx)
+
+    // b6 is two knight hops away; the Euclidean-nearest firing cell e5 is four.
+    expect(ctx.world.require(knight, Motion).goal).toEqual({ x: 1, y: 2 })
+  })
+
+  it('logs why an attack order was abandoned when its target is gone', () => {
+    const ctx = makeContext()
+    const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 2, y: 2 })
+    const queen = createPiece(ctx, 'red', PIECES.queen, { x: 3, y: 0 })
+    const order = ctx.world.require(knight, Order)
+    order.kind = 'attack'
+    order.target = queen
+    order.reachable = true
+    ctx.world.destroy(queen)
+
+    run(ctx)
+
+    expect(order.kind).toBe('none')
+    expect(order.log.some((entry) => entry.text.includes('attack target lost'))).toBe(true)
+  })
 })
 
 describe('orders system — motion intent provenance', () => {
