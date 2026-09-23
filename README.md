@@ -1,5 +1,7 @@
 # Bar Chess
 
+[![Play Now](https://img.shields.io/badge/Play_Now-bar--chess.netlify.app-brightgreen?style=for-the-badge&logo=netlify&logoColor=white)](https://bar-chess.netlify.app/)
+
 **Bar Chess is chess with bullets** — a chess-derived battlefield where pieces move by chess geometry and shoot visible projectiles at each other, inspired by [BAR (Beyond All Reason)](https://www.beyondallreason.info/), the open-source RTS game.
 
 ![Bar Chess main screenshot](docs/screenshots/screenshot-main-01.png)
@@ -17,7 +19,16 @@ You command your pieces by giving them **intentions** (a destination or a target
 - **Procedural audio.** WebAudio SFX driven by the event bus, with a synth editor to tweak every cue.
 - **Self-preservation, bodyguards and capture-advance** make fights feel tactical rather than static.
 
+## Demo
+
+<figure>
+	<img src="docs/screenshots/screen-recording-01.gif" alt="Demo video">
+	<figcaption><em>Animated GIF of a demo battle, showing the UI and gameplay.</em></figcaption>
+</figure>
+
 ## Installation
+
+You don't need to install anything to play — the game is hosted at [bar-chess.netlify.app](https://bar-chess.netlify.app/). The steps below are only for running it locally from source.
 
 Requires [Node.js](https://nodejs.org/) 20+.
 
