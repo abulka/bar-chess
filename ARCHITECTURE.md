@@ -636,6 +636,40 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   `window.game` in dev. The shorthand is read-only — `SavedPosition` JSON stays
   the import/round-trip format.
 
+### Seeds, game records & self-play
+
+- **Seeds.** `Game` takes an optional origin `seed` (`new Game(size, mode, seed)`,
+  `loadSize(size, seed)`; `reset()` reuses `this.seed`). `Rng` consumes it for
+  damage variance and initial cooldown/reload jitter, so `(board + seed + ordered
+  inputs)` fully determines a battle. The seed is exposed on `GameSnapshot.seed`
+  and `SavedPosition.seed` (absent on pre-seed saves, defaulted on load).
+- **Game record.** `Game.onCommand` reports player commands (order, stance,
+  clear, deploy, mode) normalized to board cells. `Recorder`
+  (`src/game/record.ts`) groups them by the turn they precede; a `GameRecord` is
+  a header (`boardId`, `size`, `mode`, `playerTeam`, `seed`, rule settings) plus
+  turns and result. AI-vs-AI records carry no intents — the seed alone reproduces
+  them. `replayRecord` clears the component stores, rebuilds
+  `new Game(size, mode, seed)`, re-applies each turn's intents and re-simulates;
+  it is exact (`tests/unit/record.spec.ts`). This is the compact, replayable
+  stand-in for a stack of position snapshots.
+- **Study mode.** The bottom HUD's **Study** tab (`src/components/StudyPanel.vue`)
+  runs a batch of games **on the live board** so they can be watched. A pure
+  `StudyController` (`src/game/study.ts`) drives the main `Game`: per game it
+  `loadSize`es a new seed, resets the `Recorder`, auto-advances turns with
+  `queueTurn()`, and applies an optional scripted "human" policy (`advance`,
+  `focus`, `turtle`) before each turn. It samples a per-turn **piece trace**
+  (`src/game/trace.ts`) and collects the event stream. `Stop game` keeps the
+  current (partial) recording and moves to the next seed; `Cancel all` discards
+  everything. The trace makes behaviour that leaves no event — a piece that
+  *held* under fire, a piece that never moved — explicit.
+- **Transcript & analysis.** `src/game/transcript.ts` renders a compact per-game
+  text (header, opening board, per-turn activity, per-piece summary) and
+  `src/game/analysis.ts` flags gaps: held-under-fire, never-moved/never-fired,
+  no-progress turns, oscillation, focus fire. `src/game/studyPrompt.ts` wraps a
+  batch's full transcripts in a reusable "analyse these games" prompt; the panel's
+  **Copy analysis prompt** button puts it on the clipboard for an LLM session.
+  The seed is shown read-only in the stats bar.
+
 Keyboard: `m`/`a` arm a move/attack command (then left-click; Shift keeps it
 armed), `space` turn, `p` pause, `s` step, `u`/`r` undo/redo, `y` replay,
 `c`/`Backspace` clear orders, `o` my orders, `e` enemy plans, `h` HUD, `tab`
@@ -890,6 +924,12 @@ src/
     pieces.ts                  Piece/Weapon/Projectile defs, weaponVision
     factory.ts                 createPiece
     position.ts                SavedPosition serialize/validate/restore
+    record.ts                  seed+inputs GameRecord, Recorder, deterministic replay
+    trace.ts                   per-turn piece trace types + labels
+    transcript.ts              LLM-readable per-game transcript
+    analysis.ts                per-game gap flags + batch summary
+    studyPrompt.ts             reusable "analyse these games" clipboard prompt
+    study.ts                   StudyController: watchable batch on the live board
     shorthand.ts               compact read-oriented position dump for LLMs
     settings.ts                persisted UI/session preferences (localStorage)
     storage.ts                 localStorage save slots
@@ -900,7 +940,7 @@ src/
     overlays.ts                pure firingLine/routePolyline segment data
     renderer.ts                canvas draw pipeline + overlays
   components/
-    Toolbar.vue BoardView.vue PiecePanel.vue ReinforcementBar.vue StatsBar.vue EventLog.vue SoundPanel.vue SynthEditor.vue Knob.vue
+    Toolbar.vue BoardView.vue PiecePanel.vue ReinforcementBar.vue StatsBar.vue EventLog.vue SoundPanel.vue SynthEditor.vue Knob.vue StudyPanel.vue
 tests/
   unit/                        logic, systems, Game integration, perf guards,
                                settings/events + audio (fake AudioContext)

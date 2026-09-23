@@ -142,3 +142,30 @@ export const Motion = defineComponent<MotionData>('Motion')
 export const Projectile = defineComponent<ProjectileData>('Projectile')
 export const Fx = defineComponent<FxData>('Fx')
 export const Dead = defineComponent<true>('Dead')
+
+/** Every component store, in declaration order. */
+export const ALL_STORES = [
+  Position,
+  Cell,
+  Team,
+  PieceType,
+  Render,
+  Health,
+  Stance,
+  Order,
+  Target,
+  Weapon,
+  Motion,
+  Projectile,
+  Fx,
+  Dead,
+]
+
+/**
+ * Clear every component store. Stores are module-level singletons shared by all
+ * `World` instances, so tests, self-play and record replay must reset them
+ * between worlds or entity ids collide across games.
+ */
+export function clearAllComponents(): void {
+  for (const store of ALL_STORES) store.map.clear()
+}

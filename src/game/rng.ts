@@ -1,3 +1,6 @@
+/** Default battle seed, kept stable so existing replays/tests are unchanged. */
+export const DEFAULT_SEED = 0x9e3779b9
+
 /**
  * Small deterministic PRNG (mulberry32). Determinism lets the recorded event
  * stream act as a reproducible trace of the simulation.
@@ -5,7 +8,7 @@
 export class Rng {
   private state: number
 
-  constructor(seed = 0x9e3779b9) {
+  constructor(seed = DEFAULT_SEED) {
     this.state = seed >>> 0
   }
 
@@ -28,7 +31,7 @@ export class Rng {
     return items[this.int(0, items.length - 1)]
   }
 
-  reset(seed = 0x9e3779b9): void {
+  reset(seed = DEFAULT_SEED): void {
     this.state = seed >>> 0
   }
 

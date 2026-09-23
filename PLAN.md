@@ -153,6 +153,26 @@ The battle **starts paused**. Give orders, then take a turn:
   the recorded ticks and returns to exactly the same end state. Because turns are
   serialized, replay shows the moves one piece at a time at ~0.5× speed.
 
+## Seeds, self-play & game records
+
+Every battle has an origin **seed** (`Game` ctor / `loadSize` / `reset`). With the
+seed and the ordered player inputs the whole game is deterministic, so a game can
+be recorded as a header + cell-based intents instead of a stack of position
+snapshots. `Game.onCommand` reports each player command (order, stance, clear,
+deploy, mode); `Recorder` (`src/game/record.ts`) collects them per turn and
+`replayRecord` reproduces the game exactly.
+
+The HUD's **Study** tab runs a batch of games **on the live board** so you can
+watch them. Pick a count, mode, board, seed base, max turns, a scripted "human"
+policy and the rule toggles, then **Run N games**. `Stop game` keeps the current
+(game's) partial recording and moves on; `Cancel all` discards everything. As it
+runs, `StudyController` (`src/game/study.ts`) records each game and samples a
+per-turn piece trace, then `transcript.ts` / `analysis.ts` produce a compact
+per-game transcript and flag gameplay gaps (pieces that held under fire, never
+moved, oscillation, focus fire, no-progress turns). **Copy analysis prompt** puts
+the batch summary plus every transcript, wrapped in a reusable "analyse these
+games" prompt, on the clipboard for an LLM session.
+
 ## Victory
 
 The game ends when a **king** dies. The defeating team's colour wins, a `win`

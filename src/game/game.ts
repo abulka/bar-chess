@@ -49,7 +49,8 @@ import { buildBoard, buildWorldSnapshot, serializePosition, validatePosition } f
 import type { SavedPosition } from './position'
 import { formatForLlm, formatShorthand } from './shorthand'
 import type { GameSettings, SettingsPatch } from './settings'
-import { Rng } from './rng'
+import { Rng, DEFAULT_SEED } from './rng'
+import type { GameCommandIntent } from './record'
 
 export type GameMode = 'human-vs-ai' | 'ai-vs-ai' | 'human-vs-human'
 
@@ -185,6 +186,8 @@ export interface GameSnapshot {
   boardId: string
   boardSize: number
   boardSizes: number[]
+  /** Origin seed of the current battle; a game replays exactly from it + inputs. */
+  seed: number
   teams: Record<TeamId, TeamSnapshot>
   timings: Array<{ name: string; ema: number }>
   events: EventRecord[]
@@ -259,6 +262,8 @@ export class Game {
   pipeline: Pipeline = createPipeline()
   board: Board
   rng = new Rng()
+  /** Origin seed for the current battle; reset/loadSize restore it. */
+  seed = DEFAULT_SEED
   cmds: Commands = { damage: [], deploy: [], destroy: [], advance: [] }
   teams: Record<TeamId, TeamRuntime>
   occupancy = new Map<number, Entity>()
@@ -354,9 +359,17 @@ export class Game {
   onFrame: ((alpha: number) => void) | null = null
   /** Per-frame turn/replay bar value (0..1), interpolated for smooth motion. */
   onProgress: ((value: number) => void) | null = null
+  /**
+   * Observer for player-issued commands, normalized to board cells so a whole
+   * game can be recorded and replayed. Fired by `orderAt`, `setPieceStance`,
+   * `clearOrders`, `deploy` and `setGameMode`; never by the simulation itself.
+   */
+  onCommand: ((intent: GameCommandIntent) => void) | null = null
 
-  constructor(size: BoardSize = 8, mode: GameMode = 'human-vs-ai') {
+  constructor(size: BoardSize = 8, mode: GameMode = 'human-vs-ai', seed: number = DEFAULT_SEED) {
     this.gameMode = mode
+    this.seed = seed >>> 0
+    this.rng = new Rng(this.seed)
     const controllers = controllersFor(mode, this.playerTeam)
     this.teams = {
       red: createTeamRuntime(controllers.red),
@@ -378,6 +391,7 @@ export class Game {
     for (const id of ['red', 'blue'] as TeamId[]) {
       this.teams[id].controller = controllers[id]
     }
+    this.onCommand?.({ t: 'mode', mode })
     this.bus.emit('info', `mode: ${mode} (you: ${this.playerTeam})`)
   }
 
@@ -856,8 +870,9 @@ export class Game {
     this.bus.emit('win', `${TEAM_NAMES[winner]} wins \u2014 undo (u) to continue`, { team: winner })
   }
 
-  loadSize(size: BoardSize): void {
+  loadSize(size: BoardSize, seed: number = this.seed): void {
     this.world.clear()
+    this.seed = seed >>> 0
     const controllers = controllersFor(this.gameMode, this.playerTeam)
     this.teams = {
       red: createTeamRuntime(controllers.red),
@@ -867,7 +882,7 @@ export class Game {
     this.occupancy.clear()
     this.tick = 0
     this.turn = 0
-    this.rng.reset()
+    this.rng.reset(this.seed)
     this.selected = []
     this.winner = null
     this.turnActive = false
@@ -886,11 +901,12 @@ export class Game {
   }
 
   reset(): void {
-    this.loadSize(this.board.width as BoardSize)
+    this.loadSize(this.board.width as BoardSize, this.seed)
   }
 
   deploy(team: TeamId, key: string): void {
     this.cmds.deploy.push({ team, key })
+    this.onCommand?.({ t: 'deploy', team, key })
   }
 
   /** World-pixel hit test; `additive` toggles the piece in the multi-selection. */
@@ -959,6 +975,8 @@ export class Game {
       if (!team || !this.commandable(team)) continue
       const stance = this.world.get(e, Stance)
       if (stance) stance.mode = mode
+      const cell = this.world.get(e, Cell)
+      if (cell) this.onCommand?.({ t: 'stance', from: { x: cell.x, y: cell.y }, mode })
       n++
     }
     this.bus.emit('info', `${n} piece(s) stance: ${mode}`)
@@ -1081,6 +1099,10 @@ export class Game {
         this.startGoto(e, order, motion, cell, occ, team)
       } else {
         this.appendStep(e, order, motion, cell, attacking ? (occupant as Entity) : null, team)
+      }
+      const from = this.world.get(e, Cell)
+      if (from) {
+        this.onCommand?.({ t: 'order', from: { x: from.x, y: from.y }, to: { x: cell.x, y: cell.y }, command })
       }
       n++
     }
@@ -1211,6 +1233,8 @@ export class Game {
         target.entity = null
         target.retargetAt = 0
       }
+      const cell = this.world.get(e, Cell)
+      if (cell) this.onCommand?.({ t: 'clear', from: { x: cell.x, y: cell.y } })
       n++
     }
     this.bus.emit('info', `${n} piece(s) order${n === 1 ? '' : 's'} cleared`)
@@ -1347,6 +1371,7 @@ export class Game {
     this.board = buildBoard(saved)
 
     this.rng.setState(saved.rng)
+    this.seed = saved.seed ?? DEFAULT_SEED
     this.tick = saved.tick
     this.turn = saved.turn
     this.winner = saved.winner
@@ -1469,6 +1494,11 @@ export class Game {
     return this.board.passable(cell.x, cell.y) ? 'empty' : 'blocked'
   }
 
+  /** Read-only view of whether a recorded turn is replaying right now. */
+  get isReplaying(): boolean {
+    return this.replaying
+  }
+
   snapshot(): GameSnapshot {
     const pieces = this.world.query(Position, Cell).length
     const projectiles = this.world.query(Projectile, Position).length
@@ -1514,6 +1544,7 @@ export class Game {
       boardId: this.board.data.id,
       boardSize: this.board.width,
       boardSizes: [8, 16, 32, 64],
+      seed: this.seed,
       teams,
       timings: this.pipeline.timings.map((t) => ({ name: t.name, ema: t.ema })),
       events: this.bus.tail(600),

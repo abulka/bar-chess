@@ -17,6 +17,9 @@ import {
 } from './game/constants'
 import { Game } from './game/game'
 import type { GameMode, GameSnapshot, OverlayFlags } from './game/game'
+import { Recorder } from './game/record'
+import { StudyController } from './game/study'
+import type { StudyOptions, StudyState } from './game/study'
 import { loadSettings, saveSettings } from './game/settings'
 import { deleteSlot, listSlots, loadSlot, saveSlot } from './game/storage'
 import type { SlotMeta } from './game/storage'
@@ -24,9 +27,12 @@ import type { StanceMode, TeamId } from './game/types'
 
 const game = new Game(8)
 game.applySettings(loadSettings() ?? {})
+const recorder = new Recorder(game)
+const study = new StudyController(game, recorder)
 const audio = new AudioEngine({ enabled: game.soundEnabled })
 const unsubscribeAudio = game.bus.subscribe((event) => audio.handle(event))
 const snapshot = shallowRef<GameSnapshot>(game.snapshot())
+const studyState = shallowRef<StudyState>(study.state)
 const barProgress = ref(0)
 const barHeld = computed(
   () => !snapshot.value.turnActive && !snapshot.value.replaying && barProgress.value >= 1,
@@ -109,7 +115,9 @@ const turnLabel = computed(() => {
 })
 
 function refresh(): void {
+  study.tick()
   snapshot.value = game.snapshot()
+  studyState.value = study.state
 }
 
 function persistSettings(): void {
@@ -123,13 +131,30 @@ function onDeploy(team: TeamId, key: string): void {
 
 function onSelectSize(size: number): void {
   game.loadSize(size as BoardSize)
+  recorder.reset()
   boardView.value?.fit()
   refresh()
 }
 
 function onSetGameMode(mode: GameMode): void {
   game.setGameMode(mode)
+  recorder.reset()
   persistSettings()
+  refresh()
+}
+
+function onStudyRun(options: StudyOptions): void {
+  study.start(options)
+  refresh()
+}
+
+function onStudyStop(): void {
+  study.stopCurrent()
+  refresh()
+}
+
+function onStudyCancel(): void {
+  study.cancel()
   refresh()
 }
 
@@ -206,6 +231,7 @@ function onToggleCaptureAdvance(): void {
 
 function onReset(): void {
   game.reset()
+  recorder.reset()
   boardView.value?.fit()
   refresh()
 }
@@ -256,6 +282,11 @@ function copyLlm(): void {
   void copyText(game.llmShorthand(), 'llm')
 }
 
+function copyRecord(): void {
+  recorder.finish()
+  void copyText(JSON.stringify(recorder.record, null, 2), 'record')
+}
+
 function refreshSlots(): void {
   slots.value = listSlots()
 }
@@ -268,6 +299,7 @@ function applyLoaded(data: unknown): void {
   }
   ioMessage.value = ''
   boardView.value?.fit()
+  recorder.reset()
   refresh()
 }
 
@@ -395,6 +427,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onWindowResize)
   unsubscribeAudio()
   audio.dispose()
+  study.dispose()
   game.stop()
 })
 </script>
@@ -526,6 +559,9 @@ onBeforeUnmount(() => {
           </button>
           <button class="ctl" @click="copyLlm">{{ copied === 'llm' ? 'Copied!' : 'Copy for LLM' }}</button>
         </div>
+        <button class="ctl copy-btn" @click="copyRecord">
+          {{ copied === 'record' ? 'Copied!' : 'Copy game record' }}
+        </button>
         <div class="save-row">
           <input
             v-model="slotName"
@@ -570,7 +606,16 @@ onBeforeUnmount(() => {
 
     <div v-if="snapshot.hudVisible" class="bottom">
       <StatsBar :snapshot="snapshot" />
-      <EventLog :snapshot="snapshot" @audition="onAudition" @preview="onPreview" @stop="onStopPreview" />
+      <EventLog
+        :snapshot="snapshot"
+        :study-state="studyState"
+        @audition="onAudition"
+        @preview="onPreview"
+        @stop="onStopPreview"
+        @study-run="onStudyRun"
+        @study-stop="onStudyStop"
+        @study-cancel="onStudyCancel"
+      />
     </div>
   </div>
 </template>

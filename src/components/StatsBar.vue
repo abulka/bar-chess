@@ -7,6 +7,7 @@ defineProps<{ snapshot: GameSnapshot }>()
 <template>
   <div class="statsbar">
     <span class="stat"><b>{{ snapshot.tick }}</b> tick</span>
+    <span class="stat" title="battle seed">seed <b>{{ snapshot.seed }}</b></span>
     <span class="stat">{{ snapshot.fps }} fps</span>
     <span class="stat">{{ snapshot.tps }} tps</span>
     <span class="stat">{{ snapshot.counts.pieces }} pieces</span>

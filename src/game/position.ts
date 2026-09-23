@@ -30,6 +30,8 @@ export interface SavedPosition {
   board: MapData & { terrain: number[] }
   world: SerializedWorld
   rng: number
+  /** Origin seed of the battle; absent on pre-seed saves (defaults on load). */
+  seed?: number
   tick: number
   turn: number
   winner: TeamId | null
@@ -87,6 +89,7 @@ export function serializePosition(game: {
   world: { capture(): WorldSnapshot }
   board: Board
   rng: { getState(): number }
+  seed: number
   tick: number
   turn: number
   winner: TeamId | null
@@ -105,6 +108,7 @@ export function serializePosition(game: {
       stores: captured.stores.map((s) => ({ name: s.store.name, entries: s.entries })),
     },
     rng: game.rng.getState(),
+    seed: game.seed,
     tick: game.tick,
     turn: game.turn,
     winner: game.winner,

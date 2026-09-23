@@ -2,22 +2,28 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import type { EventRecord, EventType } from '../ecs/events'
 import type { GameSnapshot } from '../game/game'
+import type { StudyOptions, StudyState } from '../game/study'
 import type { VoiceSpec } from '../audio/voices'
 import SoundPanel from './SoundPanel.vue'
+import StudyPanel from './StudyPanel.vue'
 
-const props = defineProps<{ snapshot: GameSnapshot }>()
+const props = defineProps<{ snapshot: GameSnapshot; studyState: StudyState }>()
 
 const emit = defineEmits<{
   (e: 'audition', id: string): void
   (e: 'preview', spec: VoiceSpec): void
   (e: 'stop'): void
+  (e: 'study-run', options: StudyOptions): void
+  (e: 'study-stop'): void
+  (e: 'study-cancel'): void
 }>()
 
-type Tab = 'events' | 'systems' | 'sound' | 'inspector'
+type Tab = 'events' | 'systems' | 'sound' | 'study' | 'inspector'
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'events', label: 'Event stream' },
   { id: 'systems', label: 'Systems' },
   { id: 'sound', label: 'Sound' },
+  { id: 'study', label: 'Study' },
   { id: 'inspector', label: 'Inspector' },
 ]
 const tab = ref<Tab>('events')
@@ -125,6 +131,14 @@ function rowClass(event: EventRecord): string {
       @audition="emit('audition', $event)"
       @preview="emit('preview', $event)"
       @stop="emit('stop')"
+    />
+
+    <StudyPanel
+      v-else-if="tab === 'study'"
+      :state="props.studyState"
+      @run="emit('study-run', $event)"
+      @stop="emit('study-stop')"
+      @cancel="emit('study-cancel')"
     />
 
     <div v-else class="inspector">
