@@ -15,6 +15,10 @@ import { aiKingGoal, isScreening, KING_GUARD_RADIUS, kingOf, kingThreats, screen
 import { COVER_RADIUS, coverageThreats, escapeGoal, isValuable, outgunned } from './preservation'
 import type { ThreatMemo } from './preservation'
 
+/** Flat HP fraction at or below which a piece is "badly wounded": it latches a
+ * safe-hold and will not advance its order until fully healed. */
+const CRITICAL_WOUND = 0.2
+
 /** HP ratio at which a piece starts saving itself, scaled by how costly it is. */
 function preserveThreshold(kind: string): number {
   switch (kind) {
@@ -117,11 +121,11 @@ const system: System = {
       const team = ctx.world.require(e, Team)
       const target = ctx.world.require(e, Target)
 
-      // 0. Self-preservation: a hurt or outgunned *idle* piece steps out of the
-      // fire on its own. Costly pieces bail earlier. An explicit player order
-      // always wins — if you command a hurt piece to move to a healing square,
-      // it goes — so this only runs with no active order; it resumes once the
-      // piece is idle again.
+      // 0. Self-preservation: a hurt or outgunned piece retreats on its own, even
+      // while it is moving or pursuing an attack order. A badly wounded piece
+      // (below CRITICAL_WOUND) latches a safe-hold and stays put until fully
+      // healed; a medium wound only retreats while the danger is present, then
+      // resumes its order. A new order clears the hold.
       const hp = ctx.world.get(e, Health)
       const hpRatio = hp && hp.max > 0 ? hp.cur / hp.max : 1
       const attacker = target.lastAttacker
@@ -137,12 +141,14 @@ const system: System = {
       // Valuable pieces scan every tick so they can bail *before* taking damage;
       // cheap pieces only bother once hurt or actually under fire.
       const valuable = kind !== undefined && isValuable(kind)
+      // Release a latched safe-hold once the piece is back to full health.
+      if (motion.holdUntilHp > 0 && hp && hp.cur >= motion.holdUntilHp) motion.holdUntilHp = 0
+      const holding = motion.holdUntilHp > 0
       if (
         ctx.autoPreserve &&
-        order.kind === 'none' &&
         kind &&
         !(ctx.teams[team].controller === 'ai' && kind === 'king') &&
-        (valuable || underFire || hpRatio < preserve)
+        (valuable || underFire || hpRatio < preserve || holding)
       ) {
         // Judge the escape against every enemy currently covering this piece, not
         // just the last one to shoot. Valuable pieces also bail when outgunned or
@@ -152,24 +158,33 @@ const system: System = {
         const threats = coverageThreats(ctx, e, team, pieceThreatMemo, { proximityRadius: COVER_RADIUS })
         const shooters = threats.reduce((n, t) => n + (t.canHitNow ? 1 : 0), 0)
         const pressured = outgunned(ctx, e, threats) || (valuable && shooters >= 2)
-        if (hpRatio < preserve || pressured) {
-          // Dodge only real, current danger. Inside the king's healing aura the
-          // piece stays put unless the volley it faces would kill it (outgunned),
-          // so a hurt piece recovers instead of being nudged out of range.
-          // Outside the aura it dodges whenever an enemy covers the square now or
-          // it is under fire.
-          const king = kings[team]
-          const kc = king !== null ? ctx.world.get(king, Cell) : null
-          const inAura = !!kc && chebyshev(cell.x, cell.y, kc.x, kc.y) <= HEAL_RADIUS
-          const shouldDodge = inAura ? outgunned(ctx, e, threats) : shooters > 0 || underFire
+        const wounded = hpRatio < preserve
+        // The king's healing aura is a sanctuary: inside it a piece holds rather
+        // than repositioning unless the volley it faces would kill it (outgunned).
+        // Outside it dodges whenever an enemy covers the square now or it is under
+        // fire.
+        const king = kings[team]
+        const kc = king !== null ? ctx.world.get(king, Cell) : null
+        const inAura = !!kc && chebyshev(cell.x, cell.y, kc.x, kc.y) <= HEAL_RADIUS
+        const shouldDodge = inAura ? outgunned(ctx, e, threats) : shooters > 0 || underFire
+        // Act (dodge or hold) while latched, or while wounded/pressured and either
+        // in danger or sitting in the healing aura. Otherwise fall through and let
+        // the order resume — that is what lets a medium wound continue once safe.
+        const act = holding || ((wounded || pressured) && (shouldDodge || inAura))
+        if (act) {
+          // A badly wounded piece holds until fully healed.
+          if (hp && (wounded || pressured) && hpRatio < CRITICAL_WOUND) motion.holdUntilHp = hp.max
           if (shouldDodge) {
             // Seek cover: step to the least-exposed nearby square, keeping a shot
             // when free; hold when every step is no safer (or nobody is near).
             // Pawns cannot retreat, so an "escape" only marches them into the
             // enemy and gives up the shot — they hold and fire instead.
-            // Idle piece only (an explicit order skips this block), so the target
-            // is kept in range only for an Attack stance.
-            const keepShot = targetValid && stance.mode === 'attack' ? (target.entity as number) : null
+            // Keep the shot while backing off: an attack order (or Attack stance)
+            // holds its target in range as a tie-break.
+            const keepShot =
+              targetValid && (order.kind === 'attack' || stance.mode === 'attack')
+                ? (target.entity as number)
+                : null
             motion.goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, keepShot)
             motion.intent = motion.goal === null ? 'none' : 'preserve'
           } else {

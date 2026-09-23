@@ -354,7 +354,7 @@ describe('orders system — automatic self-preservation', () => {
     expect(goal!.x).not.toBe(goal!.y)
   })
 
-  it('follows an explicit attack order even when badly hurt', () => {
+  it('overrides an explicit attack order when badly hurt', () => {
     const ctx = hurtContext(true)
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
     const knight = createPiece(ctx, 'red', PIECES.knight, { x: 5, y: 6 })
@@ -368,12 +368,32 @@ describe('orders system — automatic self-preservation', () => {
 
     const goal = ctx.world.require(queen, Motion).goal
     expect(goal).not.toBeNull()
-    // It closes on the ordered target instead of retreating under auto-preserve.
+    // It retreats from the attacker rather than charging it.
     const before = Math.hypot(4 - 5, 4 - 6)
-    expect(Math.hypot(goal!.x - 5, goal!.y - 6)).toBeLessThan(before)
+    expect(Math.hypot(goal!.x - 5, goal!.y - 6)).toBeGreaterThan(before)
   })
 
-  it('follows an explicit move order even when badly hurt', () => {
+  it('disengages an attack order when focused by several shooters (c6 knight)', () => {
+    const ctx = makeContext()
+    const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 2, y: 2 }) // c6
+    const queen = createPiece(ctx, 'red', PIECES.queen, { x: 3, y: 0 }) // d8
+    createPiece(ctx, 'red', PIECES.rook, { x: 5, y: 2 }) // f6, covers the rank
+    createPiece(ctx, 'red', PIECES.bishop, { x: 3, y: 3 }) // d5, diagonal to c6
+    createPiece(ctx, 'red', PIECES.pawn, { x: 3, y: 1 }) // d7, fires on c6
+    const order = ctx.world.require(knight, Order)
+    order.kind = 'attack'
+    order.target = queen
+    order.reachable = true
+
+    run(ctx)
+
+    // Three shooters cover c6, so it breaks off instead of charging the queen.
+    const motion = ctx.world.require(knight, Motion)
+    expect(motion.intent).toBe('preserve')
+    expect(motion.goal).not.toBeNull()
+  })
+
+  it('retreats a moving piece while in danger, then resumes the move when safe', () => {
     const ctx = hurtContext(true)
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
     const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
@@ -384,9 +404,68 @@ describe('orders system — automatic self-preservation', () => {
     fireOn(ctx, queen, rook)
 
     run(ctx)
+    // Danger present: it dodges instead of walking the route.
+    expect(ctx.world.require(queen, Motion).intent).toBe('preserve')
+    expect(ctx.world.require(queen, Motion).goal).not.toEqual({ x: 7, y: 4 })
 
-    // The player's destination wins over the automatic retreat.
+    // Danger gone (medium wound, no full-heal hold): it resumes the move.
+    ctx.world.destroy(rook)
+    run(ctx)
     expect(ctx.world.require(queen, Motion).goal).toEqual({ x: 7, y: 4 })
+  })
+
+  it('holds a badly wounded mover until fully healed, then resumes the move', () => {
+    const ctx = hurtContext(true)
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
+    const hp = ctx.world.require(queen, Health)
+    hp.cur = Math.floor(hp.max * 0.15) // below the critical-wound line
+    const order = ctx.world.require(queen, Order)
+    order.kind = 'goto'
+    order.dest = { x: 7, y: 4 }
+    fireOn(ctx, queen, rook)
+
+    run(ctx)
+    // It latches a safe-hold and retreats.
+    expect(ctx.world.require(queen, Motion).holdUntilHp).toBe(hp.max)
+    expect(ctx.world.require(queen, Motion).intent).toBe('preserve')
+
+    // Danger gone but still wounded: it holds, it does not resume.
+    ctx.world.destroy(rook)
+    run(ctx)
+    expect(ctx.world.require(queen, Motion).goal).toBeNull()
+
+    // Fully healed: the hold releases and the move resumes.
+    hp.cur = hp.max
+    run(ctx)
+    expect(ctx.world.require(queen, Motion).goal).toEqual({ x: 7, y: 4 })
+  })
+
+  it('holds a badly wounded attacker until fully healed, then resumes the attack', () => {
+    const ctx = hurtContext(true)
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    // Target out of the queen's lines so it cannot itself keep her in danger.
+    const knight = createPiece(ctx, 'red', PIECES.knight, { x: 1, y: 0 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
+    const hp = ctx.world.require(queen, Health)
+    hp.cur = Math.floor(hp.max * 0.15)
+    const order = ctx.world.require(queen, Order)
+    order.kind = 'attack'
+    order.target = knight
+    fireOn(ctx, queen, rook)
+
+    run(ctx)
+    expect(ctx.world.require(queen, Motion).intent).toBe('preserve')
+
+    // Still wounded after the danger clears: the attack does not auto-resume.
+    ctx.world.destroy(rook)
+    run(ctx)
+    expect(ctx.world.require(queen, Motion).goal).toBeNull()
+
+    // Fully healed: it resumes pursuing the ordered target.
+    hp.cur = hp.max
+    run(ctx)
+    expect(ctx.world.require(queen, Motion).goal).not.toBeNull()
   })
 })
 

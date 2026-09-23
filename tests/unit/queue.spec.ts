@@ -204,6 +204,17 @@ describe('order queue', () => {
     void king
   })
 
+  it('a new order clears a self-preservation safe-hold latch', () => {
+    const game = new Game(8)
+    const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
+    game.world.require(rook, Motion).holdUntilHp = 999
+    game.selected = [rook]
+
+    game.orderAt({ x: 0, y: 5 })
+
+    expect(game.world.require(rook, Motion).holdUntilHp).toBe(0)
+  })
+
   it('still queues behind an order that is merely blocked by a friendly', () => {
     const game = new Game(8)
     const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })

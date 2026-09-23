@@ -102,7 +102,7 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Order` | `{ kind, dest, target, reachable, resumeTarget, resumeTurn, queue }` | active step is one-shot `none` / `goto` / `attack`; `reachable` marks an attack target that is positionally attainable; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence (`resumeTarget`/`resumeTurn` are retained for save compatibility but unused — a move now replaces an attack) |
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping |
 | `Weapon` | `{ left }` | seconds until next shot |
-| `Motion` | `{ goal, intent, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn }` | grid movement + render interpolation; `intent` is the goal's source (`order`/`preserve`/`defense`/`engage`/`rally`); `reserved` is the cell being entered |
+| `Motion` | `{ goal, intent, holdUntilHp, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn }` | grid movement + render interpolation; `intent` is the goal's source (`order`/`preserve`/`defense`/`engage`/`rally`); `holdUntilHp` is a latched safe-hold until that HP; `reserved` is the cell being entered |
 | `Projectile` | `{ team, damage, ttl, trajectory, splash, radius, size, shape, spin, color, target, owner, waypoints, waypointIndex }` | |
 | `Fx` | `{ ttl, maxTtl, radius, color }` | render-only impact/explosion |
 | `Dead` | `true` | marker processed by the death system |
@@ -326,13 +326,17 @@ cell/reservation during movement validation and path planning.
   them into the enemy and give up the shot, so they hold and fire instead. Valuable
   pieces run this scan every tick so they can bail before taking damage; cheap
   pieces only scan once hurt or actually under fire, and `coverageThreats` skips
-  any enemy beyond its weapon's reach, keeping the cost bounded. It runs only
-  while the piece has **no active order**: an explicit player order always wins
-  (command a hurt piece to a healing square and it goes), and preservation
-  resumes once the order completes and clears. It repositions only for **real,
-  current danger** — an enemy covering the piece's square now (`shooters > 0`) or
-  a recent attacker still under fire — so a piece with only distant, non-shooting
-  enemies nearby holds instead of drifting. The king's **healing aura** is a
+  any enemy beyond its weapon's reach, keeping the cost bounded. It runs for
+  **every piece** — idle, moving, or pursuing an attack order. It repositions only
+  for **real, current danger** — an enemy covering the piece's square now
+  (`shooters > 0`) or a recent attacker still under fire — so a piece with only
+  distant, non-shooting enemies nearby holds instead of drifting. An **attack
+  order is not sacred**: a hurt attacker disengages rather than charging in. A
+  **medium wound** retreats only while the danger is present and then resumes the
+  interrupted order (move continues, attack resumes). A **badly wounded** piece
+  (below `CRITICAL_WOUND = 0.2`) latches a safe-hold (`Motion.holdUntilHp = max`)
+  and will not advance its order until it is **fully healed** — a new player order
+  clears the hold. The king's **healing aura** is a
   strong sanctuary: a piece inside it holds unless the volley it currently faces
   would **kill** it (`outgunned`) — a mere shooter or a stale "recent attacker" is
   not enough — so it recovers instead of being nudged out of range. When
@@ -347,7 +351,8 @@ cell/reservation during movement validation and path planning.
   Every goal records a `Motion.intent` (`order` / `preserve` /
   `defense` / `engage` / `rally`), so the renderer can colour a self-preservation
   retreat bright yellow and the properties panel can label each goal's source;
-  the shorthand export carries it as `intent=<kind>`.
+  the shorthand export carries it as `intent=<kind>` (and `hold=<hp>` while a
+  safe-hold is latched).
   A player-issued move **replaces** any active attack — it does not park the
   target to resume later and does not kite the piece back toward the old fight.
   A piece ordered to a healing square therefore stays there and recovers.

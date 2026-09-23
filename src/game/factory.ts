@@ -31,6 +31,7 @@ export function createPiece(ctx: SimContext, team: 'red' | 'blue', def: PieceDef
   world.add(e, Motion, {
     goal: null,
     intent: 'none',
+    holdUntilHp: 0,
     reserved: null,
     path: [],
     fromX: center.x,

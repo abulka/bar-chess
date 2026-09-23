@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Motion, Order, Stance, Target } from '../../src/ecs/components'
+import { Cell, Health, Motion, Order, Stance, Target } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
@@ -47,6 +47,28 @@ describe('Game integration', () => {
     game.runTicks(1)
 
     expect(game.world.require(knight, Cell)).toEqual({ x: 5, y: 1 })
+  })
+
+  it('disengages a badly hurt piece that holds an attack order', () => {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    const knight = createPiece(shim, 'blue', PIECES.knight, { x: 2, y: 2 }) // c6
+    const queen = createPiece(shim, 'red', PIECES.queen, { x: 3, y: 0 }) // d8
+    createPiece(shim, 'red', PIECES.rook, { x: 5, y: 2 }) // f6, covers the rank
+    createPiece(shim, 'red', PIECES.bishop, { x: 3, y: 3 }) // d5, diagonal to c6
+    createPiece(shim, 'red', PIECES.pawn, { x: 3, y: 1 }) // d7, fires on c6
+    game.world.require(knight, Health).cur = Math.floor(PIECES.knight.hp * 0.3)
+    const order = game.world.require(knight, Order)
+    order.kind = 'attack'
+    order.target = queen
+    order.reachable = true
+
+    game.runTicks(1)
+
+    // A hurt piece with an attack order breaks off instead of charging to its death.
+    expect(game.world.require(knight, Motion).intent).toBe('preserve')
+    expect(game.world.isAlive(knight)).toBe(true)
   })
 
   it('lets a home pawn take its two-square first move in a single turn', () => {

@@ -1103,6 +1103,7 @@ export class Game {
     order.resumeTurn = -1
     motion.goal = null
     motion.intent = 'none'
+    motion.holdUntilHp = 0
     motion.path = []
     motion.arrived = true
     // Plan the route to a firing position now so it is visible while paused.
@@ -1134,6 +1135,7 @@ export class Game {
     }
     motion.goal = { x: cell.x, y: cell.y }
     motion.intent = 'order'
+    motion.holdUntilHp = 0
     // Fall back to a friendly-passable route when boxed in, so a blocked move
     // still shows a path instead of a bare straight line.
     this.planNow(e, motion, cell, occupiedExcept(this.board, occ, e), this.friendlyPass(occ, e, team))
@@ -1198,6 +1200,7 @@ export class Game {
       if (motion) {
         motion.goal = null
         motion.intent = 'none'
+        motion.holdUntilHp = 0
         motion.path = []
         motion.arrived = true
       }

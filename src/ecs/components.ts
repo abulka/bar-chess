@@ -77,6 +77,9 @@ export interface MotionData {
   goal: Vec2 | null
   /** source of the current goal (drives overlay colour + panel label) */
   intent: MotionIntent
+  /** While `Health.cur < holdUntilHp` the piece stays in a self-preservation
+   * safe-hold and does not advance its order. 0 = no hold. */
+  holdUntilHp: number
   /** cell currently being entered; occupancy reserves it until arrival */
   reserved: Vec2 | null
   /** upcoming cells in tile coordinates, excluding the current cell */

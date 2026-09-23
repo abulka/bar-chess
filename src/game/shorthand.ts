@@ -43,6 +43,7 @@ const FORMAT_LEGEND =
   'atk=#id(cell)[!]=attack order (! positionally unreachable); tgt=#id(cell) current target; ' +
   'fire=#id under retaliation; goal=<cell> path end; path=hop>hop (A* move hops); blk=route blocked; ' +
   'intent=<preserve|rally|defense|engage> why the goal was chosen (absent = explicit order or none); ' +
+  'hold=<hp> badly wounded: safe-hold latched until that HP is reached; ' +
   'moving=mid-hop; res=<cell> reserved next cell; ' +
   'q=step>step queued steps after the active order (cell=goto, atk#id(cell)=attack); ' +
   'w=weapon reload seconds; grid red=Upper blue=lower. terrain: . floor : road , sand ~ water # wall'
@@ -71,6 +72,7 @@ Reading a position block:
   goal=<cell>            current motion goal (where the planned path ends)
   intent=<kind>          why the goal was chosen: preserve (self-preservation retreat),
                          rally / defense / engage; absent = explicit order or no goal
+  hold=<hp>              badly wounded: a latched safe-hold that persists until this HP
   path=a>b>c             planned route waypoints; each is one move hop, not every traversed square
   blk / moving / res     route blocked and waiting / mid-hop / reserved destination cell
   w=<seconds>            weapon reload remaining
@@ -176,6 +178,7 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
 
     if (motion.goal) flags.push(`goal=${cellName(width, height, motion.goal)}`)
     if (motion.intent !== 'none' && motion.intent !== 'order') flags.push(`intent=${motion.intent}`)
+    if (motion.holdUntilHp > 0) flags.push(`hold=${Math.round(motion.holdUntilHp)}`)
     if (motion.blocked) flags.push('blk')
     if (motion.moving) flags.push('moving')
     if (motion.reserved) flags.push(`res=${cellName(width, height, motion.reserved)}`)
