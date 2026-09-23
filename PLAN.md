@@ -201,8 +201,10 @@ enemy and drop the shot, so they hold and fire instead. A persisted
 (8 squares) instead of a slider's board-wide vision, so pieces fight locally
 rather than wandering across the map to an out-of-range enemy. An attack order on
 a **positionally impossible** target (e.g. a bishop ordered onto the opposite
-colour square) is held pending instead of chasing the nearest reachable square,
-which used to walk the piece into enemy lines.
+colour square) is still approached best-effort: the route ends on the closest
+reachable square and the overlay draws it followed by the dashed "unreachable"
+firing line, both recomputed each move. Only automatically acquired targets are
+leashed — an explicit order is followed.
 
 **Capture advance.** A persisted **capture advance** checkbox in the toolbar
 (default off) makes a piece that lands a kill step onto the victim's square, like

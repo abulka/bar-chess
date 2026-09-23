@@ -270,12 +270,13 @@ cell/reservation during movement validation and path planning.
   leash guard also holds a piece that drifts beyond `ATTACK_LEASH` and is not in
   firing geometry.
 - **orders** — turns stance/order into `Motion.goal` for every piece (human or
-  AI): an `attack` order pursues the target (or stops to fire when in geometry),
-  but a **positionally unreachable** order (`order.reachable === false`, e.g. a
-  bishop ordered onto the opposite colour) is held pending rather than chased —
-  otherwise `pursue` would route the piece to the nearest reachable square, often
-  deep in enemy lines. Targeting recomputes `reachable` each tick, so it resumes
-  if the target moves onto a coverable line;
+  AI): an `attack` order pursues the target (or stops to fire when in geometry).
+  A **positionally unreachable** target (`order.reachable === false`, e.g. a bishop
+  ordered onto the opposite colour) is still approached best-effort — the route
+  ends on the closest reachable empty square, and the overlay draws that route
+  followed by a dashed "unreachable" firing line, both recomputed each tick as the
+  piece and target move (the `reachable` flag only classifies the firing line; it
+  no longer freezes the piece);
   a `goto` order advances toward the objective (best effort); autonomous `attack`
   pursues in a leash, and rallies only for AI teams; a low-HP piece retreats via
   `preservation.ts` (escape the shooters that actually cover it, else seek nearby

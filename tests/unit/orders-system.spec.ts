@@ -380,7 +380,7 @@ describe('orders system — automatic self-preservation', () => {
 describe('orders system — attack orders', () => {
   beforeEach(() => clearComponents())
 
-  it('holds instead of chasing a positionally unreachable target', () => {
+  it('approaches a positionally unreachable target as close as it can get', () => {
     const ctx = makeContext()
     const bishop = createPiece(ctx, 'blue', PIECES.bishop, { x: 5, y: 3 }) // f5 (light)
     const king = createPiece(ctx, 'red', PIECES.king, { x: 3, y: 0 }) // d8 (dark)
@@ -391,8 +391,9 @@ describe('orders system — attack orders', () => {
 
     run(ctx)
 
-    // Would otherwise route to the nearest reachable square — deep in enemy lines.
-    expect(ctx.world.require(bishop, Motion).goal).toBeNull()
+    // Best-effort: it still routes toward the target rather than freezing, so the
+    // overlay can show the route followed by the unreachable firing line.
+    expect(ctx.world.require(bishop, Motion).goal).not.toBeNull()
   })
 
   it('still pursues a reachable attack target', () => {

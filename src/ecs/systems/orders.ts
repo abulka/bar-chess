@@ -208,13 +208,14 @@ const system: System = {
       if (order.kind === 'attack') {
         const t = order.target
         if (t !== null && ctx.world.isAlive(t) && ctx.world.has(t, Cell)) {
-          // A positionally impossible target (e.g. a bishop on the wrong colour
-          // square) is kept pending but not chased: marching to the nearest
-          // reachable square would mean walking into the enemy and dying for
-          // nothing. Targeting recomputes `reachable`, so it resumes if the
-          // target moves onto a line this piece can cover.
-          if (order.reachable) motion.goal = pursue(ctx, e, t, team)
-          else motion.goal = null
+          // Best-effort approach: stop and fire when in geometry, else head to a
+          // firing cell, else the closest reachable empty square. A positionally
+          // unreachable target (e.g. a bishop on the wrong colour) is therefore
+          // still approached as close as the piece can get, and the overlay draws
+          // that route followed by a dashed "unreachable" firing line. Targeting
+          // recomputes `reachable` every tick, so the route and overlay update as
+          // the piece and target move.
+          motion.goal = pursue(ctx, e, t, team)
           continue
         }
         // The order is done; the next queued step takes over, else clear. The
