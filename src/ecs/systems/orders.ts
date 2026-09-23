@@ -12,7 +12,15 @@ import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
 import { aiKingGoal, isScreening, KING_GUARD_RADIUS, kingOf, kingThreats, screenPlan } from './kingDefense'
-import { COVER_RADIUS, coverageThreats, escapeGoal, isValuable, outgunned } from './preservation'
+import {
+  COVER_RADIUS,
+  coverageThreats,
+  escapeGoal,
+  inHealingAura,
+  isValuable,
+  nearestHealingCell,
+  outgunned,
+} from './preservation'
 import type { ThreatMemo } from './preservation'
 
 /** Flat HP fraction at or below which a piece is "badly wounded": it latches a
@@ -174,7 +182,25 @@ const system: System = {
         if (act) {
           // A badly wounded piece holds until fully healed.
           if (hp && (wounded || pressured) && hpRatio < CRITICAL_WOUND) motion.holdUntilHp = hp.max
-          if (shouldDodge) {
+          const lethal = outgunned(ctx, e, threats)
+          // Healing-aware hold: a latched, badly wounded piece outside the aura
+          // walks to the nearest healing square so it can regenerate and release
+          // the hold, instead of parking where it can never heal. An explicit move
+          // order that already ends inside the aura is left to run, and only a
+          // volley that would kill it this tick breaks it off to dodge.
+          const auraBound =
+            order.kind === 'goto' && order.dest !== null && !!kc && inHealingAura(order.dest, kc)
+          if (holding && !inAura && kc && kind !== 'pawn' && !(auraBound && !lethal)) {
+            const heal = nearestHealingCell(ctx, e, team, kc)
+            if (heal) {
+              motion.goal = lethal && shouldDodge ? escapeGoal(ctx, e, team, threats, null) ?? heal : heal
+              motion.intent = 'preserve'
+              continue
+            }
+          }
+          if (auraBound && !lethal) {
+            // Fall through: honour the player's move order into the healing aura.
+          } else if (shouldDodge) {
             // Seek cover: step to the least-exposed nearby square, keeping a shot
             // when free; hold when every step is no safer (or nobody is near).
             // Pawns cannot retreat, so an "escape" only marches them into the
@@ -185,14 +211,22 @@ const system: System = {
               targetValid && (order.kind === 'attack' || stance.mode === 'attack')
                 ? (target.entity as number)
                 : null
-            motion.goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, keepShot)
-            motion.intent = motion.goal === null ? 'none' : 'preserve'
+            let goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, keepShot)
+            // No local step is safer (e.g. boxed in by ranged fire while the
+            // current square is only "safe" by adjacency): a wounded piece should
+            // not stand and die — head home to the king's aura to heal instead.
+            if (goal === null && wounded && !inAura && kc && kind !== 'pawn') {
+              goal = nearestHealingCell(ctx, e, team, kc)
+            }
+            motion.goal = goal
+            motion.intent = goal === null ? 'none' : 'preserve'
+            continue
           } else {
             // Safe or healing: hold rather than drift, and let the aura work.
             motion.goal = null
             motion.intent = 'none'
+            continue
           }
-          continue
         }
       }
 

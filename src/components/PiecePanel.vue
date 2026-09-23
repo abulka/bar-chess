@@ -44,6 +44,11 @@ function pct(ratio: number): string {
   return `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`
 }
 
+/** Health is a float (aura regen ticks), so round it for display. */
+function hp(value: number): number {
+  return Math.round(value)
+}
+
 /** A weapon that has never fired is simply ready; otherwise show its recharge. */
 function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): number {
   if (!w.fired || w.cooldown <= 0) return 1
@@ -71,7 +76,7 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
         <div class="bar">
           <div class="fill hp" :style="{ width: pct(info.health.ratio), background: healthColor(info.health.ratio) }"></div>
         </div>
-        <span class="num">{{ info.health.cur }}/{{ info.health.max }}</span>
+        <span class="num">{{ hp(info.health.cur) }}/{{ hp(info.health.max) }}</span>
       </div>
 
       <div v-if="info.weapon" class="stat">
@@ -101,11 +106,11 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
       </p>
       <p v-if="!info.commandable" class="line muted tiny">not under your control</p>
 
-      <div class="sub">engaging</div>
+      <div class="sub">target</div>
       <p v-if="info.target" class="line">
         <span :style="{ color: info.target.color }">{{ info.target.glyph }}</span>
         {{ info.target.name }} @ {{ info.target.coord }}
-        <span v-if="info.target.health" class="muted">({{ info.target.health.cur }}/{{ info.target.health.max }})</span>
+        <span v-if="info.target.health" class="muted">({{ hp(info.target.health.cur) }}/{{ hp(info.target.health.max) }})</span>
       </p>
       <p v-else class="line muted">no target</p>
       <p v-if="info.underFire" class="line warn">under fire from {{ info.underFire.coord }}</p>

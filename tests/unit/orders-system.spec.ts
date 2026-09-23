@@ -467,6 +467,100 @@ describe('orders system — automatic self-preservation', () => {
     run(ctx)
     expect(ctx.world.require(queen, Motion).goal).not.toBeNull()
   })
+
+  /** A context with a blue king on e1 so a healing goal can be computed. */
+  function auraContext(): SimContext {
+    const ctx = makeContext()
+    createPiece(ctx, 'blue', PIECES.king, { x: 4, y: 7 }) // e1
+    return ctx
+  }
+
+  /** A latched, badly wounded blue rook parked on a3 (far outside the aura). */
+  function latchedRook(ctx: SimContext) {
+    const rook = createPiece(ctx, 'blue', PIECES.rook, { x: 0, y: 5 }) // a3
+    const hp = ctx.world.require(rook, Health)
+    hp.cur = 8
+    const motion = ctx.world.require(rook, Motion)
+    motion.holdUntilHp = hp.max
+    return { rook, motion, hp }
+  }
+
+  it('routes a latched piece outside the aura toward the king to heal', () => {
+    const ctx = auraContext()
+    const { motion } = latchedRook(ctx)
+
+    run(ctx)
+
+    expect(motion.intent).toBe('preserve')
+    expect(motion.goal).not.toBeNull()
+    // The goal sits inside the king's aura (Chebyshev <= 2 of e1).
+    expect(Math.max(Math.abs(motion.goal!.x - 4), Math.abs(motion.goal!.y - 7))).toBeLessThanOrEqual(2)
+  })
+
+  it("honours a latched piece's explicit move order into the aura", () => {
+    const ctx = auraContext()
+    const { rook, motion } = latchedRook(ctx)
+    const order = ctx.world.require(rook, Order)
+    order.kind = 'goto'
+    order.dest = { x: 3, y: 7 } // d1, adjacent to the king
+
+    run(ctx)
+
+    expect(motion.goal).toEqual({ x: 3, y: 7 })
+    expect(motion.intent).toBe('order')
+  })
+
+  it("redirects a latched piece's non-aura move order toward the king", () => {
+    const ctx = auraContext()
+    const { rook, motion } = latchedRook(ctx)
+    const order = ctx.world.require(rook, Order)
+    order.kind = 'goto'
+    order.dest = { x: 7, y: 7 } // h1, far outside the aura
+
+    run(ctx)
+
+    expect(motion.intent).toBe('preserve')
+    expect(motion.goal).not.toEqual({ x: 7, y: 7 })
+    expect(Math.max(Math.abs(motion.goal!.x - 4), Math.abs(motion.goal!.y - 7))).toBeLessThanOrEqual(2)
+  })
+
+  it('holds a latched piece that is already inside the aura', () => {
+    const ctx = auraContext()
+    const rook = createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 6 }) // e2, inside the aura
+    const hp = ctx.world.require(rook, Health)
+    hp.cur = 8
+    const motion = ctx.world.require(rook, Motion)
+    motion.holdUntilHp = hp.max
+
+    run(ctx)
+
+    expect(motion.goal).toBeNull()
+    expect(motion.intent).toBe('none')
+  })
+
+  it('sends a wounded, boxed-in piece home to heal when no step is safer', () => {
+    const ctx = auraContext()
+    const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 2, y: 1 }) // c7
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 1, y: 0 }) // b8 (adjacent)
+    createPiece(ctx, 'red', PIECES.bishop, { x: 2, y: 0 }) // c8 (adjacent)
+    createPiece(ctx, 'red', PIECES.queen, { x: 3, y: 4 }) // d4, covers d5
+    createPiece(ctx, 'red', PIECES.king, { x: 4, y: 0 }) // e8, occupies the last open hop
+    const hp = ctx.world.require(knight, Health)
+    hp.cur = 22 // wounded (23%), but above the critical latch
+    const target = ctx.world.require(knight, Target)
+    target.lastAttacker = rook
+    target.underFireUntil = ctx.tick + 90
+
+    run(ctx)
+
+    const motion = ctx.world.require(knight, Motion)
+    // Every knight step is covered, so it does not stand in the fire: it heads
+    // for the king's aura to heal instead of holding with no goal.
+    expect(motion.intent).toBe('preserve')
+    expect(motion.goal).not.toBeNull()
+    expect(Math.max(Math.abs(motion.goal!.x - 4), Math.abs(motion.goal!.y - 7))).toBeLessThanOrEqual(2)
+    expect(motion.holdUntilHp).toBe(0)
+  })
 })
 
 describe('orders system — attack orders', () => {

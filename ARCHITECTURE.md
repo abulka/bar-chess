@@ -336,7 +336,17 @@ cell/reservation during movement validation and path planning.
   interrupted order (move continues, attack resumes). A **badly wounded** piece
   (below `CRITICAL_WOUND = 0.2`) latches a safe-hold (`Motion.holdUntilHp = max`)
   and will not advance its order until it is **fully healed** — a new player order
-  clears the hold. The king's **healing aura** is a
+  clears the hold. Because healing only happens inside the aura, the hold is
+  **healing-aware**: a latched piece outside its king's aura walks to the nearest
+  reachable square inside it (`nearestHealingCell`) instead of parking where it can
+  never recover, breaking off only to dodge a volley that would kill it this tick;
+  an explicit move order whose destination already lies inside the aura is left to
+  run (only the hold is relaxed, so a pawn can still advance onto a healing
+  square). The same fallback covers any wounded piece that is merely below its
+  `preserveThreshold`: when `escapeGoal` finds no strictly safer step (e.g. it is
+  boxed in by ranged fire while its own square is only "safe" by the adjacency
+  term), it heads for the aura instead of standing in the fire. The king's
+  **healing aura** is a
   strong sanctuary: a piece inside it holds unless the volley it currently faces
   would **kill** it (`outgunned`) — a mere shooter or a stale "recent attacker" is
   not enough — so it recovers instead of being nudged out of range. When

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Health, Motion, Order, Stance, Target } from '../../src/ecs/components'
+import { Cell, Health, Motion, Order, Stance, Target, Weapon } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
@@ -433,5 +433,112 @@ describe('Game queued turns', () => {
     game.togglePause()
     expect(game.turnActive).toBe(false)
     expect(game.queuedTurns).toBe(0)
+  })
+})
+
+describe('Game integration — healing-aware self-preservation', () => {
+  beforeEach(() => clearComponents())
+
+  /** An empty board with a blue king on e1 and a badly wounded piece elsewhere. */
+  function healingGame(
+    piece: { kind: keyof typeof PIECES; cell: { x: number; y: number }; hp: number },
+    orderDest?: { x: number; y: number },
+  ): { game: Game; piece: number } {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    createPiece(shim, 'blue', PIECES.king, { x: 4, y: 7 }) // e1
+    const e = createPiece(shim, 'blue', PIECES[piece.kind], piece.cell)
+    const hp = game.world.require(e, Health)
+    hp.cur = piece.hp
+    game.world.require(e, Motion).holdUntilHp = hp.max
+    if (orderDest) {
+      const order = game.world.require(e, Order)
+      order.kind = 'goto'
+      order.dest = orderDest
+    }
+    return { game, piece: e }
+  }
+
+  const inAura = (game: Game, e: number): boolean => {
+    const c = game.world.require(e, Cell)
+    return Math.max(Math.abs(c.x - 4), Math.abs(c.y - 7)) <= 2
+  }
+
+  it('walks a latched, badly wounded piece to the aura so it can heal', () => {
+    const { game, piece } = healingGame({ kind: 'rook', cell: { x: 0, y: 5 }, hp: 8 })
+
+    for (let i = 0; i < 4; i++) runTurn(game)
+
+    expect(inAura(game, piece)).toBe(true)
+    expect(game.world.require(piece, Health).cur).toBeGreaterThan(8)
+  })
+
+  it('honours a latched move order that ends in the aura and then heals', () => {
+    const { game, piece } = healingGame(
+      { kind: 'rook', cell: { x: 0, y: 5 }, hp: 8 },
+      { x: 3, y: 7 }, // d1, adjacent to the king
+    )
+
+    for (let i = 0; i < 4; i++) runTurn(game)
+
+    expect(game.world.require(piece, Cell)).toEqual({ x: 3, y: 7 })
+    expect(game.world.require(piece, Health).cur).toBeGreaterThan(8)
+  })
+
+  it('releases the safe-hold once the healing trip restores full health', () => {
+    const { game, piece } = healingGame({ kind: 'rook', cell: { x: 0, y: 5 }, hp: 8 })
+
+    runUntil(game, () => game.world.require(piece, Motion).holdUntilHp === 0, 20000)
+
+    const hp = game.world.require(piece, Health)
+    expect(game.world.require(piece, Motion).holdUntilHp).toBe(0)
+    expect(hp.cur).toBe(hp.max)
+    expect(inAura(game, piece)).toBe(true)
+  })
+
+  it('walks a wounded, boxed-in piece home to heal instead of standing in the fire', () => {
+    // Human-vs-human so the red "cover" pieces hold still; their weapons are
+    // removed so they shape the threat field (all knight steps covered) without
+    // actually killing the retreating knight.
+    const game = new Game(8, 'human-vs-human')
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    createPiece(shim, 'blue', PIECES.king, { x: 4, y: 7 }) // e1
+    const knight = createPiece(shim, 'blue', PIECES.knight, { x: 2, y: 1 }) // c7
+    const rook = createPiece(shim, 'red', PIECES.rook, { x: 1, y: 0 }) // b8
+    const bishop = createPiece(shim, 'red', PIECES.bishop, { x: 2, y: 0 }) // c8
+    const queen = createPiece(shim, 'red', PIECES.queen, { x: 3, y: 4 }) // d4
+    const redKing = createPiece(shim, 'red', PIECES.king, { x: 4, y: 0 }) // e8, blocks the last open hop
+    for (const e of [rook, bishop, queen, redKing]) game.world.remove(e, Weapon)
+    game.world.require(knight, Health).cur = 22 // wounded, not critical
+    const target = game.world.require(knight, Target)
+    target.lastAttacker = rook
+    target.underFireUntil = 9999
+
+    runTurn(game)
+
+    const motion = game.world.require(knight, Motion)
+    expect(motion.intent).toBe('preserve')
+    expect(motion.goal).not.toBeNull()
+    // It left the square it was standing on, heading for the king.
+    expect(game.world.require(knight, Cell)).not.toEqual({ x: 2, y: 1 })
+  })
+
+  it('does not park a cornered, badly wounded knight: it seeks its king', () => {
+    // The enemy corner (a7) is locally safe but a dead end; the fix is that the
+    // latched knight heads for its own king instead of holding with no goal.
+    const { game, piece } = healingGame({ kind: 'knight', cell: { x: 0, y: 1 }, hp: 8 })
+
+    game.runTicks(1)
+    const motion = game.world.require(piece, Motion)
+    expect(motion.goal).not.toBeNull()
+    expect(motion.intent).toBe('preserve')
+
+    const before = Math.max(Math.abs(0 - 4), Math.abs(1 - 7))
+    for (let i = 0; i < 3 && game.world.isAlive(piece); i++) runTurn(game)
+    const c = game.world.require(piece, Cell)
+    expect(c).not.toEqual({ x: 0, y: 1 })
+    expect(Math.max(Math.abs(c.x - 4), Math.abs(c.y - 7))).toBeLessThan(before)
   })
 })

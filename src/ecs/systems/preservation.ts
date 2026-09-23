@@ -1,5 +1,7 @@
 import { chebyshev, containsCell, fireCells, moveDestinations } from '../../game/geometry'
+import { HEAL_RADIUS } from '../../game/healing'
 import { makeOccupied, occupiedExcept } from '../../game/occupancy'
+import { reachableCells } from '../../game/pathfind'
 import { PIECES, WEAPONS, weaponVision } from '../../game/pieces'
 import type { TeamId, Vec2 } from '../../game/types'
 import { Cell, Health, PieceType, Target, Team } from '../components'
@@ -124,6 +126,51 @@ export function isValuable(kind: string): boolean {
 export function homeCell(ctx: SimContext, team: TeamId): Vec2 | null {
   const lanes = ctx.board.data.lanes[team]
   return lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
+}
+
+/** True when `cell` sits inside the healing aura centred on `kingCell`. */
+export function inHealingAura(cell: Vec2, kingCell: Vec2): boolean {
+  return chebyshev(cell.x, cell.y, kingCell.x, kingCell.y) <= HEAL_RADIUS
+}
+
+/**
+ * The reachable, passable square inside the team king's aura nearest `piece`, so
+ * a badly wounded piece can walk to the aura and regenerate rather than parking
+ * where it can never heal. Prefers an unoccupied square (a legal landing spot)
+ * and falls back to the nearest aura square even if occupied, so a boxed-in
+ * piece still best-efforts toward healing. Returns null when the piece's
+ * movement geometry cannot reach any aura square.
+ */
+export function nearestHealingCell(
+  ctx: SimContext,
+  piece: Entity,
+  team: TeamId,
+  kingCell: Vec2,
+): Vec2 | null {
+  const cell = ctx.world.get(piece, Cell)
+  const kind = ctx.world.get(piece, PieceType)?.kind
+  const def = kind ? PIECES[kind] : undefined
+  if (!cell || !def) return null
+  const reach = reachableCells(ctx.board, cell, def.move, team)
+  const w = ctx.board.width
+  let best: Vec2 | null = null
+  let bestDist = Infinity
+  let bestFree = false
+  for (let y = 0; y < ctx.board.height; y++) {
+    for (let x = 0; x < w; x++) {
+      if (chebyshev(x, y, kingCell.x, kingCell.y) > HEAL_RADIUS) continue
+      if (!ctx.board.passable(x, y)) continue
+      if (reach[y * w + x] !== 1) continue
+      const free = !ctx.occupancy.has(y * w + x)
+      const dist = (x - cell.x) ** 2 + (y - cell.y) ** 2
+      if ((free && !bestFree) || (free === bestFree && dist < bestDist)) {
+        best = { x, y }
+        bestDist = dist
+        bestFree = free
+      }
+    }
+  }
+  return best
 }
 
 /**
