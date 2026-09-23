@@ -39,6 +39,17 @@ const intentLabel = computed(() => INTENT_LABEL[intent.value] ?? intent.value)
 /** An autonomous goal (not a player order) — shown as an "auto" pseudo-order. */
 const isAuto = computed(() => intent.value !== 'none' && intent.value !== 'order')
 const orderIdle = computed(() => !info.value || info.value.order.kind === 'none')
+/**
+ * A committed piece will pursue its target: an AI controller always does, and a
+ * human piece does in Attack stance. A None/Move piece only fires at whatever is
+ * already in range and never follows it — a stationary "pot shot".
+ */
+const committed = computed(() =>
+  info.value ? !info.value.commandable || info.value.stance === 'attack' : true,
+)
+const targetHeading = computed(() =>
+  info.value?.target ? (committed.value ? 'engaging' : 'pot shot') : 'target',
+)
 
 function pct(ratio: number): string {
   return `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`
@@ -106,13 +117,16 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
       </p>
       <p v-if="!info.commandable" class="line muted tiny">not under your control</p>
 
-      <div class="sub">target</div>
+      <div class="sub">{{ targetHeading }}</div>
       <p v-if="info.target" class="line">
         <span :style="{ color: info.target.color }">{{ info.target.glyph }}</span>
         {{ info.target.name }} @ {{ info.target.coord }}
         <span v-if="info.target.health" class="muted">({{ hp(info.target.health.cur) }}/{{ hp(info.target.health.max) }})</span>
       </p>
       <p v-else class="line muted">no target</p>
+      <p v-if="info.target && !committed" class="line muted tiny">
+        in range only — {{ info.motion.goalCoord ? 'not pursuing' : 'holding position, not pursuing' }}
+      </p>
       <p v-if="info.underFire" class="line warn">under fire from {{ info.underFire.coord }}</p>
 
       <div class="sub">order</div>
@@ -134,7 +148,7 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
       <div class="sub">movement</div>
       <p class="line">
         <span v-if="info.motion.goalCoord">goal {{ info.motion.goalCoord }} · </span>
-        <span v-else>no goal · </span>
+        <span v-else>{{ info.target && !committed ? 'holding position' : 'no goal' }} · </span>
         <span
           v-if="intentLabel"
           class="intent"

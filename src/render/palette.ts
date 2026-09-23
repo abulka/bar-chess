@@ -15,6 +15,9 @@ export const BAR_BG = 'rgba(8,10,14,0.82)'
 export const RELOAD_FILL = '#15c2b6'
 /** Bright yellow for a self-preservation retreat route/objective (not an order). */
 export const PRESERVE_COLOR = '#f2ff49'
+/** Muted grey for an incidental "pot shot": a stationary piece firing at whatever
+ * is in range without committing to pursue it (None/Move stance). */
+export const POTSHOT_COLOR = '#8b929c'
 
 const HEALTH_FULL: [number, number, number] = [76, 217, 100]
 const HEALTH_EMPTY: [number, number, number] = [255, 59, 48]

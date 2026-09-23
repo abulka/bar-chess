@@ -511,7 +511,7 @@ pieceInfo terrainVersion`.
 | --------- | -------------- |
 | `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, reset |
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle |
-| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`), selection-wide stance buttons and clear-orders |
+| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed, `pot shot` when only firing in range), selection-wide stance buttons and clear-orders |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
 | `StatsBar.vue` | tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Sound config panel, Inspector for the selection |
@@ -534,10 +534,20 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   (`Motion.intent === 'preserve'`) draws the same route and diamond in bright
   yellow (`PRESERVE_COLOR`) so an automatic dodge is never mistaken for an order.
 - **Target** — an ordered attack (`order.kind === 'attack'`) draws a red firing
-  line + reticle and rings the victim red; an auto-acquired or retaliation target
-  (`Target.entity` under Attack stance / return fire) draws the same indicator in
-  **amber**, so an autonomous engagement is as legible as an ordered one while
-  staying distinct.
+  line + reticle and rings the victim red. An auto-acquired target is drawn two
+  ways: a **committed** piece (AI controller, or Attack stance) will pursue it, so
+  it gets the same line + reticle in **amber** and rings the victim; a stationary
+  **None/Move** piece only fires at whatever passes in range and will not follow
+  it, so it gets a muted **grey dashed** line with no arrow, reticle or ring — a
+  "pot shot", never mistaken for a lock-on. The line runs from the piece's
+  **current square** unless it is genuinely moving to a firing position to pursue
+  (`Motion.intent === 'engage'` for an autonomous engagement, or `'order'` for an
+  ordered attack), in which case it is previewed from the end of the planned path;
+  a self-preservation override (`intent === 'preserve'`) therefore never draws the
+  line from a retreat square. The piece panel mirrors this: its target heading
+  reads `engaging` for a committed piece and `pot shot` otherwise, with an
+  "in range only — …" note that adds "holding position" when the piece has no
+  goal.
 - **Healing** (`show healing`, off by default) — a pulsing green aura around each
   living king, a dashed ring at the two-square boundary, and wavy tendrils to the
   damaged same-team pieces inside it. This toggle is display-only: the

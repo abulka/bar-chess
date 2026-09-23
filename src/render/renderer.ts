@@ -25,7 +25,15 @@ import { coordName, fileLabel } from '../game/coords'
 import type { Game } from '../game/game'
 import { Camera } from './camera'
 import { firingLine, routePolyline, type FiringLine } from './overlays'
-import { BAR_BG, BAR_HIDE_THRESHOLD, PRESERVE_COLOR, RELOAD_FILL, RELOAD_MIN_COOLDOWN, healthColor } from './palette'
+import {
+  BAR_BG,
+  BAR_HIDE_THRESHOLD,
+  POTSHOT_COLOR,
+  PRESERVE_COLOR,
+  RELOAD_FILL,
+  RELOAD_MIN_COOLDOWN,
+  healthColor,
+} from './palette'
 import { bakeTerrain } from './terrain'
 
 const STANCE_COLORS: Record<string, string> = {
@@ -230,7 +238,13 @@ export class Renderer {
       const tp = game.world.get(target, Position)
       const tc = game.world.get(target, Cell)
       if (tp && tc) {
-        const endCell = motion && motion.path.length > 0 ? motion.path[motion.path.length - 1] : cell
+        // Preview the shot from the firing position only while the attack order
+        // is actually being pursued. If self-preservation has overridden the goal
+        // (`intent === 'preserve'`) the path leads to a retreat square, not a
+        // firing position, so the line must come from where the piece stands now.
+        const pursuing = motion?.intent === 'order'
+        const endCell =
+          pursuing && motion && motion.path.length > 0 ? motion.path[motion.path.length - 1] : cell
         const weaponGeom = WEAPONS[def.weapon].geometry
         const reachable = order?.reachable ?? true
         const line = firingLine(board, endCell, tc, weaponGeom, team, reachable, occupied)
@@ -290,26 +304,54 @@ export class Renderer {
       ctx.setLineDash([])
     }
 
-    // Auto-acquired / retaliation target (Attack stance, or return fire): an
-    // amber engagement line + reticle, so an autonomous engagement reads as
-    // clearly as an ordered one while staying distinct from its red indicator.
+    // Auto-acquired / retaliation target. A committed piece (AI, or Attack
+    // stance) will pursue it: an amber line + reticle reads as an engagement.
+    // A stationary None/Move piece is only taking pot shots at whatever passes
+    // in range and will not follow it, so it gets a muted grey dashed line with
+    // no arrow or reticle — no lock-on feel.
     if (autoTarget === null || !game.world.isAlive(autoTarget)) return
     const tc = game.world.get(autoTarget, Cell)
     if (!tc) return
-    const endCell = motion && motion.path.length > 0 ? motion.path[motion.path.length - 1] : cell
+    const committed = this.committedTarget(game, e)
+    // The target was acquired from the piece's current square, so the line shows
+    // the shot it can take *now* — unless it is genuinely moving to a firing
+    // position to pursue (`intent === 'engage'`), in which case preview it from
+    // the path end. A pot shot / retreat / rally / defense never previews.
+    const pursuing = motion?.intent === 'engage'
+    const endCell =
+      pursuing && motion && motion.path.length > 0 ? motion.path[motion.path.length - 1] : cell
     const autoLine = firingLine(board, endCell, tc, WEAPONS[def.weapon].geometry, team, true, occupied)
-    const autoColor = full ? ENGAGE_COLOR : 'rgba(227,179,65,0.6)'
-    ctx.strokeStyle = autoColor
+    const dash = [5 / this.camera.zoom, 4 / this.camera.zoom]
+    ctx.strokeStyle = committed
+      ? full
+        ? ENGAGE_COLOR
+        : 'rgba(227,179,65,0.6)'
+      : full
+        ? POTSHOT_COLOR
+        : 'rgba(139,146,156,0.55)'
     ctx.lineWidth = (full ? 1.8 : 1.2) / this.camera.zoom
     for (const seg of autoLine.segments) {
-      ctx.setLineDash(seg.dashed ? [5 / this.camera.zoom, 4 / this.camera.zoom] : [])
+      // A pot shot always reads dashed: an incidental, uncommitted line.
+      ctx.setLineDash(committed ? (seg.dashed ? dash : []) : dash)
       ctx.beginPath()
       ctx.moveTo(seg.from.x, seg.from.y)
       ctx.lineTo(seg.to.x, seg.to.y)
       ctx.stroke()
     }
     ctx.setLineDash([])
-    this.drawReticle(ctx, board, autoLine, ENGAGE_COLOR, ENGAGE_COLOR, full)
+    if (committed) this.drawReticle(ctx, board, autoLine, ENGAGE_COLOR, ENGAGE_COLOR, full)
+  }
+
+  /**
+   * Whether a piece is committed to pursuing its auto-acquired target: an AI
+   * controller always is, and a human piece is when set to Attack stance. A
+   * None/Move piece only fires in range and never follows the target.
+   */
+  private committedTarget(game: Game, e: Entity): boolean {
+    const team = game.world.get(e, Team)
+    if (!team) return false
+    if (game.teams[team].controller === 'ai') return true
+    return game.world.get(e, Stance)?.mode === 'attack'
   }
 
   /**
@@ -629,8 +671,9 @@ export class Renderer {
     const sorted = entities.slice().sort((a, b) => game.world.require(a, Position).y - game.world.require(b, Position).y)
 
     // Target rings follow the same scope as orders/overlays: an explicit attack
-    // order marks its victim red, while an auto-acquired / retaliation target
-    // (Attack stance or return fire) marks it amber so the difference is clear.
+    // order marks its victim red, while a *committed* auto-acquired target (AI or
+    // Attack stance) marks it amber. A stationary pot shot rings nothing — it is
+    // not pursuing the target, so it must not imply a lock-on.
     const targeted = new Set<Entity>()
     const autoTargeted = new Set<Entity>()
     for (const { e } of scoped) {
@@ -640,7 +683,9 @@ export class Renderer {
         continue
       }
       const auto = game.world.get(e, Target)?.entity ?? null
-      if (auto !== null && game.world.isAlive(auto) && !targeted.has(auto)) autoTargeted.add(auto)
+      if (auto !== null && game.world.isAlive(auto) && !targeted.has(auto) && this.committedTarget(game, e)) {
+        autoTargeted.add(auto)
+      }
     }
 
     for (const e of sorted) {

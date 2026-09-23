@@ -5,12 +5,12 @@ vi.mock('../../src/render/terrain', () => ({
   bakeTerrain: () => ({ width: 0, height: 0 }),
 }))
 
-import { Health, Motion, PieceType, Position, Render, Target, Weapon } from '../../src/ecs/components'
+import { Health, Motion, PieceType, Position, Render, Stance, Target, Weapon } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { WEAPONS } from '../../src/game/pieces'
 import { HEAL_COLOR } from '../../src/game/healing'
-import { BAR_BG, PRESERVE_COLOR, RELOAD_FILL, healthColor } from '../../src/render/palette'
+import { BAR_BG, POTSHOT_COLOR, PRESERVE_COLOR, RELOAD_FILL, healthColor } from '../../src/render/palette'
 import { Renderer } from '../../src/render/renderer'
 import { orderAttack, placePiece } from '../helpers'
 
@@ -185,6 +185,20 @@ describe('Renderer firing-line overlay', () => {
     expect(route!.points[0]).toEqual(center(4, 4))
     expect(route!.points[route!.points.length - 1]).toEqual(center(4, 5))
   })
+
+  it('draws the ordered line from the current cell when self-preservation overrides it', () => {
+    orderAttack(s.game, attacker, target, true)
+    const motion = s.game.world.require(attacker, Motion)
+    motion.intent = 'preserve'
+    motion.goal = { x: 6, y: 4 }
+    motion.path = [{ x: 6, y: 4 }]
+    s.renderer.draw(s.game)
+
+    const line = firingStrokes(s.ctx).filter((st) => st.style === TRACK)
+    expect(line).toHaveLength(1)
+    // From where the piece stands (4,4), not the retreat square (6,4).
+    expect(line[0].points).toEqual([center(4, 4), center(4, 6)])
+  })
 })
 
 describe('Renderer autonomous target overlay', () => {
@@ -200,7 +214,8 @@ describe('Renderer autonomous target overlay', () => {
     s.game.selected = [attacker]
   })
 
-  it('draws an amber line + ring for an auto-acquired target', () => {
+  it('draws an amber line + reticle + ring for a committed (Attack stance) target', () => {
+    s.game.world.require(attacker, Stance).mode = 'attack'
     s.game.world.require(attacker, Target).entity = target
     s.renderer.draw(s.game)
 
@@ -211,6 +226,57 @@ describe('Renderer autonomous target overlay', () => {
     // The victim is ringed amber (an arc-only stroke) and never red.
     expect(s.ctx.strokes.some((st) => st.style === ENGAGE && st.points.length === 0)).toBe(true)
     expect(s.ctx.strokes.some((st) => st.style === TRACK)).toBe(false)
+  })
+
+  it('keeps an AI piece\'s auto-acquired target amber (committed by controller)', () => {
+    s.game.teams.blue.controller = 'ai'
+    s.game.world.require(attacker, Target).entity = target
+    s.renderer.draw(s.game)
+
+    expect(firingStrokes(s.ctx).filter((st) => st.style === ENGAGE)).toHaveLength(1)
+    expect(s.ctx.strokes.some((st) => st.style === ENGAGE && st.points.length === 0)).toBe(true)
+  })
+
+  it('draws a grey dashed pot-shot line with no reticle or ring for a None-stance target', () => {
+    s.game.world.require(attacker, Target).entity = target
+    s.renderer.draw(s.game)
+
+    const line = firingStrokes(s.ctx).filter((st) => st.style === POTSHOT_COLOR)
+    expect(line).toHaveLength(1)
+    // Always dashed: an incidental, uncommitted line.
+    expect(line[0].dash.length).toBeGreaterThan(0)
+    expect(line[0].points).toEqual([center(4, 4), center(4, 6)])
+    // No lock-on: no reticle ring/cross and no amber engagement indicator.
+    expect(s.ctx.strokes.some((st) => st.style === POTSHOT_COLOR && st.points.length === 0)).toBe(false)
+    expect(s.ctx.strokes.some((st) => st.style === ENGAGE)).toBe(false)
+  })
+
+  it('draws a pot shot from the current cell, not the retreat path end', () => {
+    const motion = s.game.world.require(attacker, Motion)
+    motion.intent = 'preserve'
+    motion.goal = { x: 6, y: 4 }
+    motion.path = [{ x: 6, y: 4 }]
+    s.game.world.require(attacker, Target).entity = target
+    s.renderer.draw(s.game)
+
+    const line = firingStrokes(s.ctx).filter((st) => st.style === POTSHOT_COLOR)
+    expect(line).toHaveLength(1)
+    // From where the piece stands (4,4), not the retreat square (6,4).
+    expect(line[0].points).toEqual([center(4, 4), center(4, 6)])
+  })
+
+  it('previews a committed engagement from the path end (future firing position)', () => {
+    s.game.world.require(attacker, Stance).mode = 'attack'
+    const motion = s.game.world.require(attacker, Motion)
+    motion.intent = 'engage'
+    motion.goal = { x: 4, y: 5 }
+    motion.path = [{ x: 4, y: 5 }]
+    s.game.world.require(attacker, Target).entity = target
+    s.renderer.draw(s.game)
+
+    const line = firingStrokes(s.ctx).filter((st) => st.style === ENGAGE)
+    expect(line).toHaveLength(1)
+    expect(line[0].points).toEqual([center(4, 5), center(4, 6)])
   })
 
   it('keeps an ordered attack red and never duplicates it in amber', () => {
