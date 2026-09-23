@@ -273,6 +273,50 @@ describe('Game integration', () => {
     expect(game.snapshot().canUndo).toBe(true)
   })
 
+  it('keeps the selection across undo/redo so the panel follows the restored state', () => {
+    const game = new Game(8)
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 3, y: 6 })
+    game.selected = [pawn]
+    game.orderAt({ x: 3, y: 4 }, 'move')
+    runTurn(game)
+
+    expect(game.snapshot().pieceInfo?.entity).toBe(pawn)
+    expect(game.snapshot().pieceInfo?.cell).toEqual({ x: 3, y: 4 })
+
+    game.undoTurn()
+    expect(game.selected).toEqual([pawn])
+    expect(game.snapshot().pieceInfo?.entity).toBe(pawn)
+    // The constructor snapshot has the pawn on its spawn rank, not d4.
+    expect(game.snapshot().pieceInfo?.cell).not.toEqual({ x: 3, y: 4 })
+
+    game.redoTurn()
+    expect(game.selected).toEqual([pawn])
+    expect(game.snapshot().pieceInfo?.entity).toBe(pawn)
+    expect(game.snapshot().pieceInfo?.cell).toEqual({ x: 3, y: 4 })
+  })
+
+  it('prunes from the selection the pieces the restored state does not have', () => {
+    const game = new Game(8)
+    const veteran = placePiece(game, 'pawn', 'blue', { x: 3, y: 6 })
+    game.selected = [veteran]
+    game.orderAt({ x: 3, y: 4 }, 'move')
+    runTurn(game)
+
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    const reinforcement = createPiece(shim, 'blue', PIECES.pawn, { x: 5, y: 7 })
+    game.selected = [reinforcement, veteran]
+    expect(game.snapshot().pieceInfo?.entity).toBe(reinforcement)
+
+    game.undoTurn()
+
+    // The reinforcement never existed at the restored boundary; the veteran
+    // survives and keeps focus so the panel shows a real piece.
+    expect(game.selected).toEqual([veteran])
+    expect(game.snapshot().selected).toEqual([veteran])
+    expect(game.snapshot().selectionCount).toBe(1)
+    expect(game.snapshot().pieceInfo?.entity).toBe(veteran)
+  })
+
   it('an attack order does not change the piece stance', () => {
     const game = new Game(8)
     const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })

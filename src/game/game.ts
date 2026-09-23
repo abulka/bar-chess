@@ -524,7 +524,6 @@ export class Game {
     if (this.turnActive || this.replaying || this.cursor <= 0) return
     this.queuedTurns = 0
     this.restoreTurn(this.history[--this.cursor])
-    this.selected = []
     this.barProgress = 0
     this.paused = true
     this.canReplay = this.cursor === this.history.length - 1 && this.lastTurn !== null
@@ -536,7 +535,6 @@ export class Game {
     if (this.turnActive || this.replaying || this.cursor >= this.history.length - 1) return
     this.queuedTurns = 0
     this.restoreTurn(this.history[++this.cursor])
-    this.selected = []
     this.barProgress = 0
     this.paused = true
     this.canReplay = this.cursor === this.history.length - 1 && this.lastTurn !== null
