@@ -250,8 +250,13 @@ export class Renderer {
         const line = firingLine(board, endCell, tc, weaponGeom, team, reachable, occupied)
 
         // Movement route (same gold "route" style as a move order), so it reads
-        // separately from the red/grey firing line that follows it.
-        if (motion && motion.path.length > 0) this.drawRoute(ctx, board, pos, motion.path, full)
+        // separately from the red/grey firing line that follows it. When
+        // self-preservation has overridden the attack the path is a retreat, so
+        // it takes the bright-yellow preserve colour, not the order gold.
+        if (motion && motion.path.length > 0) {
+          const preserve = motion.intent === 'preserve'
+          this.drawRoute(ctx, board, pos, motion.path, full, preserve ? PRESERVE_COLOR : undefined)
+        }
 
         const dash = [5 / this.camera.zoom, 4 / this.camera.zoom]
         const lineColor = line.kind === 'unreachable' ? UNREACHABLE_COLOR : TRACK_COLOR

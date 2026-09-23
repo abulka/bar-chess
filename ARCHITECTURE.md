@@ -532,7 +532,9 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   dashed when blocked). The diamond shape keeps the destination distinct from the
   target reticle (circle + cross). A **self-preservation** retreat
   (`Motion.intent === 'preserve'`) draws the same route and diamond in bright
-  yellow (`PRESERVE_COLOR`) so an automatic dodge is never mistaken for an order.
+  yellow (`PRESERVE_COLOR`) so an automatic dodge is never mistaken for an order —
+  including when it overrides an ordered attack, where the retreat route is
+  yellow, not the attack-route gold.
 - **Target** — an ordered attack (`order.kind === 'attack'`) draws a red firing
   line + reticle and rings the victim red. An auto-acquired target is drawn two
   ways: a **committed** piece (AI controller, or Attack stance) will pursue it, so

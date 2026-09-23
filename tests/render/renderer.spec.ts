@@ -199,6 +199,19 @@ describe('Renderer firing-line overlay', () => {
     // From where the piece stands (4,4), not the retreat square (6,4).
     expect(line[0].points).toEqual([center(4, 4), center(4, 6)])
   })
+
+  it("draws an overridden attack's retreat route in the preserve colour, not order gold", () => {
+    orderAttack(s.game, attacker, target, true)
+    const motion = s.game.world.require(attacker, Motion)
+    motion.intent = 'preserve'
+    motion.goal = { x: 6, y: 4 }
+    motion.path = [{ x: 6, y: 4 }]
+    s.renderer.draw(s.game)
+
+    expect(s.ctx.strokes.some((st) => st.style === PRESERVE_COLOR)).toBe(true)
+    // No gold route polyline (the #ffd166 selection ring is arc-only, not a route).
+    expect(s.ctx.strokes.some((st) => st.style === ROUTE && st.points.length >= 2)).toBe(false)
+  })
 })
 
 describe('Renderer autonomous target overlay', () => {
