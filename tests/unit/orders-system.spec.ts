@@ -273,18 +273,48 @@ describe('orders system — automatic self-preservation', () => {
     expect(ctx.world.require(pawn, Motion).goal).toBeNull()
   })
 
-  it('lets a cheap piece flee when a single shooter would kill it', () => {
+  it('lets a non-pawn flee when a single shooter would kill it', () => {
+    const ctx = hurtContext(true)
+    const bishop = createPiece(ctx, 'blue', PIECES.bishop, { x: 4, y: 4 })
+    // Rook covers the rank; the bishop can step off it, and 15 HP vs 20 damage
+    // means it is outgunned.
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 0, y: 4 })
+    ctx.world.require(bishop, Health).cur = 15
+    fireOn(ctx, bishop, rook)
+
+    run(ctx)
+
+    expect(ctx.world.require(bishop, Motion).goal).not.toBeNull()
+  })
+
+  it('never flees a pawn, even outgunned: it holds instead', () => {
     const ctx = hurtContext(true)
     const pawn = createPiece(ctx, 'blue', PIECES.pawn, { x: 4, y: 4 })
-    // Rook covers the rank; the pawn can step off it, but 15 HP vs 20 damage
-    // means it is outgunned, though still above its 30% HP threshold.
     const rook = createPiece(ctx, 'red', PIECES.rook, { x: 0, y: 4 })
     ctx.world.require(pawn, Health).cur = 15
     fireOn(ctx, pawn, rook)
 
     run(ctx)
 
-    expect(ctx.world.require(pawn, Motion).goal).not.toBeNull()
+    expect(ctx.world.require(pawn, Motion).goal).toBeNull()
+  })
+
+  it('keeps a hurt pawn firing at an in-range ordered target instead of fleeing', () => {
+    const ctx = hurtContext(true)
+    const pawn = createPiece(ctx, 'blue', PIECES.pawn, { x: 3, y: 3 }) // d5
+    const knight = createPiece(ctx, 'red', PIECES.knight, { x: 2, y: 2 }) // c6, diagonal
+    createPiece(ctx, 'red', PIECES.rook, { x: 1, y: 3 }) // b5, covers d5 on rank 5
+    createPiece(ctx, 'red', PIECES.queen, { x: 3, y: 7 }) // d8, covers the d-file
+    ctx.world.require(pawn, Health).cur = 5
+    const order = ctx.world.require(pawn, Order)
+    order.kind = 'attack'
+    order.target = knight
+    order.reachable = true
+    fireOn(ctx, pawn, knight)
+
+    run(ctx)
+
+    expect(ctx.world.require(pawn, Motion).goal).toBeNull()
   })
 
   it('pulls a valuable piece out of a two-shooter crossfire before it is hit', () => {

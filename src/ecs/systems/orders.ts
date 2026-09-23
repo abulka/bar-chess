@@ -195,9 +195,11 @@ const system: System = {
         if (hpRatio < preserve || pressured) {
           // Seek cover: step to the least-exposed nearby square, keeping a shot
           // when free; hold when every step is no safer (or nobody is near).
+          // Pawns cannot retreat, so an "escape" only marches them into the enemy
+          // and gives up the shot — they hold and fire instead.
           const keepShot =
             targetValid && (order.kind === 'attack' || stance.mode === 'attack') ? (target.entity as number) : null
-          motion.goal = escapeGoal(ctx, e, team, threats, keepShot)
+          motion.goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, keepShot)
           continue
         }
       }
@@ -352,8 +354,9 @@ const system: System = {
 
       if (targetValid && hpRatio < preserveThreshold(kind ?? '')) {
         // Low HP (auto-preserve off): seek nearby cover, keeping the shot if free.
+        // Pawns cannot retreat, so they hold and fire instead.
         const threats = coverageThreats(ctx, e, team, pieceThreatMemo, { proximityRadius: COVER_RADIUS })
-        motion.goal = escapeGoal(ctx, e, team, threats, target.entity as number)
+        motion.goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, target.entity as number)
         continue
       }
       if (!targetValid) {

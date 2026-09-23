@@ -317,7 +317,9 @@ cell/reservation during movement validation and path planning.
   that still fires. It triggers when the piece is below a
   per-kind HP threshold (`preserveThreshold`: queen/king 0.5, rook 0.45,
   bishop/knight 0.4, else 0.3) **or** outgunned **or** — for queen/rook/bishop/
-  knight/king — covered by two or more shooters, even above the HP gate. Valuable
+  knight/king — covered by two or more shooters, even above the HP gate. Pawns are
+  exempt from the retreat: they can only step forward, so an "escape" would march
+  them into the enemy and give up the shot, so they hold and fire instead. Valuable
   pieces run this scan every tick so they can bail before taking damage; cheap
   pieces only scan once hurt or actually under fire, and `coverageThreats` skips
   any enemy beyond its weapon's reach, keeping the cost bounded. It runs even with
