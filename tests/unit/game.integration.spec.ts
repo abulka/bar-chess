@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Motion, Order, Stance, Target } from '../../src/ecs/components'
+import { Cell, Motion, Order, Stance, Target } from '../../src/ecs/components'
+import type { SimContext } from '../../src/ecs/types'
+import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
+import { PIECES } from '../../src/game/pieces'
 import { clearComponents, orderAttack, placePiece } from '../helpers'
 
 function runTurn(game: Game): void {
@@ -29,6 +32,20 @@ describe('Game integration', () => {
     const game = new Game(8)
     game.runTicks(10)
     expect(game.tick).toBe(10)
+  })
+
+  it('applies a capture-advance toggle set after construction', () => {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    const knight = createPiece(shim, 'blue', PIECES.knight, { x: 6, y: 3 }) // g5
+    const pawn = createPiece(shim, 'red', PIECES.pawn, { x: 5, y: 1 }) // f7
+    game.cmds.damage.push({ target: pawn, source: knight, amount: 999, kind: 'projectile', direct: true })
+    game.setCaptureAdvance(true)
+
+    game.runTicks(1)
+
+    expect(game.world.require(knight, Cell)).toEqual({ x: 5, y: 1 })
   })
 
   it('a deploy command spawns a reinforcement on the next tick', () => {

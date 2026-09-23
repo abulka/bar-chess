@@ -1,6 +1,6 @@
 import { firingPositionExists } from '../../game/approach'
 import { ATTACK_LEASH } from '../../game/constants'
-import { fireCells } from '../../game/geometry'
+import { containsCell, fireCells } from '../../game/geometry'
 import { buildOccupancy, makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS, weaponVision } from '../../game/pieces'
 import { Cell, Health, Order, PieceType, Stance, Target, Team } from '../components'
@@ -36,13 +36,20 @@ function nearestInFireGeometry(
 
 /**
  * Attack acquisition: nearest enemy within vision, biased toward damaged ones.
- * Sliders have board-wide vision, so the leash keeps Attack from chasing a
- * target clear across the map; the piece fights locally instead.
+ * Enemies the piece can actually shoot this instant are strongly preferred, and
+ * an enemy currently firing on it breaks ties, so a unit returns fire instead
+ * of locking onto a nearer target it cannot hit yet. Sliders have board-wide
+ * vision, so the leash keeps Attack from chasing a target clear across the map;
+ * the piece fights locally instead.
  */
 function acquireAttack(ctx: SimContext, e: Entity, team: 'red' | 'blue', weaponKey: string): Entity | null {
   const cell = ctx.world.require(e, Cell)
-  const vision = Math.min(weaponVision(WEAPONS[weaponKey].geometry), ATTACK_LEASH)
+  const geometry = WEAPONS[weaponKey].geometry
+  const vision = Math.min(weaponVision(geometry), ATTACK_LEASH)
   const maxDist2 = vision * vision
+  const occupied = makeOccupied(ctx.board, ctx.occupancy)
+  const target = ctx.world.get(e, Target)
+  const underFireAttacker = target && ctx.tick < target.underFireUntil ? target.lastAttacker : null
   let best: Entity | null = null
   let bestScore = Infinity
   for (const other of ctx.world.query(Cell, Team, Health)) {
@@ -53,7 +60,10 @@ function acquireAttack(ctx: SimContext, e: Entity, team: 'red' | 'blue', weaponK
     if (d2 > maxDist2) continue
     const hp = ctx.world.get(other, Health)
     const ratio = hp && hp.max > 0 ? hp.cur / hp.max : 1
-    const score = Math.sqrt(d2) - (1 - ratio) * vision * 0.75
+    const canHit = containsCell(fireCells(ctx.board, cell, geometry, team, occupied), oc.x, oc.y)
+    let score = Math.sqrt(d2) - (1 - ratio) * vision * 0.75
+    if (canHit) score -= 1000
+    if (other === underFireAttacker) score -= 500
     if (score < bestScore) {
       bestScore = score
       best = other

@@ -195,6 +195,7 @@ export interface GameSnapshot {
   overlays: OverlayFlags
   hudVisible: boolean
   autoPreserve: boolean
+  captureAdvance: boolean
   /** Whether combat sound effects are enabled. */
   soundEnabled: boolean
   /** Whether the left/right side rails (controls, stance, position) are shown. */
@@ -254,7 +255,7 @@ export class Game {
   pipeline: Pipeline = createPipeline()
   board: Board
   rng = new Rng()
-  cmds: Commands = { damage: [], deploy: [], destroy: [] }
+  cmds: Commands = { damage: [], deploy: [], destroy: [], advance: [] }
   teams: Record<TeamId, TeamRuntime>
   occupancy = new Map<number, Entity>()
 
@@ -275,6 +276,8 @@ export class Game {
   gameMode: GameMode = 'human-vs-ai'
   /** Hurt pieces step out of fire on their own, even without orders. */
   autoPreserve = true
+  /** An idle killer steps onto the square of a piece it just killed. */
+  captureAdvance = false
   /** Transient BAR-style command awaiting the next left-click. */
   pendingCommand: StanceMode = 'none'
 
@@ -385,6 +388,7 @@ export class Game {
       verbosePhases: this.pipeline.verbose,
       turnActive: this.turnActive,
       autoPreserve: this.autoPreserve,
+      captureAdvance: this.captureAdvance,
     }
   }
 
@@ -666,6 +670,7 @@ export class Game {
       speed: this.speed,
       gameMode: this.gameMode,
       autoPreserve: this.autoPreserve,
+      captureAdvance: this.captureAdvance,
       soundEnabled: this.soundEnabled,
       bottomFraction: this.bottomFraction,
     }
@@ -686,6 +691,7 @@ export class Game {
     if (typeof settings.railsVisible === 'boolean') this.railsVisible = settings.railsVisible
     if (typeof settings.speed === 'number' && SPEEDS.includes(settings.speed)) this.speed = settings.speed
     if (typeof settings.autoPreserve === 'boolean') this.autoPreserve = settings.autoPreserve
+    if (typeof settings.captureAdvance === 'boolean') this.captureAdvance = settings.captureAdvance
     if (typeof settings.soundEnabled === 'boolean') this.soundEnabled = settings.soundEnabled
     if (
       typeof settings.bottomFraction === 'number' &&
@@ -703,6 +709,11 @@ export class Game {
   setAutoPreserve(value: boolean): void {
     this.autoPreserve = value
     this.bus.emit('info', `auto-preserve ${value ? 'on' : 'off'}`)
+  }
+
+  setCaptureAdvance(value: boolean): void {
+    this.captureAdvance = value
+    this.bus.emit('info', `capture advance ${value ? 'on' : 'off'}`)
   }
 
   private frame = (now: number): void => {
@@ -759,6 +770,10 @@ export class Game {
     this.ctx.tick = this.tick
     this.ctx.turn = this.turn
     this.ctx.verbosePhases = this.pipeline.verbose
+    // Runtime toggles are copied onto the shared context here so toolbar changes
+    // take effect immediately rather than only after a reset/import.
+    this.ctx.autoPreserve = this.autoPreserve
+    this.ctx.captureAdvance = this.captureAdvance
     // A replay re-runs a recorded turn, so the one-move-per-turn gate must apply.
     this.ctx.turnActive = this.turnActive || this.replaying
     this.bus.tick = this.tick
@@ -1445,6 +1460,7 @@ export class Game {
       overlays: { ...this.overlays },
       hudVisible: this.hudVisible,
       autoPreserve: this.autoPreserve,
+      captureAdvance: this.captureAdvance,
       soundEnabled: this.soundEnabled,
       railsVisible: this.railsVisible,
       playerTeam: this.playerTeam,

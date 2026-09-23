@@ -21,6 +21,7 @@ const emit = defineEmits<{
   (e: 'reset'): void
   (e: 'toggle-hud'): void
   (e: 'toggle-auto-preserve'): void
+  (e: 'toggle-capture-advance'): void
 }>()
 
 const speeds = SPEEDS
@@ -137,6 +138,11 @@ function onSoundChange(event: Event): void {
     <label class="toggle" title="Hurt pieces step out of fire on their own, even without orders">
       <input type="checkbox" :checked="props.snapshot.autoPreserve" @change="emit('toggle-auto-preserve')" />
       auto-preserve
+    </label>
+
+    <label class="toggle" title="An idle killer steps onto the square of the piece it just killed (chess capture)">
+      <input type="checkbox" :checked="props.snapshot.captureAdvance" @change="emit('toggle-capture-advance')" />
+      capture advance
     </label>
 
     <button class="ctl" @click="emit('toggle-hud')">{{ props.snapshot.hudVisible ? 'Hide HUD' : 'Show HUD' }}</button>

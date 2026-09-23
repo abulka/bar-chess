@@ -56,7 +56,8 @@ from the **piece panel** (left rail), which applies to the whole selection:
 - **None** (default, no badge) — stand ground and fire only at enemies already in
   range, so the opening board stays clean.
 - **Move** (`M`, green) — travel and return fire only; never starts an attack.
-- **Attack** (`A`, red) — seek and attack nearby targets, prefer damaged ones.
+- **Attack** (`A`, red) — seek and attack nearby targets. Prefers an enemy it can
+  actually shoot right now, then whoever is shooting it, then damaged ones.
   Below 30% HP it keeps firing: it holds when already safe, otherwise steps to the
   nearest square that still hits the target but escapes the fire geometry of the
   target and its last attacker; it only runs when the target is out of range.
@@ -127,8 +128,9 @@ indicators** (tracking chain, targeted ring, Attack stance). Pieces have no
 default ring — a red ring means "this piece is under an attack order".
 
 Auto-targeting follows from this: attack order = sticky target; Attack = scored
-auto-acquire; no stance = in-range only; Move = retaliation only (returns fire at its
-attacker while continuing to move).
+auto-acquire (a shootable enemy first, then one firing on the piece, then damaged
+and nearer ones); no stance = in-range only; Move = retaliation only (returns fire
+at its attacker while continuing to move).
 
 ## Turn flow, pause and replay
 
@@ -200,6 +202,15 @@ rather than wandering across the map to an out-of-range enemy. An attack order o
 a **positionally impossible** target (e.g. a bishop ordered onto the opposite
 colour square) is held pending instead of chasing the nearest reachable square,
 which used to walk the piece into enemy lines.
+
+**Capture advance.** A persisted **capture advance** checkbox in the toolbar
+(default off) makes a piece that lands a kill step onto the victim's square, like
+a chess capture. It only applies to an **idle** killer (no active order, queue,
+path or hop; the attack order that just killed this victim does not count), steps
+along the firing ray it killed with (re-checked for a clear line), and is a free
+move — it does not spend the piece's turn move or the AI move budget. This rewards kills with territorial pressure instead of everyone standing
+still and sniping; because it is free, long-range sliders can push aggressively,
+so it is opt-in for balance.
 
 ## Overlays: seeing what is going on
 

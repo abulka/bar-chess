@@ -34,13 +34,14 @@ function makeContext(): SimContext {
     tick: 0,
     turn: 0,
     dt: 1 / 30,
-    cmds: { damage: [], deploy: [], destroy: [] },
+    cmds: { damage: [], deploy: [], destroy: [], advance: [] },
     teams: { red: runtime(), blue: runtime() },
     occupancy: new Map(),
     pathBudget: PATH_BUDGET_PER_TICK,
     verbosePhases: false,
     turnActive: false,
     autoPreserve: true,
+    captureAdvance: false,
   }
 }
 

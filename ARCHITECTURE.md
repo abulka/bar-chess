@@ -185,13 +185,14 @@ and a `You: Blue · Red ai` badge.
 
 `SimContext` (`src/ecs/types.ts`) is the shared mutable context passed to every
 system: `world`, `bus`, `board`, `rng`, `tick`, `turn`, `dt`, `cmds`, `teams`,
-`occupancy`, `pathBudget`, `verbosePhases`, `turnActive`, `autoPreserve`.
+`occupancy`, `pathBudget`, `verbosePhases`, `turnActive`, `autoPreserve`,
+`captureAdvance`.
 
 System order (`createPipeline()` in `src/ecs/systems/index.ts`):
 
 ```
 spawn → targeting → orders → pathfinding → movement → combat
-      → projectile → damage → death → cleanup
+      → projectile → damage → death → cleanup → advance
 ```
 
 ---
@@ -258,10 +259,12 @@ cell/reservation during movement validation and path planning.
   and `createPiece`s there; updates `TeamRuntime.alive` / `deployed`.
 - **targeting** — rebuilds occupancy, then sets the engagement target from
   stance + order: an `attack` order is sticky on its enemy; `none` picks the
-  nearest enemy already in firing geometry; `attack` auto-acquires the nearest
-  enemy within `min(weaponVision, ATTACK_LEASH)` (so sliders fight locally instead
-  of chasing board-wide), biased toward damaged ones; `move` only targets its
-  `lastAttacker` while `underFire`. AI-controlled teams always behave as `attack`.
+  nearest enemy already in firing geometry; `attack` auto-acquires within
+  `min(weaponVision, ATTACK_LEASH)` (so sliders fight locally instead of chasing
+  board-wide), strongly preferring an enemy it can actually shoot this instant,
+  then the `lastAttacker` firing on it, then damaged and nearer ones; `move` only
+  targets its `lastAttacker` while `underFire`. AI-controlled teams always behave
+  as `attack`.
   When an attack order ends (target gone) the order clears; the stance is never
   changed by orders, so the piece reverts to its explicit policy. The `orders`
   leash guard also holds a piece that drifts beyond `ATTACK_LEASH` and is not in
@@ -377,10 +380,20 @@ cell/reservation during movement validation and path planning.
 - **projectile** — advances waypoints at `speed`; applies splash/direct damage on
   impact via `cmds.damage`; `line` shots are stopped by walls; jump/arc ignore
   blockers.
-- **damage** — applies damage with ±10% seeded variance, marks `Dead`, and
-  credits kills.
+- **damage** — applies damage with ±10% seeded variance, marks `Dead`, credits
+  kills. A kill by a direct blow from a still-living enemy of the victim queues
+  an `advance` intent (killer → victim cell) when `ctx.captureAdvance` is on.
 - **death** — spawns an `Fx`, updates losses, queues destruction.
 - **cleanup** — destroys queued entities and ages FX.
+- **advance** — drains `cmds.advance`. After cleanup has freed the victim's
+  square, an **idle** killer (no active order, queue, path or hop; the attack
+  order that just killed this victim does not count) steps along the firing ray
+  it killed with onto that square. The move is free (a capture,
+  not the piece's turn move), so it ignores the move cooldown, the turn move
+  allowance and the AI move budget. The hop is re-validated against live
+  occupancy and geometry (blocked line, occupied destination or a dead killer
+  cancels it), capped at one step per killer per tick, and exposed by the
+  persisted **capture advance** toolbar toggle (default off).
 
 ---
 
@@ -452,13 +465,13 @@ and the result is persisted as `bottomFraction` of the viewport.
 `GameSnapshot` fields (`src/game/game.ts`): `running paused tick fps tps speed
 boardId boardSize boardSizes teams timings events eventCount shots kills
 warnings selected selectedLines counts winner overlays hudVisible autoPreserve
-soundEnabled railsVisible playerTeam turnActive queuedTurns canReplay canUndo
+captureAdvance soundEnabled railsVisible playerTeam turnActive queuedTurns canReplay canUndo
 canRedo replaying barProgress pendingCommand selectionCount stanceSummary
 pieceInfo terrainVersion`.
 
 | Component | Responsibility |
 | --------- | -------------- |
-| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, reset |
+| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, reset |
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle |
 | `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, queue, movement) with selection-wide stance buttons and clear-orders |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
@@ -822,6 +835,7 @@ src/
       damage.ts                HP, Dead, kill credit
       death.ts                 FX + bookkeeping
       cleanup.ts               destroy queue + FX ageing
+      advance.ts               idle-killer chess capture step
   game/
     types.ts                   TeamId, Vec2, Geometry, dirs, resolveGeometry
     constants.ts               FIXED_DT, budgets, teams, timings

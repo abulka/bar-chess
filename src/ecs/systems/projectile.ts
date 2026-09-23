@@ -20,7 +20,7 @@ function impact(ctx: SimContext, e: Entity, pos: { x: number; y: number }): void
     const splash = proj.splash > 0 && d2 <= proj.splash * proj.splash
     if (!direct && !splash) continue
     if (direct) directKind = ctx.world.get(other, PieceType)?.kind ?? directKind
-    ctx.cmds.damage.push({ target: other, source: proj.owner, amount: proj.damage, kind: 'projectile' })
+    ctx.cmds.damage.push({ target: other, source: proj.owner, amount: proj.damage, kind: 'projectile', direct })
     hits++
   }
 

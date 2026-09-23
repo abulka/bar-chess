@@ -19,6 +19,7 @@ describe('settings persistence', () => {
       speed: 2,
       gameMode: 'ai-vs-ai',
       autoPreserve: false,
+      captureAdvance: true,
       soundEnabled: true,
       bottomFraction: 0.4,
     })
@@ -37,6 +38,7 @@ describe('settings persistence', () => {
     expect(restored.speed).toBe(2)
     expect(restored.gameMode).toBe('ai-vs-ai')
     expect(restored.autoPreserve).toBe(false)
+    expect(restored.captureAdvance).toBe(true)
     expect(restored.soundEnabled).toBe(true)
     expect(restored.bottomFraction).toBe(0.4)
     expect(restored.teams.red.controller).toBe('ai')
@@ -60,6 +62,7 @@ describe('settings persistence', () => {
         speed: 99,
         gameMode: 'nonsense',
         autoPreserve: 'yes',
+        captureAdvance: 'yes',
         soundEnabled: 'yes',
         bottomFraction: 2,
       }),
@@ -72,6 +75,7 @@ describe('settings persistence', () => {
     expect(loaded?.speed).toBeUndefined()
     expect(loaded?.gameMode).toBeUndefined()
     expect(loaded?.autoPreserve).toBeUndefined()
+    expect(loaded?.captureAdvance).toBeUndefined()
     expect(loaded?.soundEnabled).toBeUndefined()
     expect(loaded?.bottomFraction).toBeUndefined()
   })
@@ -81,6 +85,13 @@ describe('settings persistence', () => {
     const game = new Game(8)
     game.applySettings({ autoPreserve: false })
     expect(game.autoPreserve).toBe(false)
+  })
+
+  it('defaults capture advance off and honors an explicit on', () => {
+    expect(new Game(8).captureAdvance).toBe(false)
+    const game = new Game(8)
+    game.applySettings({ captureAdvance: true })
+    expect(game.captureAdvance).toBe(true)
   })
 
   it('ignores invalid values in applySettings', () => {

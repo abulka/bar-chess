@@ -10,6 +10,7 @@ export interface GameSettings {
   speed: number
   gameMode: GameMode
   autoPreserve: boolean
+  captureAdvance: boolean
   soundEnabled: boolean
   /** HUD bottom-panel height as a fraction of the viewport. */
   bottomFraction: number
@@ -23,6 +24,7 @@ export interface SettingsPatch {
   speed?: number
   gameMode?: GameMode
   autoPreserve?: boolean
+  captureAdvance?: boolean
   soundEnabled?: boolean
   bottomFraction?: number
 }
@@ -59,6 +61,7 @@ export function loadSettings(): SettingsPatch | null {
   if (typeof parsed.hudVisible === 'boolean') out.hudVisible = parsed.hudVisible
   if (typeof parsed.railsVisible === 'boolean') out.railsVisible = parsed.railsVisible
   if (typeof parsed.autoPreserve === 'boolean') out.autoPreserve = parsed.autoPreserve
+  if (typeof parsed.captureAdvance === 'boolean') out.captureAdvance = parsed.captureAdvance
   if (typeof parsed.speed === 'number' && SPEEDS.includes(parsed.speed)) out.speed = parsed.speed
   if (typeof parsed.gameMode === 'string' && GAME_MODES.some((m) => m.id === parsed.gameMode)) {
     out.gameMode = parsed.gameMode as GameMode

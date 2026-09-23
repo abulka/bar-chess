@@ -28,7 +28,7 @@ const hidden = ref<Set<EventType>>(new Set<EventType>(['phase']))
 
 const categories: Array<{ label: string; types: EventType[] }> = [
   { label: 'Spawn', types: ['spawn', 'deploy'] },
-  { label: 'AI', types: ['target', 'ai', 'path', 'move'] },
+  { label: 'AI', types: ['target', 'ai', 'path', 'move', 'advance'] },
   { label: 'Combat', types: ['shot', 'hit', 'miss'] },
   { label: 'Damage', types: ['damage', 'kill', 'explosion'] },
   { label: 'System', types: ['info', 'warn', 'map', 'boot', 'cleanup'] },

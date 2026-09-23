@@ -11,6 +11,7 @@ export type EventType =
   | 'ai'
   | 'path'
   | 'move'
+  | 'advance'
   | 'shot'
   | 'hit'
   | 'miss'

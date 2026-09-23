@@ -33,13 +33,14 @@ function makeContext(): SimContext {
     tick: 0,
     turn: 0,
     dt: 1 / 30,
-    cmds: { damage: [], deploy: [], destroy: [] },
+    cmds: { damage: [], deploy: [], destroy: [], advance: [] },
     teams: { red: runtime(), blue: runtime() },
     occupancy: new Map(),
     pathBudget: PATH_BUDGET_PER_TICK,
     verbosePhases: false,
     turnActive: false,
     autoPreserve: true,
+    captureAdvance: false,
   }
 }
 
@@ -70,5 +71,34 @@ describe('targeting system — Attack leash', () => {
     run(ctx)
 
     expect(ctx.world.require(queen, Target).entity).toBeNull()
+  })
+
+  it('prefers an enemy it can actually shoot over a nearer off-line one', () => {
+    const ctx = makeContext()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 3, y: 0 }) // d8
+    const pawn = createPiece(ctx, 'red', PIECES.pawn, { x: 2, y: 6 }) // c2, closer but off the queen's lines
+    const enemyQueen = createPiece(ctx, 'red', PIECES.queen, { x: 3, y: 7 }) // d1, on the open d-file
+    ctx.world.require(queen, Stance).mode = 'attack'
+
+    run(ctx)
+
+    expect(ctx.world.require(queen, Target).entity).toBe(enemyQueen)
+    expect(ctx.world.require(queen, Target).entity).not.toBe(pawn)
+  })
+
+  it('returns fire at the enemy shooting it over an equally-shootable one', () => {
+    const ctx = makeContext()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
+    const other = createPiece(ctx, 'red', PIECES.rook, { x: 6, y: 0 }) // clear rank, dist 6
+    const attacker = createPiece(ctx, 'red', PIECES.rook, { x: 0, y: 6 }) // clear file, dist 6
+    const target = ctx.world.require(queen, Target)
+    target.lastAttacker = attacker
+    target.underFireUntil = 10
+    ctx.world.require(queen, Stance).mode = 'attack'
+
+    run(ctx)
+
+    expect(ctx.world.require(queen, Target).entity).toBe(attacker)
+    expect(ctx.world.require(queen, Target).entity).not.toBe(other)
   })
 })

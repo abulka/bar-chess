@@ -2,13 +2,15 @@ import type { Entity, World } from './world'
 import type { EventBus } from './events'
 import type { Rng } from '../game/rng'
 import type { Board } from '../game/board'
-import type { TeamId } from '../game/types'
+import type { TeamId, Vec2 } from '../game/types'
 
 export interface DamageCommand {
   target: Entity
   source: Entity | null
   amount: number
   kind: string
+  /** For projectile damage: whether the blow landed on the target's own cell. */
+  direct?: boolean
 }
 
 export interface DeployCommand {
@@ -16,10 +18,18 @@ export interface DeployCommand {
   key: string
 }
 
+/** A kill that may let the killer step onto the victim's square (chess capture). */
+export interface AdvanceCommand {
+  killer: Entity
+  victim: Entity
+  cell: Vec2
+}
+
 export interface Commands {
   damage: DamageCommand[]
   deploy: DeployCommand[]
   destroy: Entity[]
+  advance: AdvanceCommand[]
 }
 
 export type TeamController = 'human' | 'ai'
@@ -59,4 +69,6 @@ export interface SimContext {
   turnActive: boolean
   /** when true, hurt pieces step out of fire on their own, even without orders */
   autoPreserve: boolean
+  /** when true, an idle killer steps onto the square of a piece it just killed */
+  captureAdvance: boolean
 }

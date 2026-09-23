@@ -198,6 +198,12 @@ function onToggleAutoPreserve(): void {
   refresh()
 }
 
+function onToggleCaptureAdvance(): void {
+  game.setCaptureAdvance(!game.captureAdvance)
+  persistSettings()
+  refresh()
+}
+
 function onReset(): void {
   game.reset()
   boardView.value?.fit()
@@ -411,6 +417,7 @@ onBeforeUnmount(() => {
       @reset="onReset"
       @toggle-hud="onToggleHud"
       @toggle-auto-preserve="onToggleAutoPreserve"
+      @toggle-capture-advance="onToggleCaptureAdvance"
     />
 
     <div

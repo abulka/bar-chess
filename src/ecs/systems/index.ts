@@ -9,6 +9,7 @@ import projectile from './projectile'
 import damage from './damage'
 import death from './death'
 import cleanup from './cleanup'
+import advance from './advance'
 
 export function createPipeline(): Pipeline {
   return new Pipeline([
@@ -22,5 +23,6 @@ export function createPipeline(): Pipeline {
     damage,
     death,
     cleanup,
+    advance,
   ])
 }
