@@ -663,8 +663,8 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   turn), the flagged **analysis** and the replay record (with a note that it is
   seed+inputs only).
 - **Copy snapshot for LLM** is the per-turn paste: `buildSnapshotPrompt` emits the
-  current compact board plus the last turn's activity (moves/shots/damage/held),
-  with no preamble — small enough to paste every turn.
+  current compact board plus the last turn's activity (moves/shots/damage/held and
+  `order:` change notes), with no preamble — small enough to paste every turn.
 - `Game.shorthand()` / `Game.llmShorthand()` remain available on `window.game` in
   dev. The shorthand is read-only — `SavedPosition` JSON stays the import/round-trip
   format.
@@ -710,7 +710,11 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
 - **Transcript & analysis.** `src/game/transcript.ts` renders a compact per-game
   text (header, opening board, per-turn activity, per-piece summary) and
   `src/game/analysis.ts` flags gaps: held-under-fire, never-moved/never-fired,
-  no-progress turns, oscillation, focus fire. `src/game/studyPrompt.ts` wraps a
+  no-progress turns, oscillation, focus fire. Per-turn activity also carries
+  `order:` notes — why a piece's order changed (issued/replaced/completed/
+  abandoned) — taken from the piece's `Order.log` (`src/game/queue.ts`) via the
+  per-turn trace, so holds and target losses are explained, not just movement.
+  `src/game/studyPrompt.ts` wraps a
   batch's full transcripts in a reusable "analyse these games" prompt; the panel's
   **Copy analysis prompt** button puts it on the clipboard for an LLM session.
   The seed is shown read-only in the stats bar.

@@ -74,4 +74,16 @@ describe('transcript & analysis', () => {
     expect(held?.moves).toBe(0)
     expect(held?.heldTurns).toEqual([1])
   })
+
+  it('surfaces why an order changed, only for transitions new this turn', () => {
+    const t = trace()
+    t[0].pieces[0].orderLog = [{ tick: 0, text: 'attack ordered → #2' }]
+    t[1].pieces[0].orderLog = [
+      { tick: 0, text: 'attack ordered → #2' },
+      { tick: 50, text: 'target #2 lost — attack abandoned' },
+    ]
+    const text = formatTranscript({ record: record(), events, trace: t })
+    expect(text).toContain('rP e2 order: target bP d2 lost — attack abandoned')
+    expect(text).not.toContain('rP e2 order: attack ordered')
+  })
 })

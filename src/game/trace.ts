@@ -1,3 +1,4 @@
+import type { OrderLogEntry } from '../ecs/components'
 import type { OrderKind, TeamId, Vec2 } from './types'
 
 /** One piece's state at a turn boundary. */
@@ -14,6 +15,8 @@ export interface PieceTrace {
   underFire: boolean
   hp: number
   maxHp: number
+  /** Order transitions up to this boundary (oldest first), if sampled. */
+  orderLog?: OrderLogEntry[]
 }
 
 /** Every living piece sampled at the end of one turn (turn 0 = opening). */

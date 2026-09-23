@@ -146,6 +146,7 @@ export class GameLog {
         underFire: target.lastAttacker !== null && this.game.tick < target.underFireUntil,
         hp: hp.cur,
         maxHp: hp.max,
+        orderLog: order.log.slice(),
       })
     }
     this.trace.push({ turn: this.game.turn, tick: this.game.tick, pieces })

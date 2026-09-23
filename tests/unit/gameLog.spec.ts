@@ -172,6 +172,23 @@ describe('GameLog & LLM game prompt', () => {
     log.dispose()
   })
 
+  it('records why a player order changed in the transcript', () => {
+    const game = new Game(8, 'human-vs-ai', 42)
+    const recorder = new Recorder(game)
+    const log = new GameLog(game)
+    log.begin()
+    const [e] = bluePieces(game)
+    const cell = game.world.require(e, Cell)
+    game.selected = [e]
+    game.orderAt({ x: cell.x, y: 0 }, 'move')
+    game.selected = []
+    playTurn(game, log)
+
+    const { transcript } = log.finish(recorder.snapshot())
+    expect(transcript).toMatch(/order: move ordered/)
+    log.dispose()
+  })
+
   it('summarises analysis in one place', () => {
     const text = formatGameAnalysis({
       winner: null,

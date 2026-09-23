@@ -75,6 +75,8 @@ export function turnActivities(trace: TurnTrace[], events: EventRecord[], height
   for (let i = 1; i < trace.length; i++) {
     const before = new Map(trace[i - 1].pieces.map((p) => [p.entity, p]))
     const tokens: string[] = []
+    const relabel = (text: string): string =>
+      text.replace(/#(\d+)/g, (_m, id: string) => labelAt(i, Number(id)))
     for (const piece of trace[i].pieces) {
       const prev = before.get(piece.entity)
       if (prev && !sameCell(prev.cell, piece.cell)) {
@@ -92,8 +94,22 @@ export function turnActivities(trace: TurnTrace[], events: EventRecord[], height
     for (const event of events) {
       if (!ACTIVITY_TYPES.has(event.type)) continue
       if (event.tick <= trace[i - 1].tick || event.tick > trace[i].tick) continue
-      const msg = event.msg.replace(/#(\d+)/g, (_m, id: string) => labelAt(i, Number(id)))
-      tokens.push(msg)
+      tokens.push(relabel(event.msg))
+    }
+    // Why each order changed this turn: order transitions recorded on the piece
+    // that were not present at the previous boundary. Matched by content (not
+    // tick) because orders issued while paused share the previous turn's tick.
+    for (const piece of trace[i].pieces) {
+      const seen = new Set(
+        (before.get(piece.entity)?.orderLog ?? []).map((n) => `${n.tick}\u0000${n.text}`),
+      )
+      for (const note of piece.orderLog ?? []) {
+        if (seen.has(`${note.tick}\u0000${note.text}`)) continue
+        tokens.push(
+          `${pieceTag(piece.team, piece.kind)} ` +
+            `${coordName(piece.cell.x, piece.cell.y, height)} order: ${relabel(note.text)}`,
+        )
+      }
     }
     out.push({
       turn: trace[i].turn,

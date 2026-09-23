@@ -34,6 +34,8 @@ Reading a transcript:
       rP e7 held(fire)     the red pawn stayed put while under fire
       rN f6 fired knight at bP d4   the red knight shot at the blue pawn
       bP d4 took 8 dmg (hp 34/42)   the blue pawn lost 8 hp
+      bN c3 order: attack ordered -> bP b6   why the knight's order changed
+                           (issued/replaced/completed/abandoned this turn)
   # pieces                 per piece: moves, shots, kills, hits taken, total
                            damage, turns under fire, held turns, death turn
 
