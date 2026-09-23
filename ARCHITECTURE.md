@@ -405,10 +405,12 @@ cell/reservation during movement validation and path planning.
   (one move per turn) **and only one piece may be `moving` at a time**, so turns
   (and replays) read as a sequence of individual moves. Travel time scales with
   the slide length. An AI team whose opponent is human is also capped by the
-  opponent's cumulative `movesMade`, so it cannot out-move the player. A
-  player-issued order (`Order.kind !== 'none'`) bypasses the budget; only pieces
-  whose team is under human control can be commanded (your own team in
-  Human-vs-AI, both teams in Human-vs-Human, none in AI-vs-AI).
+  opponent's per-turn `movesThisTurn`, so it cannot out-move the player within a
+  turn (with a floor of one move so a passive player cannot freeze it; nothing
+  carries over between turns). A player-issued order (`Order.kind !== 'none'`)
+  bypasses the budget; only pieces whose team is under human control can be
+  commanded (your own team in Human-vs-AI, both teams in Human-vs-Human, none in
+  AI-vs-AI).
 - **combat** — ticks `Weapon.left`; when ready, fires at `Target.entity` if it is
   inside `fireCells`. Because targeting decides whether a target exists at all,
   combat inherits the stance/order fire policy automatically.

@@ -570,3 +570,61 @@ describe('Game integration — healing-aware self-preservation', () => {
     expect(Math.max(Math.abs(c.x - 4), Math.abs(c.y - 7))).toBeLessThan(before)
   })
 })
+
+describe('Game integration — AI move budget', () => {
+  beforeEach(() => clearComponents())
+
+  /** The live entity standing on `cell`. */
+  function pieceAt(game: Game, x: number, y: number): number {
+    for (const e of game.world.query(Cell)) {
+      const c = game.world.require(e, Cell)
+      if (c.x === x && c.y === y) return e
+    }
+    throw new Error(`no piece at ${x},${y}`)
+  }
+
+  /** Command the blue pawn on `from` to step one square to `to`. */
+  function orderPawn(game: Game, from: { x: number; y: number }, to: { x: number; y: number }): void {
+    game.selected = [pieceAt(game, from.x, from.y)]
+    game.orderAt(to, 'move')
+    game.selected = []
+  }
+
+  it('answers two human moves with two AI moves in the same turn', () => {
+    const game = new Game(8) // human-vs-ai, you=blue
+    orderPawn(game, { x: 3, y: 6 }, { x: 3, y: 5 }) // d2 -> d3
+    orderPawn(game, { x: 4, y: 6 }, { x: 4, y: 5 }) // e2 -> e3
+
+    runTurn(game)
+
+    expect(game.teams.blue.movesMade).toBe(2)
+    expect(game.teams.red.movesMade).toBe(2)
+  })
+
+  it('gives the AI one move when the human does nothing', () => {
+    const game = new Game(8)
+    runTurn(game)
+
+    expect(game.teams.blue.movesMade).toBe(0)
+    expect(game.teams.red.movesMade).toBe(1)
+  })
+
+  it('does not bank unused AI moves across turns', () => {
+    const game = new Game(8)
+    runTurn(game)
+    runTurn(game)
+
+    expect(game.teams.blue.movesMade).toBe(0)
+    expect(game.teams.red.movesMade).toBe(2) // one per turn, never a burst
+  })
+
+  it('never lets the AI out-move the human within a turn', () => {
+    const game = new Game(8)
+    orderPawn(game, { x: 3, y: 6 }, { x: 3, y: 5 }) // d2 -> d3
+
+    runTurn(game)
+
+    expect(game.teams.blue.movesMade).toBe(1)
+    expect(game.teams.red.movesMade).toBeLessThanOrEqual(game.teams.blue.movesMade)
+  })
+})

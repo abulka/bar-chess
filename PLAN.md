@@ -186,10 +186,12 @@ several cells along a rank/file, and a pawn advances one square — or two from 
 home rank (rank 2 / rank 7), its chess first move — in a single move. The
 two-square step is blocked if the first square is occupied.
 
-**AI move budget.** An AI team facing a human may never out-move them: its
-cumulative moves are capped by the human's, and unused budget carries over. Order
-one pawn and the AI may move one piece; order two and it may move two (possibly
-across turns). It may skip moves but never exceed yours. AI-vs-AI is unrestricted.
+**AI move budget.** An AI team facing a human may not out-move them within a
+turn: it may make at most as many moves that turn as the human makes, and always
+at least one, so a passive player cannot freeze the AI. Order two pieces and the
+AI may move two in the same turn; do nothing and it still gets one move. Nothing
+carries over between turns, so a blocked AI never bursts later. AI-vs-AI is
+unrestricted.
 
 ## Game modes
 

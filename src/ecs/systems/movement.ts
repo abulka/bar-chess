@@ -58,14 +58,16 @@ const system: System = {
       }
 
       if (ctx.turnActive && (motion.movedThisTurn || anyMoving)) continue
-      // AI move budget: an AI team facing a human may not out-move them. Its
-      // cumulative moves are capped by the human's, unused budget carries over.
-      // In AI-vs-AI both sides are free. Player-issued orders bypass the budget,
-      // so you can command enemy pieces directly.
+      // AI move budget: an AI team facing a human may not out-move them within a
+      // turn. It may make at most as many moves this turn as the human has, and
+      // always at least one, so a passive player cannot freeze the AI. Nothing
+      // carries over, so a blocked AI never bursts later. In AI-vs-AI both sides
+      // are free. Player-issued orders bypass the budget, so you can command
+      // enemy pieces directly.
       if (ctx.turnActive && ctx.teams[team].controller === 'ai' && order.kind === 'none') {
         const other = team === 'red' ? 'blue' : 'red'
         if (ctx.teams[other].controller === 'human') {
-          const allowance = Math.max(0, ctx.teams[other].movesMade - ctx.teams[team].movesMade)
+          const allowance = Math.max(ctx.teams[other].movesThisTurn, 1)
           if (ctx.teams[team].movesThisTurn >= allowance) continue
         }
       }
