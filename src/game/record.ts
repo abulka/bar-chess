@@ -31,6 +31,8 @@ export interface GameRecordResult {
   turns: number
   ticks: number
   timedOut: boolean
+  /** True when copied mid-battle: the outcome is not final. */
+  partial?: boolean
 }
 
 /**
@@ -90,8 +92,25 @@ export class Recorder {
       turns: result.turns ?? this.game.turn,
       ticks: result.ticks ?? this.game.tick,
       timedOut: result.timedOut ?? false,
+      partial: result.partial ?? this.game.winner === null,
     }
     return this.record
+  }
+
+  /**
+   * A detached copy with the current outcome, without mutating the live
+   * recorder — safe to call mid-battle (e.g. the "Copy history for LLM" button).
+   */
+  snapshot(result: Partial<GameRecordResult> = {}): GameRecord {
+    const data = structuredClone(this.record)
+    data.result = {
+      winner: result.winner ?? this.game.winner,
+      turns: result.turns ?? this.game.turn,
+      ticks: result.ticks ?? this.game.tick,
+      timedOut: result.timedOut ?? false,
+      partial: result.partial ?? this.game.winner === null,
+    }
+    return data
   }
 
   get record(): GameRecord {

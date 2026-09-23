@@ -80,4 +80,15 @@ describe('game record', () => {
     expect(validateRecord({ v: 999 }).ok).toBe(false)
     expect(validateRecord(null).ok).toBe(false)
   })
+
+  it('snapshots mid-battle without mutating the live recorder', () => {
+    const game = new Game(8, 'ai-vs-ai', 3)
+    const recorder = new Recorder(game)
+    playTurns(game, 2)
+
+    const copy = recorder.snapshot()
+    expect(copy.result?.turns).toBe(2)
+    expect(copy.result?.partial).toBe(true)
+    expect(recorder.record.result).toBeNull()
+  })
 })

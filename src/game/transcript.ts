@@ -1,6 +1,7 @@
 import { fileLabel, coordName } from './coords'
 import type { EventRecord } from '../ecs/events'
 import type { GameRecord } from './record'
+import { TERRAIN_CHAR } from './shorthand'
 import { PIECE_LETTER, pieceTag } from './trace'
 import type { PieceTrace, TurnTrace } from './trace'
 import { pieceLabel, rangeLabel, summarizePieces } from './analysis'
@@ -12,6 +13,10 @@ export interface TranscriptInput {
   /** Pre-rendered opening/final position blocks (optional). */
   opening?: string
   final?: string
+  /** Board terrain, so per-turn boards show walls/water (optional). */
+  terrain?: number[]
+  /** Draw a compact board after each turn (default false). */
+  boards?: boolean
 }
 
 const ACTIVITY_TYPES = new Set(['shot', 'damage', 'kill', 'advance', 'warn'])
@@ -20,7 +25,7 @@ function sameCell(a: { x: number; y: number }, b: { x: number; y: number }): boo
   return a.x === b.x && a.y === b.y
 }
 
-function renderGrid(pieces: PieceTrace[], size: number): string {
+function renderGrid(pieces: PieceTrace[], size: number, terrain?: number[]): string {
   const byCell = new Map<number, PieceTrace>()
   for (const p of pieces) byCell.set(p.cell.y * size + p.cell.x, p)
   const files: string[] = []
@@ -32,7 +37,7 @@ function renderGrid(pieces: PieceTrace[], size: number): string {
     for (let x = 0; x < size; x++) {
       const piece = byCell.get(y * size + x)
       if (!piece) {
-        cells.push('.')
+        cells.push(terrain ? (TERRAIN_CHAR[terrain[y * size + x]] ?? '.') : '.')
         continue
       }
       const letter = PIECE_LETTER[piece.kind] ?? '?'
@@ -41,6 +46,76 @@ function renderGrid(pieces: PieceTrace[], size: number): string {
     lines.push(`${rank} ${cells.join(' ')}`)
   }
   return lines.join('\n')
+}
+
+/** One turn's activity line plus the end-of-turn piece layout. */
+export interface TurnActivity {
+  turn: number
+  tick: number
+  /** `T<n>: ...`, empty when nothing happened that turn. */
+  text: string
+  pieces: PieceTrace[]
+}
+
+/**
+ * Render each turn's activity (moves, shots, damage, kills, held-under-fire).
+ * Shared by the full transcript and the snapshot.
+ */
+export function turnActivities(trace: TurnTrace[], events: EventRecord[], height: number): TurnActivity[] {
+  const stats = summarizePieces(trace, events)
+  const statsByEntity = new Map(stats.map((s) => [s.entity, s]))
+  const labelAt = (turnIndex: number, entity: number): string => {
+    const piece = trace[turnIndex]?.pieces.find((p) => p.entity === entity)
+    if (piece) return `${pieceTag(piece.team, piece.kind)} ${coordName(piece.cell.x, piece.cell.y, height)}`
+    const stat = statsByEntity.get(entity)
+    return stat ? pieceLabel(stat, height) : `#${entity}`
+  }
+
+  const out: TurnActivity[] = []
+  for (let i = 1; i < trace.length; i++) {
+    const before = new Map(trace[i - 1].pieces.map((p) => [p.entity, p]))
+    const tokens: string[] = []
+    for (const piece of trace[i].pieces) {
+      const prev = before.get(piece.entity)
+      if (prev && !sameCell(prev.cell, piece.cell)) {
+        tokens.push(
+          `${pieceTag(piece.team, piece.kind)} ` +
+            `${coordName(prev.cell.x, prev.cell.y, height)}->${coordName(piece.cell.x, piece.cell.y, height)}`,
+        )
+      } else if (prev && piece.underFire && piece.hp < prev.hp) {
+        tokens.push(
+          `${pieceTag(piece.team, piece.kind)} ` +
+            `${coordName(piece.cell.x, piece.cell.y, height)} held(fire)`,
+        )
+      }
+    }
+    for (const event of events) {
+      if (!ACTIVITY_TYPES.has(event.type)) continue
+      if (event.tick <= trace[i - 1].tick || event.tick > trace[i].tick) continue
+      const msg = event.msg.replace(/#(\d+)/g, (_m, id: string) => labelAt(i, Number(id)))
+      tokens.push(msg)
+    }
+    out.push({
+      turn: trace[i].turn,
+      tick: trace[i].tick,
+      text: tokens.length > 0 ? `T${trace[i].turn}: ${tokens.join('; ')}` : '',
+      pieces: trace[i].pieces,
+    })
+  }
+  return out
+}
+
+/** Every non-empty turn activity line, e.g. `T5: bP d2->d4; ...`. */
+export function turnActivityLines(trace: TurnTrace[], events: EventRecord[], height: number): string[] {
+  return turnActivities(trace, events, height)
+    .map((a) => a.text)
+    .filter((text) => text.length > 0)
+}
+
+/** The most recent turn's activity line, or null when nothing happened. */
+export function lastTurnActivity(trace: TurnTrace[], events: EventRecord[], height: number): string | null {
+  const lines = turnActivityLines(trace, events, height)
+  return lines.length > 0 ? lines[lines.length - 1] : null
 }
 
 /**
@@ -65,42 +140,20 @@ export function formatTranscript(input: TranscriptInput): string {
   )
 
   lines.push('# opening')
-  lines.push(input.opening ?? (trace.length > 0 ? renderGrid(trace[0].pieces, height) : ''))
+  lines.push(
+    input.opening ?? (trace.length > 0 ? renderGrid(trace[0].pieces, height, input.terrain) : ''),
+  )
 
   const stats = summarizePieces(trace, events)
-  const statsByEntity = new Map(stats.map((s) => [s.entity, s]))
-  const labelAt = (turnIndex: number, entity: number): string => {
-    const piece = trace[turnIndex]?.pieces.find((p) => p.entity === entity)
-    if (piece) return `${pieceTag(piece.team, piece.kind)} ${coordName(piece.cell.x, piece.cell.y, height)}`
-    const stat = statsByEntity.get(entity)
-    return stat ? pieceLabel(stat, height) : `#${entity}`
-  }
 
   lines.push('# turns')
-  for (let i = 1; i < trace.length; i++) {
-    const before = new Map(trace[i - 1].pieces.map((p) => [p.entity, p]))
-    const tokens: string[] = []
-    for (const piece of trace[i].pieces) {
-      const prev = before.get(piece.entity)
-      if (prev && !sameCell(prev.cell, piece.cell)) {
-        tokens.push(
-          `${pieceTag(piece.team, piece.kind)} ` +
-            `${coordName(prev.cell.x, prev.cell.y, height)}->${coordName(piece.cell.x, piece.cell.y, height)}`,
-        )
-      } else if (prev && piece.underFire && piece.hp < prev.hp) {
-        tokens.push(
-          `${pieceTag(piece.team, piece.kind)} ` +
-            `${coordName(piece.cell.x, piece.cell.y, height)} held(fire)`,
-        )
-      }
+  if (input.boards) {
+    for (const turn of turnActivities(trace, events, height)) {
+      if (turn.text) lines.push(turn.text)
+      lines.push(renderGrid(turn.pieces, height, input.terrain))
     }
-    for (const event of events) {
-      if (!ACTIVITY_TYPES.has(event.type)) continue
-      if (event.tick <= trace[i - 1].tick || event.tick > trace[i].tick) continue
-      const msg = event.msg.replace(/#(\d+)/g, (_m, id: string) => labelAt(i, Number(id)))
-      tokens.push(msg)
-    }
-    if (tokens.length > 0) lines.push(`T${trace[i].turn}: ${tokens.join('; ')}`)
+  } else {
+    lines.push(...turnActivityLines(trace, events, height))
   }
 
   lines.push('# pieces')

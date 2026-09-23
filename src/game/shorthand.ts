@@ -27,7 +27,7 @@ const PIECE_LETTER: Record<string, string> = {
   king: 'K',
 }
 
-const TERRAIN_CHAR: Record<number, string> = {
+export const TERRAIN_CHAR: Record<number, string> = {
   0: '.',
   1: ':',
   2: ',',

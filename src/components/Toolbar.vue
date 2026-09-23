@@ -95,6 +95,10 @@ function onSoundChange(event: Event): void {
       {{ props.snapshot.teams[props.snapshot.playerTeam === 'blue' ? 'red' : 'blue'].controller }}
     </span>
 
+    <span class="turn-badge" :class="{ active: props.snapshot.turnActive }" title="current turn (u/r to undo/redo)">
+      Turn <b>{{ props.snapshot.turn }}</b>
+    </span>
+
     <button class="ctl" :class="{ active: props.snapshot.turnActive }" :disabled="!!props.snapshot.winner" @click="emit('turn')">
       {{ props.snapshot.turnActive ? '⏵ Turn…' : '⏵ Turn' }}
     </button>

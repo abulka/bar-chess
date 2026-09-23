@@ -1,5 +1,11 @@
 import { formatBatchSummary, summarizeBatch } from './analysis'
 import type { GameAnalysis } from './analysis'
+import type { EventRecord } from '../ecs/events'
+import type { Game } from './game'
+import type { GameRecord } from './record'
+import { LLM_PREAMBLE, formatShorthand } from './shorthand'
+import { lastTurnActivity } from './transcript'
+import type { TurnTrace } from './trace'
 import type { TeamId } from './types'
 
 export interface StudyPromptGame {
@@ -57,4 +63,82 @@ export function buildStudyPrompt(
     )
     .join('\n\n')
   return [STUDY_PREAMBLE, header, '# batch summary', report, '# transcripts', transcripts].join('\n\n')
+}
+
+/** One- or few-line, LLM-readable summary of a single game's flagged behaviour. */
+export function formatGameAnalysis(analysis: GameAnalysis): string {
+  const lines = [
+    `winner=${analysis.winner ?? 'none'} turns=${analysis.turns}` +
+      `${analysis.partial ? ' (partial)' : ''} shots=${analysis.shots} hits=${analysis.hits} ` +
+      `kills=${analysis.kills} noProgressTurns=${analysis.noProgressTurns}`,
+  ]
+  if (analysis.heldUnderFire.length > 0) {
+    lines.push(
+      'heldUnderFire: ' +
+        analysis.heldUnderFire
+          .map((h) => `${h.piece} ${h.turns} (${h.hitsTaken} hits${h.isPawn ? ', pawn' : ''})`)
+          .join('; '),
+    )
+  }
+  if (analysis.neverMoved.length > 0) lines.push(`neverMoved: ${analysis.neverMoved.join(', ')}`)
+  if (analysis.neverFired.length > 0) lines.push(`neverFired: ${analysis.neverFired.join(', ')}`)
+  if (analysis.oscillation.length > 0) lines.push(`oscillation: ${analysis.oscillation.join(', ')}`)
+  if (analysis.focusFire.length > 0) {
+    lines.push(
+      'focusFire: ' + analysis.focusFire.map((f) => `${f.target} T${f.turn}×${f.attackers}`).join('; '),
+    )
+  }
+  return lines.join('\n')
+}
+
+export interface GamePromptInput {
+  game: Game
+  record: GameRecord
+  transcript: string
+  analysis: GameAnalysis
+}
+
+/**
+ * A self-contained prompt for debugging one battle: rules, the current compact
+ * board, the turn-by-turn transcript, flagged analysis and the replay record.
+ * This is the one artifact to paste when asking an LLM about the live game.
+ */
+export function buildGamePrompt(input: GamePromptInput): string {
+  const { game, record, transcript, analysis } = input
+  const result = record.result
+  const recordHeader =
+    `# replay record seed=${record.seed} mode=${record.mode} board=${record.boardId} ` +
+    `playerTeam=${record.playerTeam} winner=${result?.winner ?? 'none'} ` +
+    `turns=${result?.turns ?? '?'} ticks=${result?.ticks ?? '?'}${result?.partial ? ' partial' : ''}`
+  const recordNote =
+    '# note: this record is a deterministic replay (seed + player inputs only); turns\n' +
+    '# with no player input are omitted. It cannot be read on its own — the transcript\n' +
+    '# above is the readable play-by-play.'
+  return [
+    LLM_PREAMBLE.trimEnd(),
+    formatShorthand(game),
+    '# transcript',
+    transcript,
+    '# analysis',
+    formatGameAnalysis(analysis),
+    recordHeader,
+    recordNote,
+    JSON.stringify(record),
+  ].join('\n\n')
+}
+
+export interface SnapshotPromptInput {
+  game: Game
+  trace: TurnTrace[]
+  events: EventRecord[]
+}
+
+/**
+ * A per-turn situational snapshot: the current compact board plus what happened
+ * in the last turn. No preamble or record — small enough to paste every turn.
+ */
+export function buildSnapshotPrompt(input: SnapshotPromptInput): string {
+  const board = formatShorthand(input.game)
+  const activity = lastTurnActivity(input.trace, input.events, input.game.board.height)
+  return activity ? `${board}\n\n# last turn\n${activity}` : board
 }

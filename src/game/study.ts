@@ -1,15 +1,14 @@
-import { Cell, Health, Motion, Order, PieceType, Target, Team } from '../ecs/components'
+import { Cell, Health, PieceType, Team } from '../ecs/components'
 import type { EventRecord } from '../ecs/events'
 import type { BoardSize } from './boards'
 import { Game } from './game'
 import type { GameMode } from './game'
+import { GameLog } from './gameLog'
 import { Recorder } from './record'
 import type { GameRecord } from './record'
-import { analyzeGame } from './analysis'
 import type { GameAnalysis } from './analysis'
-import { formatTranscript } from './transcript'
 import { buildStudyPrompt } from './studyPrompt'
-import type { PieceTrace, TurnTrace } from './trace'
+import type { TurnTrace } from './trace'
 import type { TeamId } from './types'
 
 export type StudyPolicyName = 'none' | 'advance' | 'focus' | 'turtle'
@@ -136,31 +135,22 @@ export interface StudyState {
  * `stopCurrent` keeps the partial game's recording; `cancel` discards everything.
  */
 export class StudyController {
-  private static readonly MAX_EVENTS = 20000
-
   private game: Game
   private recorder: Recorder
+  private log: GameLog
   private options: StudyOptions | null = null
   private results: StudyGameResult[] = []
-  private events: EventRecord[] = []
-  private trace: TurnTrace[] = []
   private running = false
   private index = -1
-  private lastSampledTurn = -1
-  private opening = ''
-  private unsubscribe: () => void
 
   constructor(game: Game, recorder: Recorder) {
     this.game = game
     this.recorder = recorder
-    this.unsubscribe = game.bus.subscribe((event) => {
-      if (!this.running) return
-      if (this.events.length < StudyController.MAX_EVENTS) this.events.push(event)
-    })
+    this.log = new GameLog(game)
   }
 
   dispose(): void {
-    this.unsubscribe()
+    this.log.dispose()
   }
 
   start(options: StudyOptions): void {
@@ -182,8 +172,7 @@ export class StudyController {
     this.running = false
     this.index = -1
     this.results = []
-    this.events = []
-    this.trace = []
+    this.log.begin()
   }
 
   /** Called every UI refresh: samples, applies the policy, starts the next turn. */
@@ -198,10 +187,7 @@ export class StudyController {
       this.finishGame()
       return
     }
-    if (this.game.turn > this.lastSampledTurn) {
-      this.sampleTrace()
-      this.lastSampledTurn = this.game.turn
-    }
+    this.log.tick()
     const policy = POLICIES[this.options.policy]
     if (policy && this.game.teams[this.game.playerTeam].controller === 'human') {
       policy(this.game, this.game.turn + 1)
@@ -239,10 +225,7 @@ export class StudyController {
     this.game.captureAdvance = this.options.captureAdvance
     this.game.loadSize(this.options.size as BoardSize, seed)
     this.recorder.reset()
-    this.events = []
-    this.trace = []
-    this.lastSampledTurn = -1
-    this.opening = this.game.shorthand()
+    this.log.begin()
   }
 
   private finishGame(): void {
@@ -255,17 +238,7 @@ export class StudyController {
         timedOut: partial,
       }),
     )
-    if (this.game.turn > this.lastSampledTurn) {
-      this.sampleTrace()
-      this.lastSampledTurn = this.game.turn
-    }
-    const transcript = formatTranscript({
-      record,
-      events: this.events,
-      trace: this.trace,
-      opening: this.opening,
-      final: this.game.shorthand(),
-    })
+    const { transcript, analysis } = this.log.finish(record)
     this.results.push({
       index: this.index,
       seed: record.seed,
@@ -276,37 +249,11 @@ export class StudyController {
       ticks: record.result?.ticks ?? this.game.tick,
       partial,
       record,
-      events: this.events,
-      trace: this.trace,
+      events: this.log.eventStream,
+      trace: this.log.turnTrace,
       transcript,
-      analysis: analyzeGame(record, this.events, this.trace),
+      analysis,
     })
     this.startNext()
-  }
-
-  private sampleTrace(): void {
-    const pieces: PieceTrace[] = []
-    for (const e of this.game.world.query(Cell, Team, PieceType, Health, Motion, Order, Target)) {
-      const cell = this.game.world.require(e, Cell)
-      const hp = this.game.world.require(e, Health)
-      const motion = this.game.world.require(e, Motion)
-      const order = this.game.world.require(e, Order)
-      const target = this.game.world.require(e, Target)
-      pieces.push({
-        entity: e,
-        team: this.game.world.require(e, Team),
-        kind: this.game.world.require(e, PieceType).kind,
-        cell: { x: cell.x, y: cell.y },
-        goal: motion.goal ? { x: motion.goal.x, y: motion.goal.y } : null,
-        moving: motion.moving,
-        movedThisTurn: motion.movedThisTurn,
-        orderKind: order.kind,
-        target: target.entity,
-        underFire: target.lastAttacker !== null && this.game.tick < target.underFireUntil,
-        hp: hp.cur,
-        maxHp: hp.max,
-      })
-    }
-    this.trace.push({ turn: this.game.turn, tick: this.game.tick, pieces })
   }
 }

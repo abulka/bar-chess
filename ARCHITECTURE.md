@@ -150,7 +150,9 @@ requestAnimationFrame(frame):
   `MAX_QUEUED_TURNS = 3`). `finishTurn()` — and the end of a replay — starts the
   next queued turn immediately, so two presses play two turns back-to-back.
   Cancelling (`p`), stepping (`s`), undo/redo/replay, and load/import clear the
-  buffer. The turnbar shows the pending count (`TURN · +2 queued`).
+  buffer. The turnbar shows the pending count (`TURN · +2 queued`), and the
+  toolbar's **Turn badge** keeps the current turn number visible even after the
+  bar fades (mirrored in the stats bar).
 - `undoTurn()` (key `u`) and `redoTurn()` (key `r`) step backwards/forwards
   through that history, restoring whole turn-boundary states; beginning a new
   turn replaces any undone branch. `replayTurn()` (key `y`) restores the last
@@ -517,7 +519,7 @@ pieceInfo terrainVersion`.
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle |
 | `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed, `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. The **order changes** list shows the piece's last few order transitions with their tick, so it is clear *why* an order was issued/replaced/completed/abandoned (e.g. `target #16 lost — attack abandoned`) |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
-| `StatsBar.vue` | tick/fps/tps/pieces/shots/kills/entities/selected/winner |
+| `StatsBar.vue` | turn/tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Sound config panel, Inspector for the selection |
 
 ### Overlay scope and legend
@@ -621,7 +623,7 @@ anything is mutated.
 - **Save/Load**: named slots in `localStorage` (`src/game/storage.ts`), keys
   `bar-chess.positions.index` and `bar-chess.positions.<id>`; a same-named save
   overwrites. Load/Delete confirm first.
-- **Copy / Export / Import**: the **Copy position JSON** button and **Export
+- **Copy / Export / Import**: the **Copy state (JSON)** button and **Export
   JSON** emit the same `SavedPosition` (so copied/exported JSON can be
   re-imported); **Import JSON** reads a file. `Game.toDebugJson()` remains the
   terse debug view.
@@ -655,12 +657,26 @@ orders with `#id(cell)` references, `q` queued steps, `tgt`, `goal`, `path`
 hops, `blk`, `moving`, `w` reload, …), selection ids and in-flight projectiles.
 Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
 
-- **Copy shorthand** copies the position plus a one-line `# fmt:` legend.
-- **Copy for LLM** prepends `LLM_PREAMBLE`, a constant explaining the game,
-  geometry, turn model and every field, for the first message of a conversation.
-- Both go through `Game.shorthand()` / `Game.llmShorthand()`, available on
-  `window.game` in dev. The shorthand is read-only — `SavedPosition` JSON stays
-  the import/round-trip format.
+- **Copy history for LLM** is the full-context paste for the first message:
+  `buildGamePrompt` (`src/game/studyPrompt.ts`) prepends `LLM_PREAMBLE` and joins
+  the compact board, the turn-by-turn **transcript** (a compact board after every
+  turn), the flagged **analysis** and the replay record (with a note that it is
+  seed+inputs only).
+- **Copy snapshot for LLM** is the per-turn paste: `buildSnapshotPrompt` emits the
+  current compact board plus the last turn's activity (moves/shots/damage/held),
+  with no preamble — small enough to paste every turn.
+- `Game.shorthand()` / `Game.llmShorthand()` remain available on `window.game` in
+  dev. The shorthand is read-only — `SavedPosition` JSON stays the import/round-trip
+  format.
+- **Live log.** `GameLog` (`src/game/gameLog.ts`) observes the running game: it
+  buffers the event stream and samples a per-turn piece trace, then renders the
+  transcript + analysis on demand. Sampling is driven by the game's
+  `phase`/`turn end` event (emitted in `Game.finishTurn`), so back-to-back queued
+  turns are never missed by polling. `begin()` samples the opening. Undo/redo only
+  move a `cursorTurn` (via `rewind`) — the full log is retained, so redo restores
+  complete detail and a snapshot taken while viewing an earlier turn is accurate;
+  a new turn played after an undo truncates the abandoned branch at `turn started`.
+  `StudyController` and the live board share it, so both produce the same output.
 
 ### Seeds, game records & self-play
 
@@ -677,7 +693,10 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   them. `replayRecord` clears the component stores, rebuilds
   `new Game(size, mode, seed)`, re-applies each turn's intents and re-simulates;
   it is exact (`tests/unit/record.spec.ts`). This is the compact, replayable
-  stand-in for a stack of position snapshots.
+  stand-in for a stack of position snapshots. `Recorder.snapshot()` returns a
+  detached copy with the current outcome (and `result.partial` while unfinished)
+  without mutating the live recorder; the record is a replay format, not a
+  narrative, so it is only pasted to an LLM as part of the **Copy history for LLM** bundle.
 - **Study mode.** The bottom HUD's **Study** tab (`src/components/StudyPanel.vue`)
   runs a batch of games **on the live board** so they can be watched. A pure
   `StudyController` (`src/game/study.ts`) drives the main `Game`: per game it

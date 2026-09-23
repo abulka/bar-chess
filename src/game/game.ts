@@ -651,6 +651,9 @@ export class Game {
       this.canReplay = true
     }
     this.bus.emit('info', `turn ended after ${this.turnTicks} ticks`)
+    // Deterministic turn boundary for observers (the live log samples here, so
+    // back-to-back queued turns are never missed by polling).
+    this.bus.emit('phase', 'turn end', { data: { turn: this.turn, tick: this.tick } })
     // A buffered space press starts the next turn immediately, back-to-back.
     if (this.queuedTurns > 0 && !this.winner) {
       this.queuedTurns--

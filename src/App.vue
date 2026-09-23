@@ -17,9 +17,11 @@ import {
 } from './game/constants'
 import { Game } from './game/game'
 import type { GameMode, GameSnapshot, OverlayFlags } from './game/game'
+import { GameLog } from './game/gameLog'
 import { Recorder } from './game/record'
 import { StudyController } from './game/study'
 import type { StudyOptions, StudyState } from './game/study'
+import { buildGamePrompt, buildSnapshotPrompt } from './game/studyPrompt'
 import { loadSettings, saveSettings } from './game/settings'
 import { deleteSlot, listSlots, loadSlot, saveSlot } from './game/storage'
 import type { SlotMeta } from './game/storage'
@@ -28,6 +30,7 @@ import type { StanceMode, TeamId } from './game/types'
 const game = new Game(8)
 game.applySettings(loadSettings() ?? {})
 const recorder = new Recorder(game)
+const liveLog = new GameLog(game)
 const study = new StudyController(game, recorder)
 const audio = new AudioEngine({ enabled: game.soundEnabled })
 const unsubscribeAudio = game.bus.subscribe((event) => audio.handle(event))
@@ -108,14 +111,16 @@ const turnLabel = computed(() => {
   if (snapshot.value.winner) {
     return `GAME OVER — ${snapshot.value.teams[snapshot.value.winner].name} wins (u to undo)`
   }
+  const turn = `TURN ${snapshot.value.turn}`
   const queued = snapshot.value.queuedTurns > 0 ? ` · +${snapshot.value.queuedTurns} queued` : ''
-  if (snapshot.value.turnActive) return `TURN ${snapshot.value.turn}${queued}`
-  if (snapshot.value.replaying) return `REPLAY${queued}`
-  return snapshot.value.canReplay ? 'READY — space for next turn' : 'press space for a turn'
+  if (snapshot.value.turnActive) return `${turn}${queued}`
+  if (snapshot.value.replaying) return `${turn} · REPLAY${queued}`
+  return snapshot.value.canReplay ? `${turn} · READY — space for next turn` : `${turn} · press space for a turn`
 })
 
 function refresh(): void {
   study.tick()
+  if (!study.state.running) liveLog.tick()
   snapshot.value = game.snapshot()
   studyState.value = study.state
 }
@@ -132,6 +137,7 @@ function onDeploy(team: TeamId, key: string): void {
 function onSelectSize(size: number): void {
   game.loadSize(size as BoardSize)
   recorder.reset()
+  liveLog.begin()
   boardView.value?.fit()
   refresh()
 }
@@ -139,22 +145,26 @@ function onSelectSize(size: number): void {
 function onSetGameMode(mode: GameMode): void {
   game.setGameMode(mode)
   recorder.reset()
+  liveLog.begin()
   persistSettings()
   refresh()
 }
 
 function onStudyRun(options: StudyOptions): void {
   study.start(options)
+  liveLog.begin()
   refresh()
 }
 
 function onStudyStop(): void {
   study.stopCurrent()
+  liveLog.begin()
   refresh()
 }
 
 function onStudyCancel(): void {
   study.cancel()
+  liveLog.begin()
   refresh()
 }
 
@@ -232,6 +242,7 @@ function onToggleCaptureAdvance(): void {
 function onReset(): void {
   game.reset()
   recorder.reset()
+  liveLog.begin()
   boardView.value?.fit()
   refresh()
 }
@@ -250,11 +261,13 @@ function onReplay(): void {
 
 function onUndo(): void {
   game.undoTurn()
+  liveLog.rewind(game.turn)
   refresh()
 }
 
 function onRedo(): void {
   game.redoTurn()
+  liveLog.rewind(game.turn)
   refresh()
 }
 
@@ -274,17 +287,17 @@ function copyJson(): void {
   void copyText(JSON.stringify(game.exportPosition(), null, 2), 'json')
 }
 
-function copyShorthand(): void {
-  void copyText(game.shorthand(), 'shorthand')
-}
-
 function copyLlm(): void {
-  void copyText(game.llmShorthand(), 'llm')
+  const record = recorder.snapshot()
+  const { transcript, analysis } = liveLog.finish(record, { boards: true })
+  void copyText(buildGamePrompt({ game, record, transcript, analysis }), 'llm')
 }
 
-function copyRecord(): void {
-  recorder.finish()
-  void copyText(JSON.stringify(recorder.record, null, 2), 'record')
+function copySnapshot(): void {
+  void copyText(
+    buildSnapshotPrompt({ game, trace: liveLog.turnTrace, events: liveLog.eventStream }),
+    'snapshot',
+  )
 }
 
 function refreshSlots(): void {
@@ -300,6 +313,7 @@ function applyLoaded(data: unknown): void {
   ioMessage.value = ''
   boardView.value?.fit()
   recorder.reset()
+  liveLog.begin()
   refresh()
 }
 
@@ -374,11 +388,9 @@ function onKey(event: KeyboardEvent): void {
     game.stepOnce()
     refresh()
   } else if (event.key === 'u') {
-    game.undoTurn()
-    refresh()
+    onUndo()
   } else if (event.key === 'r') {
-    game.redoTurn()
-    refresh()
+    onRedo()
   } else if (event.key === 'y') {
     onReplay()
   } else if (event.key === 'c' || event.key === 'Backspace') {
@@ -404,6 +416,7 @@ function onKey(event: KeyboardEvent): void {
 
 onMounted(() => {
   game.start()
+  liveLog.begin()
   game.onProgress = (value) => {
     barProgress.value = value
   }
@@ -427,6 +440,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onWindowResize)
   unsubscribeAudio()
   audio.dispose()
+  liveLog.dispose()
   study.dispose()
   game.stop()
 })
@@ -551,16 +565,15 @@ onBeforeUnmount(() => {
           <li><span class="ln ln-blocked"></span> blocked</li>
           <li><span class="ln ln-unreachable"></span> out of reach</li>
         </ul>
-        <div class="rail-title">position</div>
-        <button class="ctl copy-btn" @click="copyJson">{{ copied === 'json' ? 'Copied!' : 'Copy position JSON' }}</button>
-        <div class="io-row">
-          <button class="ctl" @click="copyShorthand">
-            {{ copied === 'shorthand' ? 'Copied!' : 'Copy shorthand' }}
-          </button>
-          <button class="ctl" @click="copyLlm">{{ copied === 'llm' ? 'Copied!' : 'Copy for LLM' }}</button>
-        </div>
-        <button class="ctl copy-btn" @click="copyRecord">
-          {{ copied === 'record' ? 'Copied!' : 'Copy game record' }}
+        <div class="rail-title">copy</div>
+        <button class="ctl copy-btn" @click="copyLlm">
+          {{ copied === 'llm' ? 'Copied!' : 'Copy history for LLM' }}
+        </button>
+        <button class="ctl copy-btn" @click="copySnapshot">
+          {{ copied === 'snapshot' ? 'Copied!' : 'Copy snapshot for LLM' }}
+        </button>
+        <button class="ctl copy-btn" @click="copyJson">
+          {{ copied === 'json' ? 'Copied!' : 'Copy state (JSON)' }}
         </button>
         <div class="save-row">
           <input
