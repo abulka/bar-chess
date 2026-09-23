@@ -48,6 +48,17 @@ describe('Game integration', () => {
     expect(game.world.require(knight, Cell)).toEqual({ x: 5, y: 1 })
   })
 
+  it('lets a home pawn take its two-square first move in a single turn', () => {
+    const game = new Game(8)
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 3, y: 6 }) // d2, blue home rank
+    game.selected = [pawn]
+    game.orderAt({ x: 3, y: 4 }, 'move')
+
+    runTurn(game)
+
+    expect(game.world.require(pawn, Cell)).toEqual({ x: 3, y: 4 })
+  })
+
   it('a deploy command spawns a reinforcement on the next tick', () => {
     const game = new Game(8)
     const before = game.teams.blue.alive.pawn

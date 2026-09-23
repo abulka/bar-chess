@@ -21,6 +21,12 @@ describe('findPath', () => {
     expect(result.cells[result.cells.length - 1]).toEqual({ x: 0, y: 3 })
   })
 
+  it('takes a two-square pawn first move as a single hop', () => {
+    const result = findPath(flatBoard(8), { x: 3, y: 6 }, { x: 3, y: 4 }, pawnMove, 'blue')
+    expect(result.found).toBe(true)
+    expect(result.cells).toEqual([{ x: 3, y: 4 }])
+  })
+
   it('returns a best-effort partial route when the goal is impossible', () => {
     // A pawn ordered to an off-file square marches up its own file.
     const result = findPath(flatBoard(), { x: 3, y: 7 }, { x: 4, y: 5 }, pawnMove, 'blue')

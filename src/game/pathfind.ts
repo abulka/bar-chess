@@ -1,5 +1,5 @@
 import type { Board } from './board'
-import { moveDestinations } from './geometry'
+import { moveDestinations, pawnHomeRank } from './geometry'
 import type { OccupiedFn } from './geometry'
 import type { Geometry, TeamId, Vec2 } from './types'
 import { resolveGeometry } from './types'
@@ -175,8 +175,14 @@ function computeReachable(
       continue
     }
 
-    const y = cy + g.dy * g.forward
-    if (board.passable(cx, y)) visit(cx, y)
+    // Pawn: advance up to `forward` squares, but the two-square first move is
+    // only legal from the home rank.
+    const advance = cy === pawnHomeRank(board, team) ? g.forward : 1
+    for (let k = 1; k <= advance; k++) {
+      const y = cy + g.dy * k
+      if (!board.passable(cx, y)) break
+      if (!visit(cx, y)) continue
+    }
   }
   return seen
 }

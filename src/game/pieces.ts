@@ -115,7 +115,9 @@ export const PIECES: Record<string, PieceDef> = {
     name: 'Pawn',
     glyph: '\u265f',
     hp: 42,
-    move: { kind: 'pawn', forward: 1 },
+    // Up to two squares forward, but the double step is only legal from the
+    // pawn's home rank (see `pawnHomeRank`); elsewhere it advances one.
+    move: { kind: 'pawn', forward: 2 },
     moveCooldown: 1.1,
     weapon: 'pawnShot',
     buildTime: 2.5,

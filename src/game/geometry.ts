@@ -6,6 +6,14 @@ export type OccupiedFn = (x: number, y: number) => boolean
 
 const NEVER: OccupiedFn = () => false
 
+/**
+ * Rank a pawn starts on: rank 2 for blue (bottom) and rank 7 for red (top),
+ * matching `initialArmy`. A pawn may take its two-square first move only here.
+ */
+export function pawnHomeRank(board: Board, team: TeamId): number {
+  return team === 'blue' ? board.height - 2 : 1
+}
+
 export function cellKey(x: number, y: number, width: number): number {
   return y * width + x
 }
@@ -50,9 +58,14 @@ export function moveDestinations(
     return out
   }
 
-  const fx = from.x
-  const fy = from.y + g.dy * g.forward
-  if (free(fx, fy)) out.push({ x: fx, y: fy })
+  // A pawn advances up to `forward` squares, but the two-square first move is
+  // only legal from its home rank; the first blocker stops the advance.
+  const advance = from.y === pawnHomeRank(board, team) ? g.forward : 1
+  for (let k = 1; k <= advance; k++) {
+    const y = from.y + g.dy * k
+    if (!free(from.x, y)) break
+    out.push({ x: from.x, y })
+  }
   return out
 }
 

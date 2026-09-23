@@ -161,8 +161,10 @@ event is logged, and play freezes: turn/pause/step/replay are disabled. Press
 redo it). A team that starts without a king has lost; if both kings fall at once
 it is a draw.
 
-A "move" is one application of the piece's movement geometry, so a pawn advances
-one square while a rook may slide several cells along a rank/file — one move.
+A "move" is one application of the piece's movement geometry: a rook may slide
+several cells along a rank/file, and a pawn advances one square — or two from its
+home rank (rank 2 / rank 7), its chess first move — in a single move. The
+two-square step is blocked if the first square is occupied.
 
 **AI move budget.** An AI team facing a human may never out-move them: its
 cumulative moves are capped by the human's, and unused budget carries over. Order

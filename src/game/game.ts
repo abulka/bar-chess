@@ -328,6 +328,10 @@ export class Game {
   // Smallest per-tick bar advance so it never visibly freezes on a work plateau;
   // kept under (just-under-full / TURN_MAX_TICKS) so it can't reach the cap early.
   private static readonly BAR_MIN_STEP = 0.004
+  // The bar never reads fully complete while the turn is still running; only
+  // `finishTurn` sets exactly 1. Guards against a long turn accumulating the
+  // per-tick minimum all the way to 100% before it actually ends.
+  private static readonly BAR_ACTIVE_CAP = 0.999
   /** Rough tick cost of one queued move, for shaping the bar only. */
   private static readonly NOMINAL_MOVE_TICKS = 5
   /** Cap on buffered space-bar turns, so a held key cannot queue a runaway. */
@@ -578,7 +582,10 @@ export class Game {
     remaining = Math.min(remaining, Game.TURN_MAX_TICKS - this.turnTicks)
     remaining = Math.max(0, remaining)
     const candidate = this.turnTicks / (this.turnTicks + remaining + 1e-6)
-    this.barProgress = Math.min(1, Math.max(this.barProgress + Game.BAR_MIN_STEP, candidate))
+    this.barProgress = Math.min(
+      Game.BAR_ACTIVE_CAP,
+      Math.max(this.barProgress + Game.BAR_MIN_STEP, candidate),
+    )
 
     const stalled = this.turnNoProgressTicks >= 45
     if ((pending === 0 || stalled) && this.turnTicks >= Game.MIN_TURN_TICKS) {

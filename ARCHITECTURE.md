@@ -219,7 +219,10 @@ and populated by `initialArmy(size)` in `src/game/boards.ts`.
 
 `Geometry` is `slide { dirs, range }`, `leap { offsets }` or `pawn { forward }`,
 defined from blue's perspective (forward = −y); red negates `dy` in
-`resolveGeometry`.
+`resolveGeometry`. A pawn's `forward` is its maximum advance: it may move two
+squares only from its home rank (`pawnHomeRank` — rank 2 for blue, rank 7 for
+red, matching `initialArmy`), otherwise one square, and the first blocker stops
+the advance.
 
 - `moveDestinations(board, from, geom, team, occupied, ignoreOccupancy)` — cells
   reachable in one move. Slides stop at terrain or a piece; leaps ignore
@@ -413,7 +416,8 @@ weapon rate; the knight's bomb is slow and tumbles (rotates) in flight.
 Shipped chess set: pawn, knight, bishop, rook, queen, king. `weaponVision`
 derives target-acquisition radius from the weapon geometry. The pawn fires the
 two forward diagonals at range 1 (chess capture); a piece directly ahead blocks
-it and is not a target.
+it and is not a target. In movement it advances one square, or two from its home
+rank as a single first move (a blocked first square forbids the double step).
 
 ---
 

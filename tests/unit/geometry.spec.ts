@@ -47,6 +47,28 @@ describe('moveDestinations', () => {
     expect(moveDestinations(flatBoard(), { x: 3, y: 3 }, pawnMove, 'red')).toEqual([{ x: 3, y: 4 }])
   })
 
+  it('a pawn may take a two-square first move from its home rank', () => {
+    const board = flatBoard(8)
+    // Blue home is rank 2 (y = 6); red home is rank 7 (y = 1).
+    expect(moveDestinations(board, { x: 3, y: 6 }, pawnMove, 'blue')).toEqual([
+      { x: 3, y: 5 },
+      { x: 3, y: 4 },
+    ])
+    expect(moveDestinations(board, { x: 3, y: 1 }, pawnMove, 'red')).toEqual([
+      { x: 3, y: 2 },
+      { x: 3, y: 3 },
+    ])
+  })
+
+  it('the pawn double step is stopped by a piece on the first square', () => {
+    const occ = occupiedCells([{ x: 3, y: 5 }])
+    expect(moveDestinations(flatBoard(8), { x: 3, y: 6 }, pawnMove, 'blue', occ)).toEqual([])
+  })
+
+  it('an off-home pawn only advances one square', () => {
+    expect(moveDestinations(flatBoard(8), { x: 3, y: 5 }, pawnMove, 'blue')).toEqual([{ x: 3, y: 4 }])
+  })
+
   it('walls stop slides', () => {
     const board = flatBoard()
     board.setTerrain(4, 2, 4)
