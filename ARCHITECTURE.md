@@ -400,6 +400,12 @@ cell/reservation during movement validation and path planning.
   occupancy and geometry (blocked line, occupied destination or a dead killer
   cancels it), capped at one step per killer per tick, and exposed by the
   persisted **capture advance** toolbar toggle (default off).
+- **healing** — king aura regeneration: same-team pieces within two Chebyshev
+  cells of their living king (the king included) regain 5% of max HP per second,
+  clamped at max and never reviving a piece at zero HP. Membership comes from
+  `healingTargets` (`src/game/healing.ts`), shared with the renderer so the
+  overlay matches the mechanic. Deterministic (advances only by `ctx.dt`), so it
+  is captured by turn snapshots and replays like every other system.
 
 ---
 
@@ -505,11 +511,16 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   (`Target.entity` under Attack stance / return fire) draws the same indicator in
   **amber**, so an autonomous engagement is as legible as an ordered one while
   staying distinct.
+- **Healing** (`show healing`, off by default) — a pulsing green aura around each
+  living king, a dashed ring at the two-square boundary, and wavy tendrils to the
+  damaged same-team pieces inside it. This toggle is display-only: the
+  regeneration itself always runs.
 - Army scope shows paths, destinations and targets; reach/attack shading and
   range arcs are reserved for selected pieces so the board stays readable.
 
 `overlays` flags: `grid`, `health`, `myOrders`, `enemyPlans`, `moveCells`,
-`attackCells`, `rangeArcs`, `reload` (firing-recharge bars over pieces).
+`attackCells`, `rangeArcs`, `reload` (firing-recharge bars over pieces), `healing`
+(king aura + tendrils).
 `rangeArcs` is off by default; movement cells, attack cells and range arcs are
 drawn for selected pieces only; the health and recharge bars are drawn for every
 piece (each gated by its toggle), and army scopes show paths/goals/targets. Bars

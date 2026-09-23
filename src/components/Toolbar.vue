@@ -34,6 +34,7 @@ const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
   { key: 'grid', label: 'grid' },
   { key: 'health', label: 'health' },
   { key: 'reload', label: 'firing recharge' },
+  { key: 'healing', label: 'show healing' },
 ]
 
 // Blur after change so global hotkeys keep working when a toolbar control was

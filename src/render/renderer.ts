@@ -17,6 +17,7 @@ import type { Entity } from '../ecs/world'
 import { buildOccupancy, makeOccupied } from '../game/occupancy'
 import { fireCells, moveDestinations } from '../game/geometry'
 import type { OccupiedFn } from '../game/geometry'
+import { HEAL_COLOR, HEAL_RADIUS, healingTargets } from '../game/healing'
 import { PIECES, WEAPONS } from '../game/pieces'
 import { queueMarkers } from '../game/queue'
 import { resolveGeometry } from '../game/types'
@@ -110,6 +111,7 @@ export class Renderer {
       this.drawPieceOverlay(ctx, game, occupied, e, full)
     }
     this.drawHoverGhosts(ctx, game)
+    if (game.overlays.healing) this.drawHealing(ctx, game)
     this.drawPieces(ctx, game, scoped)
     this.drawProjectiles(ctx, game)
     this.drawFx(ctx, game)
@@ -863,6 +865,82 @@ export class Renderer {
       ctx.stroke()
       ctx.globalAlpha = 1
     }
+  }
+
+  /**
+   * King healing field: a pulsing green aura around each living king, a dashed
+   * ring marking the exact two-square boundary, and wavy green tendrils to every
+   * damaged piece actually gaining health inside it. Membership comes from the
+   * shared `healingTargets`, so the overlay matches the mechanic exactly.
+   */
+  private drawHealing(ctx: CanvasRenderingContext2D, game: Game): void {
+    const t = game.board.tile
+    const pulse = 0.5 + 0.5 * Math.sin(this.time * 3)
+    for (const team of ['red', 'blue'] as const) {
+      const field = healingTargets(game.world, team)
+      if (!field) continue
+      const kpos = game.world.get(field.king, Position)
+      if (!kpos) continue
+      const radius = (HEAL_RADIUS + 0.5) * t
+
+      // Radial gradient so the aura glows at the king and fades at the edge.
+      const gradient = ctx.createRadialGradient(kpos.x, kpos.y, t * 0.2, kpos.x, kpos.y, radius)
+      gradient.addColorStop(0, `rgba(74,217,145,${0.2 + 0.12 * pulse})`)
+      gradient.addColorStop(1, 'rgba(74,217,145,0)')
+      ctx.fillStyle = gradient
+      ctx.beginPath()
+      ctx.arc(kpos.x, kpos.y, radius, 0, Math.PI * 2)
+      ctx.fill()
+
+      // Faint dashed ring at the exact two-square boundary.
+      ctx.strokeStyle = `rgba(74,217,145,${0.2 + 0.14 * pulse})`
+      ctx.lineWidth = 1.4 / this.camera.zoom
+      ctx.setLineDash([4 / this.camera.zoom, 5 / this.camera.zoom])
+      ctx.beginPath()
+      ctx.arc(kpos.x, kpos.y, HEAL_RADIUS * t, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.setLineDash([])
+
+      let index = 0
+      for (const e of field.targets) {
+        if (e === field.king) continue
+        const health = game.world.get(e, Health)
+        if (!health || health.cur <= 0 || health.cur >= health.max) continue
+        const pos = game.world.get(e, Position)
+        if (!pos) continue
+        this.drawHealingWave(ctx, kpos, pos, t * 0.18, this.time * 5 + index)
+        index++
+      }
+    }
+  }
+
+  /** A sine wave from `from` to `to`, pinched at both ends, animated by `phase`. */
+  private drawHealingWave(
+    ctx: CanvasRenderingContext2D,
+    from: { x: number; y: number },
+    to: { x: number; y: number },
+    amp: number,
+    phase: number,
+  ): void {
+    const dx = to.x - from.x
+    const dy = to.y - from.y
+    const len = Math.hypot(dx, dy) || 1
+    const nx = -dy / len
+    const ny = dx / len
+    const segments = 24
+    ctx.strokeStyle = HEAL_COLOR
+    ctx.globalAlpha = 0.7
+    ctx.lineWidth = 2 / this.camera.zoom
+    ctx.beginPath()
+    ctx.moveTo(from.x, from.y)
+    for (let i = 1; i <= segments; i++) {
+      const s = i / segments
+      const envelope = Math.sin(s * Math.PI)
+      const offset = Math.sin(s * Math.PI * 4 - phase) * amp * envelope
+      ctx.lineTo(from.x + dx * s + nx * offset, from.y + dy * s + ny * offset)
+    }
+    ctx.stroke()
+    ctx.globalAlpha = 1
   }
 
   private drawBorder(ctx: CanvasRenderingContext2D, game: Game): void {

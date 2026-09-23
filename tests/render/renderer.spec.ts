@@ -9,6 +9,7 @@ import { Health, Motion, PieceType, Position, Render, Target, Weapon } from '../
 import { Game } from '../../src/game/game'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { WEAPONS } from '../../src/game/pieces'
+import { HEAL_COLOR } from '../../src/game/healing'
 import { BAR_BG, RELOAD_FILL, healthColor } from '../../src/render/palette'
 import { Renderer } from '../../src/render/renderer'
 import { orderAttack, placePiece } from '../helpers'
@@ -71,6 +72,9 @@ class RecordingContext {
   arc(): void {}
   ellipse(): void {}
   fill(): void {}
+  createRadialGradient(): { addColorStop: () => void } {
+    return { addColorStop: () => {} }
+  }
   stroke(): void {
     this.strokes.push({
       style: this.strokeStyle,
@@ -330,6 +334,40 @@ describe('Renderer hover coordinate label', () => {
     ctx.fills = []
     renderer.draw(game)
     expect(ctx.fills.filter((f) => f.style === '#0b0f16' && f.w < TILE)).toHaveLength(0)
+  })
+})
+
+describe('Renderer healing overlay', () => {
+  const AURA = 'rgba(74,217,145'
+
+  it('draws a green aura ring and a wavy tendril to a damaged piece', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.healing = true
+    placePiece(game, 'king', 'blue', { x: 4, y: 4 })
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 5, y: 5 })
+    game.world.require(pawn, Health).cur = 10
+
+    ctx.strokes = []
+    renderer.draw(game)
+
+    // The dashed boundary ring is an arc-only stroke in the aura colour.
+    expect(ctx.strokes.some((st) => st.style.startsWith(AURA) && st.points.length === 0)).toBe(true)
+    // The tendril is a multi-point wavy polyline in the healing green.
+    expect(ctx.strokes.some((st) => st.style === HEAL_COLOR && st.points.length > 2)).toBe(true)
+  })
+
+  it('draws no aura or tendrils when the overlay is off', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.healing = false
+    placePiece(game, 'king', 'blue', { x: 4, y: 4 })
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 5, y: 5 })
+    game.world.require(pawn, Health).cur = 10
+
+    ctx.strokes = []
+    renderer.draw(game)
+
+    expect(ctx.strokes.some((st) => st.style.startsWith(AURA))).toBe(false)
+    expect(ctx.strokes.some((st) => st.style === HEAL_COLOR)).toBe(false)
   })
 })
 

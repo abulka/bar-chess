@@ -13,7 +13,7 @@ describe('settings persistence', () => {
   it('round-trips game settings through storage', () => {
     const game = new Game(8)
     game.applySettings({
-      overlays: { rangeArcs: true, grid: false, myOrders: false, reload: false },
+      overlays: { rangeArcs: true, grid: false, myOrders: false, reload: false, healing: true },
       hudVisible: true,
       railsVisible: false,
       speed: 2,
@@ -33,6 +33,7 @@ describe('settings persistence', () => {
     expect(restored.overlays.myOrders).toBe(false)
     expect(restored.overlays.reload).toBe(false)
     expect(restored.overlays.moveCells).toBe(true)
+    expect(restored.overlays.healing).toBe(true)
     expect(restored.hudVisible).toBe(true)
     expect(restored.railsVisible).toBe(false)
     expect(restored.speed).toBe(2)

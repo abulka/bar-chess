@@ -158,6 +158,8 @@ export interface OverlayFlags {
   attackCells: boolean
   rangeArcs: boolean
   reload: boolean
+  /** Draw the king's green healing aura and tendrils to healed pieces. */
+  healing: boolean
 }
 
 interface TurnState {
@@ -290,6 +292,7 @@ export class Game {
     attackCells: true,
     rangeArcs: false,
     reload: true,
+    healing: false,
   }
 
   selected: Entity[] = []
