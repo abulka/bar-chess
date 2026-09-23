@@ -72,6 +72,27 @@ describe('Game integration', () => {
     expect(game.world.isAlive(knight)).toBe(true)
   })
 
+  it('clears the reported under-fire once the piece leaves the attacker line', () => {
+    const game = new Game(8, 'human-vs-human')
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    const bishop = createPiece(shim, 'blue', PIECES.bishop, { x: 2, y: 2 }) // c6
+    const rook = createPiece(shim, 'red', PIECES.rook, { x: 2, y: 7 }) // c1, same file
+    const target = game.world.require(bishop, Target)
+    target.lastAttacker = rook
+    target.underFireUntil = game.tick + 90
+    game.selected = [bishop]
+
+    expect(game.snapshot().pieceInfo?.underFire?.entity).toBe(rook)
+    expect(game.shorthand()).toMatch(/bB c6[^\n]*fire=/)
+
+    // Step the bishop off the c-file: the rook no longer covers it.
+    game.world.require(bishop, Cell).x = 3
+
+    expect(game.snapshot().pieceInfo?.underFire).toBeNull()
+    expect(game.shorthand()).not.toMatch(/bB d6[^\n]*fire=/)
+  })
+
   it('lets a home pawn take its two-square first move in a single turn', () => {
     const game = new Game(8)
     const pawn = placePiece(game, 'pawn', 'blue', { x: 3, y: 6 }) // d2, blue home rank

@@ -41,6 +41,7 @@ import { closestEmptyCell, firingPositionExists, previewFiringCell } from './app
 import { createPiece } from './factory'
 import { buildOccupancy, occupiedExcept } from './occupancy'
 import type { Occupancy } from './occupancy'
+import { underFireAttacker } from './underFire'
 import type { OrderKind, StanceMode, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { destReachable, findPath } from './pathfind'
@@ -1672,6 +1673,14 @@ export class Game {
           : `attack ${this.pieceRef(step.target)?.coord ?? '—'}`,
     }))
 
+    const underFire = underFireAttacker(
+      this.world,
+      this.board,
+      buildOccupancy(this.world, this.board),
+      e,
+      this.tick,
+    )
+
     return {
       entity: e,
       kind: ref.kind,
@@ -1689,9 +1698,7 @@ export class Game {
       commandable: team !== undefined && this.commandable(team),
       target: target?.entity != null ? this.pieceRef(target.entity) : null,
       underFire:
-        target?.lastAttacker != null && this.tick < target.underFireUntil && this.world.isAlive(target.lastAttacker)
-          ? { entity: target.lastAttacker, coord: this.pieceRef(target.lastAttacker)?.coord ?? '—' }
-          : null,
+        underFire != null ? { entity: underFire, coord: this.pieceRef(underFire)?.coord ?? '—' } : null,
       order: {
         kind: order?.kind ?? 'none',
         dest: order?.dest ?? null,

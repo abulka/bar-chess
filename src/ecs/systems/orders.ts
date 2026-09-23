@@ -3,6 +3,7 @@ import { chebyshev, containsCell, fireCells } from '../../game/geometry'
 import { makeOccupied } from '../../game/occupancy'
 import { HEAL_RADIUS } from '../../game/healing'
 import { closestEmptyCell, previewFiringCell } from '../../game/approach'
+import { coordName } from '../../game/coords'
 import { PIECES, WEAPONS } from '../../game/pieces'
 import { destReachable as canReach } from '../../game/pathfind'
 import { noteOrder, promoteNext, rechainQueue } from '../../game/queue'
@@ -183,6 +184,19 @@ const system: System = {
           // A badly wounded piece holds until fully healed.
           if (hp && (wounded || pressured) && hpRatio < CRITICAL_WOUND) motion.holdUntilHp = hp.max
           const lethal = outgunned(ctx, e, threats)
+          const prevIntent = motion.intent
+          const prevGoal = motion.goal
+          // Record the autonomous retreat in the order history (the same log the
+          // panel and transcript surface) so a self-preservation move is not
+          // invisible once it completes. Log only on a real transition, so a held
+          // goal does not spam the bounded log every tick.
+          const setPreserveGoal = (goal: { x: number; y: number } | null, text: string): void => {
+            motion.goal = goal
+            motion.intent = goal === null ? 'none' : 'preserve'
+            const moved =
+              goal !== null && (prevGoal === null || prevGoal.x !== goal.x || prevGoal.y !== goal.y)
+            if (prevIntent !== motion.intent || moved) noteOrder(order, ctx.tick, text)
+          }
           // Healing-aware hold: a latched, badly wounded piece outside the aura
           // walks to the nearest healing square so it can regenerate and release
           // the hold, instead of parking where it can never heal. An explicit move
@@ -193,8 +207,8 @@ const system: System = {
           if (holding && !inAura && kc && kind !== 'pawn' && !(auraBound && !lethal)) {
             const heal = nearestHealingCell(ctx, e, team, kc)
             if (heal) {
-              motion.goal = lethal && shouldDodge ? escapeGoal(ctx, e, team, threats, null) ?? heal : heal
-              motion.intent = 'preserve'
+              const goal = lethal && shouldDodge ? escapeGoal(ctx, e, team, threats, null) ?? heal : heal
+              setPreserveGoal(goal, `self-preservation retreat → ${coordName(goal.x, goal.y, ctx.board.height)}`)
               continue
             }
           }
@@ -218,13 +232,21 @@ const system: System = {
             if (goal === null && wounded && !inAura && kc && kind !== 'pawn') {
               goal = nearestHealingCell(ctx, e, team, kc)
             }
-            motion.goal = goal
-            motion.intent = goal === null ? 'none' : 'preserve'
+            setPreserveGoal(
+              goal,
+              goal === null
+                ? 'self-preservation: no safer step — holding'
+                : `self-preservation retreat → ${coordName(goal.x, goal.y, ctx.board.height)}`,
+            )
             continue
           } else {
             // Safe or healing: hold rather than drift, and let the aura work.
-            motion.goal = null
-            motion.intent = 'none'
+            setPreserveGoal(
+              null,
+              order.kind === 'none'
+                ? 'self-preservation: safe — holding'
+                : 'self-preservation: safe — resuming order',
+            )
             continue
           }
         }

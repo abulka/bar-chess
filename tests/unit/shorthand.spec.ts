@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Weapon } from '../../src/ecs/components'
+import { Order, Weapon } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
 import { LLM_PREAMBLE } from '../../src/game/shorthand'
 import { clearComponents, placePiece } from '../helpers'
@@ -60,6 +60,14 @@ describe('position shorthand', () => {
     const game = new Game(8)
     game.paint(3, 3, 4)
     expect(game.shorthand()).toContain('# terrain d5=wall')
+  })
+
+  it('surfaces a self-preservation retreat in note=', () => {
+    const game = new Game(8)
+    const bishop = placePiece(game, 'bishop', 'blue', { x: 4, y: 4 })
+    const order = game.world.require(bishop, Order)
+    order.log.push({ tick: 42, text: 'self-preservation retreat → c5' })
+    expect(game.shorthand()).toMatch(/note="self-preservation retreat → c5"/)
   })
 
   it('prefixes the preamble for the LLM variant', () => {

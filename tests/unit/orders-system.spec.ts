@@ -248,6 +248,43 @@ describe('orders system — automatic self-preservation', () => {
     expect(ctx.world.require(queen, Motion).goal).not.toBeNull()
   })
 
+  it('records a self-preservation retreat in the order log, once per goal', () => {
+    const ctx = hurtContext(true)
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
+    ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.45)
+    fireOn(ctx, queen, rook)
+
+    run(ctx)
+
+    const order = ctx.world.require(queen, Order)
+    expect(order.log).toHaveLength(1)
+    expect(order.log[0].text).toMatch(/^self-preservation retreat → /)
+
+    // A second tick holding the same goal must not duplicate the entry.
+    run(ctx)
+    expect(order.log).toHaveLength(1)
+  })
+
+  it('logs when a latched piece is safe again', () => {
+    const ctx = hurtContext(true)
+    const bishop = createPiece(ctx, 'blue', PIECES.bishop, { x: 4, y: 4 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
+    ctx.world.require(bishop, Health).cur = 10 // below CRITICAL_WOUND: latches a hold
+    fireOn(ctx, bishop, rook)
+
+    run(ctx)
+    const order = ctx.world.require(bishop, Order)
+    expect(order.log.some((n) => n.text.startsWith('self-preservation retreat'))).toBe(true)
+
+    // Threat gone and the fire window elapsed: it reports safe and holds.
+    ctx.world.destroy(rook)
+    ctx.tick = 1000
+    run(ctx)
+
+    expect(order.log[order.log.length - 1].text).toBe('self-preservation: safe — holding')
+  })
+
   it('does nothing when auto-preserve is switched off', () => {
     const ctx = hurtContext(false)
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })

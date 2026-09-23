@@ -14,6 +14,8 @@ import {
 } from '../ecs/components'
 import { TERRAIN_DEFS } from './board'
 import { coordName, fileLabel } from './coords'
+import { buildOccupancy } from './occupancy'
+import { underFireAttacker } from './underFire'
 import type { Game } from './game'
 import type { Entity } from '../ecs/world'
 import type { TeamId, Vec2 } from './types'
@@ -46,7 +48,7 @@ const FORMAT_LEGEND =
   'hold=<hp> badly wounded: safe-hold latched until that HP is reached; ' +
   'moving=mid-hop; res=<cell> reserved next cell; ' +
   'q=step>step queued steps after the active order (cell=goto, atk#id(cell)=attack); ' +
-  'note="..." why the order last changed (issued/replaced/completed/abandoned); ' +
+  'note="..." why the order/behaviour last changed (issued/replaced/completed/abandoned); ' +
   'w=weapon reload seconds; grid red=Upper blue=lower. terrain: . floor : road , sand ~ water # wall'
 
 /**
@@ -69,7 +71,7 @@ Reading a position block:
   goto=<cell>            standing move order
   atk=#id(cell)          standing attack order ('!' = target positionally unreachable, e.g. wrong colour)
   q=a>b>atk#id(cell)     queued steps after the active order (cell=goto, atk#id=attack), run in sequence
-  note="..."             why the order last changed (issued/replaced/completed/abandoned)
+  note="..."             why the order/behaviour last changed (issued/replaced/completed/abandoned)
   tgt=#id(cell)          current auto-acquired or retaliated target
   goal=<cell>            current motion goal (where the planned path ends)
   intent=<kind>          why the goal was chosen: preserve (self-preservation retreat),
@@ -138,6 +140,7 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
   }
   const units: Unit[] = []
   const byCell = new Map<number, Entity>()
+  const occupancy = buildOccupancy(game.world, game.board)
 
   for (const e of game.world.query(Cell, Team, PieceType, Health, Stance, Order, Target, Motion)) {
     const cell = game.world.require(e, Cell)
@@ -171,9 +174,8 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
     if (target.entity !== null && game.world.isAlive(target.entity)) {
       flags.push(`tgt=${refName(game, width, height, target.entity)}`)
     }
-    const attacker =
-      target.lastAttacker !== null && game.world.isAlive(target.lastAttacker) ? target.lastAttacker : null
-    if (attacker !== null && game.tick < target.underFireUntil) {
+    const attacker = underFireAttacker(game.world, game.board, occupancy, e, game.tick)
+    if (attacker !== null) {
       flags.push(`fire=${refName(game, width, height, attacker)}`)
     }
 

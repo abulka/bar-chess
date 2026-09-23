@@ -3,9 +3,11 @@ import type { EventRecord } from '../ecs/events'
 import { analyzeGame } from './analysis'
 import type { GameAnalysis } from './analysis'
 import type { Game } from './game'
+import { buildOccupancy } from './occupancy'
 import type { GameRecord } from './record'
 import { formatTranscript } from './transcript'
 import type { PieceTrace, TurnTrace } from './trace'
+import { underFireAttacker } from './underFire'
 
 export interface GameLogFinish {
   transcript: string
@@ -127,6 +129,7 @@ export class GameLog {
 
   private sample(): void {
     const pieces: PieceTrace[] = []
+    const occupancy = buildOccupancy(this.game.world, this.game.board)
     for (const e of this.game.world.query(Cell, Team, PieceType, Health, Motion, Order, Target)) {
       const cell = this.game.world.require(e, Cell)
       const hp = this.game.world.require(e, Health)
@@ -143,7 +146,7 @@ export class GameLog {
         movedThisTurn: motion.movedThisTurn,
         orderKind: order.kind,
         target: target.entity,
-        underFire: target.lastAttacker !== null && this.game.tick < target.underFireUntil,
+        underFire: underFireAttacker(this.game.world, this.game.board, occupancy, e, this.game.tick) !== null,
         hp: hp.cur,
         maxHp: hp.max,
         orderLog: order.log.slice(),

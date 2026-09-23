@@ -145,7 +145,7 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
         <span v-if="info.motion.goalCoord" class="muted"> → {{ info.motion.goalCoord }}</span>
       </p>
 
-      <div v-if="info.order.history.length" class="sub">order changes</div>
+      <div v-if="info.order.history.length" class="sub">order / auto changes</div>
       <ol v-if="info.order.history.length" class="order-log">
         <li v-for="(h, i) in info.order.history" :key="i">
           <span class="muted">t{{ h.tick }}</span> {{ h.text }}
