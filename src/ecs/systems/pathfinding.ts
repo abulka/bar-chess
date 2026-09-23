@@ -55,7 +55,11 @@ const system: System = {
           motion.blocked ||
           ctx.tick >= motion.replanAt
         : goalChanged || motion.path.length === 0
-      if (!needsPlan || ctx.tick < motion.replanAt) continue
+      // A goal change must re-plan immediately, otherwise the piece keeps walking
+      // a stale route to its previous goal while `motion.goal` points elsewhere
+      // (the overlay then draws a detour to the new goal). The cadence only
+      // throttles re-planning of an unchanged, blocked or empty route.
+      if (!needsPlan || (ctx.tick < motion.replanAt && !goalChanged)) continue
 
       budget--
       const team = ctx.world.require(e, Team)

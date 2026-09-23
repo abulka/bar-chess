@@ -248,21 +248,28 @@ describe('orders system — automatic self-preservation', () => {
     expect(ctx.world.require(queen, Motion).goal).not.toBeNull()
   })
 
-  it('records a self-preservation retreat in the order log, once per goal', () => {
+  it('records one retreat entry per preserve episode, not per goal change', () => {
     const ctx = hurtContext(true)
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
-    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 }) // covers the c-file
     ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.45)
     fireOn(ctx, queen, rook)
 
     run(ctx)
-
     const order = ctx.world.require(queen, Order)
     expect(order.log).toHaveLength(1)
-    expect(order.log[0].text).toMatch(/^self-preservation retreat → /)
+    expect(order.log[0].text).toMatch(/^self-preservation: retreating → /)
+    const firstGoal = ctx.world.require(queen, Motion).goal
 
-    // A second tick holding the same goal must not duplicate the entry.
+    // Add a second shooter covering the previous escape square: still preserving,
+    // but the least-exposed escape square changes. That re-evaluation must not
+    // add a second entry.
+    createPiece(ctx, 'red', PIECES.rook, { x: 7, y: 0 })
     run(ctx)
+
+    const motion = ctx.world.require(queen, Motion)
+    expect(motion.intent).toBe('preserve')
+    expect(motion.goal).not.toEqual(firstGoal)
     expect(order.log).toHaveLength(1)
   })
 
@@ -275,7 +282,7 @@ describe('orders system — automatic self-preservation', () => {
 
     run(ctx)
     const order = ctx.world.require(bishop, Order)
-    expect(order.log.some((n) => n.text.startsWith('self-preservation retreat'))).toBe(true)
+    expect(order.log.some((n) => n.text.startsWith('self-preservation: retreating'))).toBe(true)
 
     // Threat gone and the fire window elapsed: it reports safe and holds.
     ctx.world.destroy(rook)
@@ -283,6 +290,28 @@ describe('orders system — automatic self-preservation', () => {
     run(ctx)
 
     expect(order.log[order.log.length - 1].text).toBe('self-preservation: safe — holding')
+  })
+
+  it('closes the episode when the preserve gate stops acting (the stale-entry bug)', () => {
+    const ctx = hurtContext(true)
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 }) // covers the c-file
+    const bishop = createPiece(ctx, 'red', PIECES.bishop, { x: 1, y: 1 }) // a1-h8 diagonal through e4
+    ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.58) // above the 0.5 gate
+    const order = ctx.world.require(queen, Order)
+
+    run(ctx)
+    expect(ctx.world.require(queen, Motion).intent).toBe('preserve')
+    expect(order.log[order.log.length - 1].text).toMatch(/^self-preservation: retreating → /)
+
+    // Drop one shooter: only one cover left, still above the HP gate, so the
+    // preserve gate falls through and stops acting. The episode must be closed
+    // out instead of leaving the last retreat as the newest entry.
+    ctx.world.destroy(bishop)
+    run(ctx)
+
+    expect(ctx.world.require(queen, Motion).intent).not.toBe('preserve')
+    expect(order.log[order.log.length - 1].text).toBe('self-preservation: no longer needed — holding')
   })
 
   it('does nothing when auto-preserve is switched off', () => {

@@ -8,7 +8,7 @@ import { PIECES, WEAPONS } from '../../game/pieces'
 import { destReachable as canReach } from '../../game/pathfind'
 import { noteOrder, promoteNext, rechainQueue } from '../../game/queue'
 import { Cell, Health, Motion, Order, PieceType, Stance, Target, Team } from '../components'
-import type { OrderData } from '../components'
+import type { MotionIntent, OrderData } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
@@ -153,6 +153,9 @@ const system: System = {
       // Release a latched safe-hold once the piece is back to full health.
       if (motion.holdUntilHp > 0 && hp && hp.cur >= motion.holdUntilHp) motion.holdUntilHp = 0
       const holding = motion.holdUntilHp > 0
+      // Whether this piece was preserving last tick, so the retreat is logged as
+      // one episode (start / end) rather than on every goal re-evaluation.
+      const wasPreserve = motion.intent === 'preserve'
       if (
         ctx.autoPreserve &&
         kind &&
@@ -184,19 +187,6 @@ const system: System = {
           // A badly wounded piece holds until fully healed.
           if (hp && (wounded || pressured) && hpRatio < CRITICAL_WOUND) motion.holdUntilHp = hp.max
           const lethal = outgunned(ctx, e, threats)
-          const prevIntent = motion.intent
-          const prevGoal = motion.goal
-          // Record the autonomous retreat in the order history (the same log the
-          // panel and transcript surface) so a self-preservation move is not
-          // invisible once it completes. Log only on a real transition, so a held
-          // goal does not spam the bounded log every tick.
-          const setPreserveGoal = (goal: { x: number; y: number } | null, text: string): void => {
-            motion.goal = goal
-            motion.intent = goal === null ? 'none' : 'preserve'
-            const moved =
-              goal !== null && (prevGoal === null || prevGoal.x !== goal.x || prevGoal.y !== goal.y)
-            if (prevIntent !== motion.intent || moved) noteOrder(order, ctx.tick, text)
-          }
           // Healing-aware hold: a latched, badly wounded piece outside the aura
           // walks to the nearest healing square so it can regenerate and release
           // the hold, instead of parking where it can never heal. An explicit move
@@ -204,52 +194,80 @@ const system: System = {
           // volley that would kill it this tick breaks it off to dodge.
           const auraBound =
             order.kind === 'goto' && order.dest !== null && !!kc && inHealingAura(order.dest, kc)
-          if (holding && !inAura && kc && kind !== 'pawn' && !(auraBound && !lethal)) {
-            const heal = nearestHealingCell(ctx, e, team, kc)
-            if (heal) {
-              const goal = lethal && shouldDodge ? escapeGoal(ctx, e, team, threats, null) ?? heal : heal
-              setPreserveGoal(goal, `self-preservation retreat → ${coordName(goal.x, goal.y, ctx.board.height)}`)
-              continue
-            }
-          }
           if (auraBound && !lethal) {
             // Fall through: honour the player's move order into the healing aura.
-          } else if (shouldDodge) {
-            // Seek cover: step to the least-exposed nearby square, keeping a shot
-            // when free; hold when every step is no safer (or nobody is near).
-            // Pawns cannot retreat, so an "escape" only marches them into the
-            // enemy and gives up the shot — they hold and fire instead.
-            // Keep the shot while backing off: an attack order (or Attack stance)
-            // holds its target in range as a tie-break.
-            const keepShot =
-              targetValid && (order.kind === 'attack' || stance.mode === 'attack')
-                ? (target.entity as number)
-                : null
-            let goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, keepShot)
-            // No local step is safer (e.g. boxed in by ranged fire while the
-            // current square is only "safe" by adjacency): a wounded piece should
-            // not stand and die — head home to the king's aura to heal instead.
-            if (goal === null && wounded && !inAura && kc && kind !== 'pawn') {
-              goal = nearestHealingCell(ctx, e, team, kc)
-            }
-            setPreserveGoal(
-              goal,
-              goal === null
-                ? 'self-preservation: no safer step — holding'
-                : `self-preservation retreat → ${coordName(goal.x, goal.y, ctx.board.height)}`,
-            )
-            continue
           } else {
-            // Safe or healing: hold rather than drift, and let the aura work.
-            setPreserveGoal(
-              null,
-              order.kind === 'none'
-                ? 'self-preservation: safe — holding'
-                : 'self-preservation: safe — resuming order',
-            )
+            let goal: { x: number; y: number } | null = null
+            let intent: MotionIntent = 'none'
+            let noSaferStep = false
+            // A latched, badly wounded piece heads for the king's aura to heal.
+            if (holding && !inAura && kc && kind !== 'pawn') {
+              const heal = nearestHealingCell(ctx, e, team, kc)
+              if (heal) {
+                goal = lethal && shouldDodge ? escapeGoal(ctx, e, team, threats, null) ?? heal : heal
+                intent = 'preserve'
+              }
+            }
+            if (intent === 'none' && shouldDodge) {
+              // Seek cover: step to the least-exposed nearby square, keeping a shot
+              // when free; hold when every step is no safer (or nobody is near).
+              // Pawns cannot retreat, so an "escape" only marches them into the
+              // enemy and gives up the shot — they hold and fire instead.
+              // Keep the shot while backing off: an attack order (or Attack stance)
+              // holds its target in range as a tie-break.
+              const keepShot =
+                targetValid && (order.kind === 'attack' || stance.mode === 'attack')
+                  ? (target.entity as number)
+                  : null
+              goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, keepShot)
+              // No local step is safer (e.g. boxed in by ranged fire while the
+              // current square is only "safe" by adjacency): a wounded piece should
+              // not stand and die — head home to the king's aura to heal instead.
+              if (goal === null && wounded && !inAura && kc && kind !== 'pawn') {
+                goal = nearestHealingCell(ctx, e, team, kc)
+              }
+              if (goal !== null) intent = 'preserve'
+              else noSaferStep = true
+            }
+            // Safe or healing with no step: hold rather than drift (intent none).
+            motion.goal = goal
+            motion.intent = intent
+            // Record the retreat as an episode — one entry when it starts, one
+            // when it ends. Intra-episode goal re-evaluations are not logged, so a
+            // goal abandoned before it is ever pursued can never leave a false
+            // "retreat" as the newest entry in the order history.
+            if (intent === 'preserve' && !wasPreserve && goal) {
+              noteOrder(
+                order,
+                ctx.tick,
+                `self-preservation: retreating → ${coordName(goal.x, goal.y, ctx.board.height)}`,
+              )
+            } else if (intent !== 'preserve' && wasPreserve) {
+              noteOrder(
+                order,
+                ctx.tick,
+                noSaferStep
+                  ? 'self-preservation: no safer step — holding'
+                  : order.kind === 'none'
+                    ? 'self-preservation: safe — holding'
+                    : 'self-preservation: safe — resuming order',
+              )
+            }
             continue
           }
         }
+      }
+      // Reached when the preserve pass did not act this tick, or is honouring an
+      // aura-bound move order: if the piece was preserving last tick, that episode
+      // is over. (The in-block branch above only covers the cases that `continue`.)
+      if (wasPreserve) {
+        noteOrder(
+          order,
+          ctx.tick,
+          order.kind === 'none'
+            ? 'self-preservation: no longer needed — holding'
+            : 'self-preservation: no longer needed — resuming order',
+        )
       }
 
       // 1. Explicit attack order: glue to the target until it dies.

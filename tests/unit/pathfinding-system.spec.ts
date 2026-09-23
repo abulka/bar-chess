@@ -150,4 +150,24 @@ describe('pathfinding system — adaptive attack routes', () => {
     expect(motion.path).not.toContainEqual({ x: 1, y: 0 })
     expect(motion.path[motion.path.length - 1]).toEqual({ x: 3, y: 0 })
   })
+
+  it('re-plans immediately when the goal changes, even within the cadence', () => {
+    const { ctx, queen } = attackingQueen()
+    const order = ctx.world.require(queen, Order)
+    order.kind = 'goto'
+    order.target = null
+    const motion = ctx.world.require(queen, Motion)
+    motion.goal = { x: 3, y: 0 }
+    motion.path = []
+    run(ctx)
+    expect(motion.path[motion.path.length - 1]).toEqual({ x: 3, y: 0 })
+
+    // Pretend a plan just happened, so the cadence would normally throttle.
+    motion.replanAt = ctx.tick + 15
+    motion.goal = { x: 0, y: 3 }
+
+    // The new goal must be routed now, not after the cadence elapses.
+    run(ctx)
+    expect(motion.path[motion.path.length - 1]).toEqual({ x: 0, y: 3 })
+  })
 })

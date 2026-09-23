@@ -66,8 +66,8 @@ describe('position shorthand', () => {
     const game = new Game(8)
     const bishop = placePiece(game, 'bishop', 'blue', { x: 4, y: 4 })
     const order = game.world.require(bishop, Order)
-    order.log.push({ tick: 42, text: 'self-preservation retreat → c5' })
-    expect(game.shorthand()).toMatch(/note="self-preservation retreat → c5"/)
+    order.log.push({ tick: 42, text: 'self-preservation: retreating → c5' })
+    expect(game.shorthand()).toMatch(/note="self-preservation: retreating → c5"/)
   })
 
   it('prefixes the preamble for the LLM variant', () => {

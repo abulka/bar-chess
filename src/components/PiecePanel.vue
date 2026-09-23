@@ -146,11 +146,13 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
       </p>
 
       <div v-if="info.order.history.length" class="sub">order / auto changes</div>
-      <ol v-if="info.order.history.length" class="order-log">
+      <ul v-if="info.order.history.length" class="order-log">
         <li v-for="(h, i) in info.order.history" :key="i">
           <span class="muted">t{{ h.tick }}</span> {{ h.text }}
+          <span v-if="i === 0" class="tag latest">latest</span>
+          <span v-else-if="i === info.order.history.length - 1" class="tag oldest">oldest</span>
         </li>
-      </ol>
+      </ul>
 
       <div class="sub">movement</div>
       <p class="line">
@@ -302,6 +304,21 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
 
 .order-log .muted {
   color: var(--muted);
+}
+
+.order-log .tag {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 0.8em;
+  color: var(--muted);
+  vertical-align: 1px;
+}
+
+.order-log .tag.latest {
+  color: var(--heading);
+  border-color: var(--heading);
 }
 
 .ctl.clear {

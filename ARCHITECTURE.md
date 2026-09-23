@@ -369,12 +369,17 @@ cell/reservation during movement validation and path planning.
   retreat bright yellow and the properties panel can label each goal's source;
   the shorthand export carries it as `intent=<kind>` (and `hold=<hp>` while a
   safe-hold is latched).
-  A self-preservation goal change is also written to the piece's `Order.log`
-  (`self-preservation retreat → <cell>` on engage/retarget, `… safe — holding` /
-  `… resuming order` on release), so the autonomous move shows up in the panel
-  history, the shorthand `note=` and the transcript's `order:` tokens instead of
-  leaving the last player-order note stale. Only real transitions are logged, so
-  a held goal does not spam the bounded log.
+  A self-preservation retreat is also written to the piece's `Order.log` as one
+  **episode**: a single `self-preservation: retreating → <cell>` when it starts and
+  a single close-out when it ends (`self-preservation: safe — holding` /
+  `… safe — resuming order` for the safe branch, `… no safer step — holding` when
+  it is still covered but every step is no safer, `… no longer needed — holding` /
+  `… no longer needed — resuming order` when the gate simply stops acting). So the
+  autonomous move shows up in the panel history, the shorthand `note=` and the
+  transcript's `order:` tokens instead of leaving the last player-order note stale.
+  Intra-episode goal re-evaluations are not logged, so a goal that is abandoned
+  before it is ever pursued cannot leave a false "retreat" as the newest entry,
+  and a held goal does not spam the bounded log.
   The **reported** under-fire status (panel `under fire from`, shorthand `fire=`,
   the per-turn trace/analysis) is stricter than the AI latch: `underFireAttacker`
   returns the last attacker only while it still has line of sight, so a piece that
