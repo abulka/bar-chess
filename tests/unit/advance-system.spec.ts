@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Motion, Order, PieceType, Position, Team } from '../../src/ecs/components'
+import { Cell, Motion, Order, PieceType, Position, Stance, Team } from '../../src/ecs/components'
 import { EventBus } from '../../src/ecs/events'
 import type { SimContext, TeamRuntime } from '../../src/ecs/types'
 import { World } from '../../src/ecs/world'
@@ -52,6 +52,7 @@ describe('advance system — chess-style capture step', () => {
 
   /** Kill `victim` (remove it) and queue the killer-to-victim-cell intent. */
   function kill(ctx: SimContext, killer: number, victim: number): void {
+    ctx.world.require(killer, Stance).mode = 'attack'
     const vcell = { ...ctx.world.require(victim, Cell) }
     ctx.world.destroy(victim)
     ctx.cmds.advance.push({ killer, victim, cell: vcell })
@@ -148,6 +149,7 @@ describe('advance system — chess-style capture step', () => {
     ctx.captureAdvance = true
     const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 6, y: 3 }) // g5
     const pawn = createPiece(ctx, 'red', PIECES.pawn, { x: 5, y: 1 }) // f7
+    ctx.world.require(knight, Stance).mode = 'attack'
     ctx.cmds.damage.push({ target: pawn, source: knight, amount: 999, kind: 'projectile', direct: true })
 
     damage.update(ctx)
@@ -156,6 +158,21 @@ describe('advance system — chess-style capture step', () => {
     advance.update(ctx)
 
     expect(cellOf(ctx, knight)).toEqual({ x: 5, y: 1 })
+  })
+
+  it('never capture-advances a passive (none/move) killer', () => {
+    const ctx = makeContext()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
+    const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
+    // kill() defaults the killer to Attack; drop it back to a passive stance.
+    const vcell = { ...ctx.world.require(victim, Cell) }
+    ctx.world.destroy(victim)
+    ctx.world.require(queen, Stance).mode = 'none'
+    ctx.cmds.advance.push({ killer: queen, victim, cell: vcell })
+
+    advance.update(ctx)
+
+    expect(cellOf(ctx, queen)).toEqual({ x: 0, y: 0 })
   })
 
   it('ignores a killer that died in the same tick', () => {

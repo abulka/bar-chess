@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Motion, Order } from '../../src/ecs/components'
+import { Motion, Order, Target } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
 import { clearComponents, placePiece } from '../helpers'
 
@@ -181,10 +181,10 @@ describe('order queue', () => {
     expect(order.queue).toHaveLength(0)
   })
 
-  it('suspends (does not abandon) a reachable attack when given a move', () => {
+  it('a move replaces a reachable attack instead of parking it', () => {
     const game = new Game(8)
-    // A bishop already on a diagonal with the target: the attack is live, so a
-    // move parks it and it resumes afterwards rather than being replaced.
+    // A bishop already on a diagonal with the target: the attack is live, but a
+    // move replaces it outright — no parked target to resume, no kiting away.
     const bishop = placePiece(game, 'bishop', 'blue', { x: 5, y: 4 })
     const king = placePiece(game, 'king', 'red', { x: 4, y: 3 })
     game.selected = [bishop]
@@ -199,7 +199,9 @@ describe('order queue', () => {
     const order = game.world.require(bishop, Order)
     expect(order.kind).toBe('goto')
     expect(order.dest).toEqual({ x: 5, y: 5 })
-    expect(order.resumeTarget).toBe(king)
+    expect(order.resumeTarget).toBeNull()
+    expect(game.world.require(bishop, Target).entity).toBeNull()
+    void king
   })
 
   it('still queues behind an order that is merely blocked by a friendly', () => {

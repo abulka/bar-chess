@@ -423,3 +423,135 @@ describe('orders system — attack orders', () => {
     expect(ctx.world.require(bishop, Motion).goal).not.toBeNull()
   })
 })
+
+describe('orders system — motion intent provenance', () => {
+  beforeEach(() => clearComponents())
+
+  /** A flat board with a blue rally lane so AI advances have a destination. */
+  function context(): SimContext {
+    const ctx = makeContext()
+    ctx.board.data.lanes.blue = [{ x: 4, y: 7 }]
+    return ctx
+  }
+
+  function fireOn(ctx: SimContext, piece: number, attacker: number): void {
+    const target = ctx.world.require(piece, Target)
+    target.lastAttacker = attacker
+    target.underFireUntil = ctx.tick + 90
+  }
+
+  it('marks an explicit goto goal as an order', () => {
+    const ctx = context()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    const order = ctx.world.require(queen, Order)
+    order.kind = 'goto'
+    order.dest = { x: 7, y: 4 }
+
+    run(ctx)
+
+    expect(ctx.world.require(queen, Motion).intent).toBe('order')
+  })
+
+  it('marks a self-preservation retreat as preserve', () => {
+    const ctx = context()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
+    ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.45)
+    fireOn(ctx, queen, rook)
+
+    run(ctx)
+
+    const motion = ctx.world.require(queen, Motion)
+    expect(motion.intent).toBe('preserve')
+    expect(motion.goal).not.toBeNull()
+  })
+
+  it('holds instead of drifting when only non-shooting enemies are near', () => {
+    const ctx = context()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    // An a-file / rank-3 rook is inside the cover radius but does not cover d4.
+    createPiece(ctx, 'red', PIECES.rook, { x: 0, y: 3 })
+    ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.45)
+
+    run(ctx)
+
+    const motion = ctx.world.require(queen, Motion)
+    expect(motion.goal).toBeNull()
+    expect(motion.intent).toBe('none')
+  })
+
+  it('holds in the king aura against a stale attacker that cannot hit it', () => {
+    const ctx = context()
+    createPiece(ctx, 'blue', PIECES.king, { x: 4, y: 7 })
+    const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 4, y: 6 })
+    // A red knight two files away cannot leap onto e2, but is flagged as the
+    // recent attacker: the aura holds the piece rather than fleeing a ghost.
+    const attacker = createPiece(ctx, 'red', PIECES.knight, { x: 6, y: 6 })
+    ctx.world.require(knight, Health).cur = Math.floor(PIECES.knight.hp * 0.3)
+    fireOn(ctx, knight, attacker)
+
+    run(ctx)
+
+    expect(ctx.world.require(knight, Motion).goal).toBeNull()
+  })
+
+  it('holds in the king aura against a non-lethal shooter', () => {
+    const ctx = context()
+    createPiece(ctx, 'blue', PIECES.king, { x: 4, y: 7 })
+    const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 4, y: 6 })
+    createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 }) // covers the e-file (20 dmg)
+    ctx.world.require(knight, Health).cur = 30 // survives one rook volley
+
+    run(ctx)
+
+    // It stays on the healing square rather than being nudged out of the aura.
+    expect(ctx.world.require(knight, Motion).goal).toBeNull()
+  })
+
+  it('dodges in the king aura when the volley would kill it', () => {
+    const ctx = context()
+    createPiece(ctx, 'blue', PIECES.king, { x: 4, y: 7 })
+    const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 4, y: 6 })
+    createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 }) // 20 dmg >= 15 hp
+    ctx.world.require(knight, Health).cur = 15
+
+    run(ctx)
+
+    const motion = ctx.world.require(knight, Motion)
+    expect(motion.intent).toBe('preserve')
+    expect(motion.goal).not.toBeNull()
+  })
+
+  it('marks an AI advance as rally', () => {
+    const ctx = context()
+    ctx.teams.red.controller = 'ai'
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 0, y: 0 })
+
+    run(ctx)
+
+    expect(ctx.world.require(rook, Motion).intent).toBe('rally')
+  })
+
+  it('marks an AI king move as defense', () => {
+    const ctx = context()
+    ctx.teams.red.controller = 'ai'
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 4 })
+    createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 0 })
+
+    run(ctx)
+
+    expect(ctx.world.require(king, Motion).intent).toBe('defense')
+  })
+
+  it('marks an autonomous target pursuit as engage', () => {
+    const ctx = context()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 1, y: 0 })
+    ctx.world.require(queen, Stance).mode = 'attack'
+    ctx.world.require(queen, Target).entity = rook
+
+    run(ctx)
+
+    expect(ctx.world.require(queen, Motion).intent).toBe('engage')
+  })
+})

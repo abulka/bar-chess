@@ -10,7 +10,7 @@ import { Game } from '../../src/game/game'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { WEAPONS } from '../../src/game/pieces'
 import { HEAL_COLOR } from '../../src/game/healing'
-import { BAR_BG, RELOAD_FILL, healthColor } from '../../src/render/palette'
+import { BAR_BG, PRESERVE_COLOR, RELOAD_FILL, healthColor } from '../../src/render/palette'
 import { Renderer } from '../../src/render/renderer'
 import { orderAttack, placePiece } from '../helpers'
 
@@ -368,6 +368,24 @@ describe('Renderer healing overlay', () => {
 
     expect(ctx.strokes.some((st) => st.style.startsWith(AURA))).toBe(false)
     expect(ctx.strokes.some((st) => st.style === HEAL_COLOR)).toBe(false)
+  })
+})
+
+describe('Renderer self-preservation route', () => {
+  it('draws the retreat route in the preserve colour, not the order gold', () => {
+    const { renderer, ctx, game } = setup()
+    const piece = placePiece(game, 'rook', 'blue', { x: 4, y: 4 })
+    game.selected = [piece]
+    const motion = game.world.require(piece, Motion)
+    motion.goal = { x: 4, y: 2 }
+    motion.intent = 'preserve'
+    motion.path = [{ x: 4, y: 3 }, { x: 4, y: 2 }]
+
+    ctx.strokes = []
+    renderer.draw(game)
+
+    expect(ctx.strokes.some((st) => st.style === PRESERVE_COLOR && st.points.length > 2)).toBe(true)
+    expect(ctx.strokes.some((st) => st.style === ROUTE && st.points.length > 2)).toBe(false)
   })
 })
 

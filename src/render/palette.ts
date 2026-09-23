@@ -13,6 +13,8 @@ export const RELOAD_MIN_COOLDOWN = 1.5
 /** Fixed container behind every bar; there is no separate outline stroke. */
 export const BAR_BG = 'rgba(8,10,14,0.82)'
 export const RELOAD_FILL = '#15c2b6'
+/** Bright yellow for a self-preservation retreat route/objective (not an order). */
+export const PRESERVE_COLOR = '#f2ff49'
 
 const HEALTH_FULL: [number, number, number] = [76, 217, 100]
 const HEALTH_EMPTY: [number, number, number] = [255, 59, 48]

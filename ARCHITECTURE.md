@@ -99,10 +99,10 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Render` | `{ glyph, tint, size }` | unicode glyph + team tint |
 | `Health` | `{ cur, max }` | |
 | `Stance` | `{ mode }` | persistent policy: `none` / `move` / `attack` (`none` stands ground and fires in range, with no badge) |
-| `Order` | `{ kind, dest, target, reachable, resumeTarget, resumeTurn, queue }` | active step is one-shot `none` / `goto` / `attack`; `reachable` marks an attack target that is positionally attainable; `resumeTarget`/`resumeTurn` park an attack while a goto suspends it; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence |
+| `Order` | `{ kind, dest, target, reachable, resumeTarget, resumeTurn, queue }` | active step is one-shot `none` / `goto` / `attack`; `reachable` marks an attack target that is positionally attainable; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence (`resumeTarget`/`resumeTurn` are retained for save compatibility but unused — a move now replaces an attack) |
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping |
 | `Weapon` | `{ left }` | seconds until next shot |
-| `Motion` | `{ goal, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn }` | grid movement + render interpolation; `reserved` is the cell being entered |
+| `Motion` | `{ goal, intent, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn }` | grid movement + render interpolation; `intent` is the goal's source (`order`/`preserve`/`defense`/`engage`/`rally`); `reserved` is the cell being entered |
 | `Projectile` | `{ team, damage, ttl, trajectory, splash, radius, size, shape, spin, color, target, owner, waypoints, waypointIndex }` | |
 | `Fx` | `{ ttl, maxTtl, radius, color }` | render-only impact/explosion |
 | `Dead` | `true` | marker processed by the death system |
@@ -329,20 +329,28 @@ cell/reservation during movement validation and path planning.
   any enemy beyond its weapon's reach, keeping the cost bounded. It runs only
   while the piece has **no active order**: an explicit player order always wins
   (command a hurt piece to a healing square and it goes), and preservation
-  resumes once the order completes and clears. When
+  resumes once the order completes and clears. It repositions only for **real,
+  current danger** — an enemy covering the piece's square now (`shooters > 0`) or
+  a recent attacker still under fire — so a piece with only distant, non-shooting
+  enemies nearby holds instead of drifting. The king's **healing aura** is a
+  strong sanctuary: a piece inside it holds unless the volley it currently faces
+  would **kill** it (`outgunned`) — a mere shooter or a stale "recent attacker" is
+  not enough — so it recovers instead of being nudged out of range. When
   hurt, the scan widens to `COVER_RADIUS = 6` so nearby enemies count even before
   they can shoot; it then steps to the least-exposed nearby square (keeping its
   shot as a tie-break) and holds there rather than chasing or trekking home. Gated by
   `ctx.autoPreserve`, the persisted **auto-preserve** toolbar toggle; with it off
   the same coverage-based retreat still runs for a low-HP Attack-stance piece
-  (there is no longer a single-target `fleeCell` path).
-  A `goto` that carries a `resumeTarget` is a suspended attack: on arrival (or
-  once stalled) it arms `resumeTurn = ctx.turn + 2` and **regroups** — holding, or
-  kiting one step back while under fire (`kiteCell`, which raises distance while
-  keeping the threat in firing geometry). It resumes the attack once the window
-  has elapsed *and* it is no longer under fire, or clears the order if the parked
-  target is gone. `ctx.turn` is a monotonic turn index captured in `TurnState` so
-  undo/redo/replay stay deterministic.
+  (there is no longer a single-target `fleeCell` path). A `none`/`move` piece
+  never pursues or capture-advances — its only self-directed move is this
+  necessary dodge, so it otherwise goes exactly where it is ordered and holds.
+  Every goal records a `Motion.intent` (`order` / `preserve` /
+  `defense` / `engage` / `rally`), so the renderer can colour a self-preservation
+  retreat bright yellow and the properties panel can label each goal's source;
+  the shorthand export carries it as `intent=<kind>`.
+  A player-issued move **replaces** any active attack — it does not park the
+  target to resume later and does not kite the piece back toward the old fight.
+  A piece ordered to a healing square therefore stays there and recovers.
   When the active step finishes — a goto arrival, an attack target's death, or a
   goto whose destination the piece's movement geometry can *never* reach
   (`destReachable` via `reachableCells`) — `promoteNext` (`src/game/queue.ts`)
@@ -350,9 +358,7 @@ cell/reservation during movement validation and path planning.
   `rechainQueue` re-plans the remaining steps from the piece's new cell. A
   waypoint merely blocked by pieces is reachable and therefore **waits**, exactly
   like a single goto order, so a queue is never lost to a temporary jam; an
-  unreachable waypoint is skipped with a `warn` event. A promoted goto keeps any
-  `resumeTarget`, so a suspended attack resumes only after the whole queue has
-  drained; a promoted attack clears it.
+  unreachable waypoint is skipped with a `warn` event.
 - **pathfinding** — budgeted A* (`PATH_BUDGET_PER_TICK`) over the piece's
   movement geometry, with other pieces passed in as blockers (excluding the
   piece itself). Unreachable goals fall back to the nearest reachable cell.
@@ -401,7 +407,9 @@ cell/reservation during movement validation and path planning.
   allowance and the AI move budget. The hop is re-validated against live
   occupancy and geometry (blocked line, occupied destination or a dead killer
   cancels it), capped at one step per killer per tick, and exposed by the
-  persisted **capture advance** toolbar toggle (default off).
+  persisted **capture advance** toolbar toggle (default off). It is an
+  **Attack-mode** behaviour only: a passive (`none`/`move`) piece never
+  capture-advances, so a kill can never pull it off a safe or healing square.
 - **healing** — king aura regeneration: same-team pieces within two Chebyshev
   cells of their living king (the king included) regain 5% of max HP per second,
   clamped at max and never reviving a piece at zero HP. Membership comes from
@@ -488,7 +496,7 @@ pieceInfo terrainVersion`.
 | --------- | -------------- |
 | `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, reset |
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle |
-| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, queue, movement) with selection-wide stance buttons and clear-orders |
+| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`), selection-wide stance buttons and clear-orders |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
 | `StatsBar.vue` | tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Sound config panel, Inspector for the selection |
@@ -507,7 +515,9 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   eight), a forward half-disc for the pawn, and 8 dots for the knight.
 - **Path** — dashed gold route; **destination** a hollow diamond (orange and
   dashed when blocked). The diamond shape keeps the destination distinct from the
-  target reticle (circle + cross).
+  target reticle (circle + cross). A **self-preservation** retreat
+  (`Motion.intent === 'preserve'`) draws the same route and diamond in bright
+  yellow (`PRESERVE_COLOR`) so an automatic dodge is never mistaken for an order.
 - **Target** — an ordered attack (`order.kind === 'attack'`) draws a red firing
   line + reticle and rings the victim red; an auto-acquired or retaliation target
   (`Target.entity` under Attack stance / return fire) draws the same indicator in
@@ -540,8 +550,9 @@ Ordering is BAR-style and **context-sensitive** — there is no global order mod
   click (or Shift+right-click) **appends** a queued step (`Game.appendStep`), so
   `move, move, attack` can be planned with repeated right-clicks; only the first
   click on an unplanned piece replaces/creates the active order, and `c` clears
-  the whole plan. A move on an un-queued attacker still suspends/regroups rather
-  than queueing behind the attack. A piece whose active order has **settled**
+  the whole plan. A move on an un-queued attacker **replaces** the attack (no
+  parked target to resume) rather than queueing behind it. A piece whose active
+  order has **settled**
   (arrived, or parked at the closest legal point a best-effort route can reach —
   `Game.orderSettled`) yields to the new command instead of hiding it in the
   queue, so an impossible order can no longer swallow every later click; an order
@@ -647,8 +658,8 @@ after it rather than being dropped; `u`/`r` undo/redo completed turns.
 Team colour is Orange vs Blue; **red marks an ordered attack**: the firing chain,
 the Attack stance badge, and the ring around a piece targeted by an explicit
 attack order. **Amber marks autonomous engagement**: the ring/line around an
-auto-acquired or retaliation target (Attack stance, return fire, or a suspended
-attack's parked target). Pieces no longer draw a default ring. Target rings/chains
+auto-acquired or retaliation target (Attack stance or return fire). Pieces no
+longer draw a default ring. Target rings/chains
 are computed from **scoped** pieces only (selection + `my orders` / `enemy plans`),
 so they never float permanently. A damaged piece draws a thin
 green→red (solid red at ≤40%) health bar and a long-cooldown weapon that has fired a **teal**

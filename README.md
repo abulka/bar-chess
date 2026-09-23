@@ -14,7 +14,7 @@ You command your pieces by giving them **intentions** (a destination or a target
 - **Command, don't micromanage.** Right-click to set goals; pieces work toward them and fight opportunistically. Set a persistent **stance** (Move / Attack / None) and let them engage.
 - **Real-time with pause as a strategy tool.** The battle starts paused. Issue orders, take a turn, or let it run at 0.5×/1×/2×/4× speed.
 - **Turns, undo, redo and deterministic replay.** `space` advances one turn (one move per piece, then auto-pause); `u`/`r` step through turn history; `y` replays the last turn exactly.
-- **Readable overlays.** Move cells, attack cells, range arcs, paths, firing lines, health and firing-recharge bars, target rings and per-army order summaries.
+- **Readable overlays.** Move cells, attack cells, range arcs, paths, firing lines, health and firing-recharge bars, target rings and per-army order summaries. Automatic self-preservation retreats are drawn in bright yellow, and the piece panel labels every goal's source (manual, unreachable, self-preservation, rally, …).
 - **Game modes.** Human vs AI, AI vs AI and Human vs Human.
 - **Procedural audio.** WebAudio SFX driven by the event bus, with a synth editor to tweak every cue.
 - **Self-preservation, bodyguards and capture-advance** make fights feel tactical rather than static.

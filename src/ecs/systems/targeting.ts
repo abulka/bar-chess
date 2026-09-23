@@ -152,14 +152,18 @@ const system: System = {
       } else if (ctx.tick >= target.retargetAt) {
         target.retargetAt = ctx.tick + RETARGET_TICKS
         const found = acquire(ctx, e, team, def.weapon, mode === 'attack')
-        if (found !== null && found !== target.entity) {
+        // Re-evaluate every retarget window: a target this piece can no longer
+        // acquire (moved out of reach / line) is dropped, not left stale.
+        if (found !== target.entity) {
           const previous = target.entity
           target.entity = found
-          ctx.bus.emit('target', `#${e} switched target #${previous} -> #${found}`, {
-            entity: e,
-            team,
-            data: { target: found },
-          })
+          if (found !== null) {
+            ctx.bus.emit('target', `#${e} switched target #${previous} -> #${found}`, {
+              entity: e,
+              team,
+              data: { target: found },
+            })
+          }
         }
       }
     }

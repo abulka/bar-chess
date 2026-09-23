@@ -1,9 +1,10 @@
 import { ATTACK_LEASH } from '../../game/constants'
-import { chebyshev, containsCell, fireCells, moveDestinations } from '../../game/geometry'
+import { chebyshev, containsCell, fireCells } from '../../game/geometry'
 import { makeOccupied } from '../../game/occupancy'
+import { HEAL_RADIUS } from '../../game/healing'
 import { closestEmptyCell, previewFiringCell } from '../../game/approach'
 import { PIECES, WEAPONS } from '../../game/pieces'
-import { reachableCells } from '../../game/pathfind'
+import { destReachable as canReach } from '../../game/pathfind'
 import { promoteNext, rechainQueue } from '../../game/queue'
 import { Cell, Health, Motion, Order, PieceType, Stance, Target, Team } from '../components'
 import type { OrderData } from '../components'
@@ -13,8 +14,6 @@ import type { System } from '../pipeline'
 import { aiKingGoal, isScreening, KING_GUARD_RADIUS, kingOf, kingThreats, screenPlan } from './kingDefense'
 import { COVER_RADIUS, coverageThreats, escapeGoal, isValuable, outgunned } from './preservation'
 import type { ThreatMemo } from './preservation'
-
-const REGROUP_TURNS = 2
 
 /** HP ratio at which a piece starts saving itself, scaled by how costly it is. */
 function preserveThreshold(kind: string): number {
@@ -55,9 +54,7 @@ function destReachable(ctx: SimContext, e: Entity, dest: { x: number; y: number 
   const cell = ctx.world.get(e, Cell)
   const team = ctx.world.get(e, Team)
   if (!def || !cell || !team) return true
-  const reach = reachableCells(ctx.board, cell, def.move, team)
-  const idx = dest.y * ctx.board.width + dest.x
-  return idx >= 0 && idx < reach.length && reach[idx] === 1
+  return canReach(ctx.board, cell, def.move, team, dest)
 }
 
 function inFiringGeometry(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'): boolean {
@@ -92,46 +89,6 @@ function pursue(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'
     closestEmptyCell(ctx.board, cell, tcell, def.move, team, occupied) ??
     { x: tcell.x, y: tcell.y }
   )
-}
-
-/**
- * Best one-move cell that backs off from the threat while keeping it in firing
- * geometry. Prefers staying in range, then distance; falls back to pure flee
- * (farthest cell) when nothing can shoot. Returns null (hold) when no cell opens
- * the gap, so a cornered piece does not shuffle between equal-distance cells.
- */
-function kiteCell(ctx: SimContext, e: Entity, team: 'red' | 'blue', threat: Entity): { x: number; y: number } | null {
-  const kind = ctx.world.require(e, PieceType).kind
-  const def = PIECES[kind]
-  if (!def) return null
-  const cell = ctx.world.require(e, Cell)
-  const tc = ctx.world.get(threat, Cell)
-  if (!tc) return null
-  const board = ctx.board
-  const blocked = (x: number, y: number) => {
-    const other = ctx.occupancy.get(y * board.width + x)
-    return other !== undefined && other !== e
-  }
-  const options = moveDestinations(board, cell, def.move, team, blocked)
-  const weaponGeom = WEAPONS[def.weapon].geometry
-  const currentDist = Math.hypot(cell.x - tc.x, cell.y - tc.y)
-  let best: { x: number; y: number } | null = null
-  let bestScore = -Infinity
-  let bestDist = currentDist
-  for (const c of options) {
-    const dist = Math.hypot(c.x - tc.x, c.y - tc.y)
-    const inRange = containsCell(fireCells(board, c, weaponGeom, team, blocked), tc.x, tc.y)
-    const score = (inRange ? 1_000_000 : 0) + dist
-    if (score > bestScore) {
-      bestScore = score
-      bestDist = dist
-      best = c
-    }
-  }
-  // No cell opens the gap (cornered): hold rather than shuffle in place, so a
-  // kite cannot oscillate between two equally distant cells.
-  if (best === null || bestDist <= currentDist) return null
-  return best
 }
 
 function rally(ctx: SimContext, team: 'red' | 'blue'): { x: number; y: number } | null {
@@ -196,14 +153,30 @@ const system: System = {
         const shooters = threats.reduce((n, t) => n + (t.canHitNow ? 1 : 0), 0)
         const pressured = outgunned(ctx, e, threats) || (valuable && shooters >= 2)
         if (hpRatio < preserve || pressured) {
-          // Seek cover: step to the least-exposed nearby square, keeping a shot
-          // when free; hold when every step is no safer (or nobody is near).
-          // Pawns cannot retreat, so an "escape" only marches them into the enemy
-          // and gives up the shot — they hold and fire instead.
-          // Idle piece only (an explicit order skips this block), so the target
-          // is kept in range only for an Attack stance.
-          const keepShot = targetValid && stance.mode === 'attack' ? (target.entity as number) : null
-          motion.goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, keepShot)
+          // Dodge only real, current danger. Inside the king's healing aura the
+          // piece stays put unless the volley it faces would kill it (outgunned),
+          // so a hurt piece recovers instead of being nudged out of range.
+          // Outside the aura it dodges whenever an enemy covers the square now or
+          // it is under fire.
+          const king = kings[team]
+          const kc = king !== null ? ctx.world.get(king, Cell) : null
+          const inAura = !!kc && chebyshev(cell.x, cell.y, kc.x, kc.y) <= HEAL_RADIUS
+          const shouldDodge = inAura ? outgunned(ctx, e, threats) : shooters > 0 || underFire
+          if (shouldDodge) {
+            // Seek cover: step to the least-exposed nearby square, keeping a shot
+            // when free; hold when every step is no safer (or nobody is near).
+            // Pawns cannot retreat, so an "escape" only marches them into the
+            // enemy and gives up the shot — they hold and fire instead.
+            // Idle piece only (an explicit order skips this block), so the target
+            // is kept in range only for an Attack stance.
+            const keepShot = targetValid && stance.mode === 'attack' ? (target.entity as number) : null
+            motion.goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, keepShot)
+            motion.intent = motion.goal === null ? 'none' : 'preserve'
+          } else {
+            // Safe or healing: hold rather than drift, and let the aura work.
+            motion.goal = null
+            motion.intent = 'none'
+          }
           continue
         }
       }
@@ -220,6 +193,7 @@ const system: System = {
           // recomputes `reachable` every tick, so the route and overlay update as
           // the piece and target move.
           motion.goal = pursue(ctx, e, t, team)
+          motion.intent = motion.goal === null ? 'none' : 'order'
           continue
         }
         // The order is done; the next queued step takes over, else clear. The
@@ -235,83 +209,40 @@ const system: System = {
       }
 
       // 2. Goto order: advance toward the objective (best effort if unreachable).
-      // A move issued mid-attack suspends the attack and resumes it after a
-      // regroup window (or as soon as the piece is no longer under fire).
+      // A move fully replaces any earlier attack; there is no parked target to
+      // resume and no kiting away from the ordered square.
       if (order.kind === 'goto') {
-        // Once armed, the piece is in the regroup phase regardless of where it
-        // has kited to, so the arrival test below is skipped from then on.
-        const armed = order.resumeTarget !== null && order.resumeTurn >= 0
-        if (!armed) {
-          const arrived =
-            order.dest !== null && order.dest.x === cell.x && order.dest.y === cell.y && !motion.moving
-          // Only treat a blocked, pathless piece as stuck once the pending replan
-          // has had a chance to run, so a transient block does not end the move.
-          const stuck =
-            !motion.moving && motion.blocked && motion.path.length === 0 && ctx.tick >= motion.replanAt
-          // A fulfilled waypoint yields to the queue. A waypoint this piece's
-          // geometry can never reach is skipped too (best-effort would idle
-          // forever); a waypoint merely blocked by pieces keeps waiting.
-          const unreachable = order.dest !== null && !destReachable(ctx, e, order.dest)
-          if (arrived || (unreachable && order.queue.length > 0)) {
-            if (promoteNext(order, motion)) {
-              rechain(ctx, e, order)
-              if (unreachable && !arrived) ctx.bus.emit('warn', `#${e} skipping unreachable waypoint`)
-              continue
-            }
-          }
-          if (!arrived && !(stuck && order.resumeTarget !== null)) {
-            motion.goal = order.dest
+        const arrived =
+          order.dest !== null && order.dest.x === cell.x && order.dest.y === cell.y && !motion.moving
+        // A fulfilled waypoint yields to the queue. A waypoint this piece's
+        // geometry can never reach is skipped too (best-effort would idle
+        // forever); a waypoint merely blocked by pieces keeps waiting.
+        const unreachable = order.dest !== null && !destReachable(ctx, e, order.dest)
+        if (arrived || (unreachable && order.queue.length > 0)) {
+          if (promoteNext(order, motion)) {
+            rechain(ctx, e, order)
+            if (unreachable && !arrived) ctx.bus.emit('warn', `#${e} skipping unreachable waypoint`)
             continue
           }
-
-          if (order.resumeTarget === null) {
-            order.kind = 'none'
-            order.dest = null
-            motion.goal = null
-            continue
-          }
-
-          order.resumeTurn = ctx.turn + REGROUP_TURNS
         }
-
-        const parked = order.resumeTarget
-        if (parked === null) {
-          order.kind = 'none'
-          order.dest = null
-          motion.goal = null
-          continue
-        }
-        const parkedValid = ctx.world.isAlive(parked) && ctx.world.has(parked, Cell)
-        const attacker = target.lastAttacker
-        const threat =
-          attacker !== null && ctx.world.isAlive(attacker) && ctx.world.has(attacker, Cell)
-            ? attacker
-            : parkedValid
-              ? parked
-              : null
-        const underFire = threat !== null && ctx.tick < target.underFireUntil
-
-        if (parkedValid && (ctx.turn < order.resumeTurn || underFire)) {
-          // Hold, but kite back a step while under fire so it never sits in the
-          // danger zone; return fire still happens via targeting/combat.
-          motion.goal = underFire && threat !== null ? kiteCell(ctx, e, team, threat) : null
+        // Not there yet: keep advancing (a blocked, pathless piece simply waits).
+        if (!arrived) {
+          motion.goal = order.dest
+          motion.intent = 'order'
           continue
         }
 
-        if (parkedValid) {
-          order.kind = 'attack'
-          order.target = parked
-          order.resumeTarget = null
-          order.resumeTurn = -1
-          motion.goal = pursue(ctx, e, parked, team)
+        // Arrived: the move is complete; the next queued step takes over, else clear.
+        if (promoteNext(order, motion)) {
+          rechain(ctx, e, order)
           continue
         }
-
         order.kind = 'none'
         order.dest = null
         order.resumeTarget = null
         order.resumeTurn = -1
         motion.goal = null
+        motion.intent = 'none'
         continue
       }
 
@@ -321,12 +252,14 @@ const system: System = {
 
       if (mode !== 'attack') {
         motion.goal = null
+        motion.intent = 'none'
         continue
       }
 
       // The AI king defends its post instead of charging with the army.
       if (controller === 'ai' && ctx.world.get(e, PieceType)?.kind === 'king') {
         motion.goal = aiKingGoal(ctx, e, team, kingThreats(ctx, e, team, kingThreatMemo))
+        motion.intent = motion.goal === null ? 'none' : 'defense'
         continue
       }
 
@@ -340,6 +273,7 @@ const system: System = {
           // Already blocking a shot: stay planted rather than chasing.
           if (isScreening(ctx, e, team, kc)) {
             motion.goal = null
+            motion.intent = 'none'
             continue
           }
           const threats = kingThreats(ctx, king, team, kingThreatMemo)
@@ -352,6 +286,7 @@ const system: System = {
               : { onSegment: false, cell: null }
             if (plan.onSegment) motion.goal = null
             else motion.goal = plan.cell ?? pursue(ctx, e, top.entity, team)
+            motion.intent = motion.goal === null ? 'none' : 'defense'
             continue
           }
         }
@@ -362,11 +297,13 @@ const system: System = {
         // Pawns cannot retreat, so they hold and fire instead.
         const threats = coverageThreats(ctx, e, team, pieceThreatMemo, { proximityRadius: COVER_RADIUS })
         motion.goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, target.entity as number)
+        motion.intent = motion.goal === null ? 'none' : 'preserve'
         continue
       }
       if (!targetValid) {
         // AI armies advance; a player's Attack stance skirmishes locally.
         motion.goal = controller === 'ai' ? rally(ctx, team) : null
+        motion.intent = motion.goal === null ? 'none' : 'rally'
         continue
       }
       // Leash: don't chase an auto-acquired target clear across the board.
@@ -376,6 +313,7 @@ const system: System = {
         chebyshev(cell.x, cell.y, tcell.x, tcell.y) > ATTACK_LEASH &&
         !inFiringGeometry(ctx, e, target.entity as number, team)
       motion.goal = beyondLeash ? null : pursue(ctx, e, target.entity as number, team)
+      motion.intent = motion.goal === null ? 'none' : 'engage'
     }
   },
 }

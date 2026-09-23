@@ -19,7 +19,7 @@ import {
   Team,
   Weapon,
 } from '../ecs/components'
-import type { MotionData, OrderData, OrderStep } from '../ecs/components'
+import type { MotionData, MotionIntent, OrderData, OrderStep } from '../ecs/components'
 import { Board } from './board'
 import type { BoardSize, Placement } from './boards'
 import { createBoardData, initialArmy } from './boards'
@@ -43,7 +43,7 @@ import { buildOccupancy, occupiedExcept } from './occupancy'
 import type { Occupancy } from './occupancy'
 import type { OrderKind, StanceMode, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
-import { findPath } from './pathfind'
+import { destReachable, findPath } from './pathfind'
 import { anchorFor, planStep } from './queue'
 import { buildBoard, buildWorldSnapshot, serializePosition, validatePosition } from './position'
 import type { SavedPosition } from './position'
@@ -130,11 +130,13 @@ export interface PieceInfo {
     reachable: boolean
     regrouping: boolean
     parked: PieceRef | null
-    queue: Array<{ kind: OrderStep['kind']; label: string }>
+    queue: Array<{ kind: OrderStep['kind']; label: string; source: 'manual'; reachable: boolean }>
   }
   motion: {
     goal: Vec2 | null
     goalCoord: string | null
+    /** Provenance of the current goal (self-preservation, rally, …). */
+    intent: MotionIntent
     pathLength: number
     blocked: boolean
     moving: boolean
@@ -1070,12 +1072,12 @@ export class Game {
           order.resumeTurn = -1
           motion.path = []
           motion.goal = null
+          motion.intent = 'none'
         }
         if (attacking) this.startAttack(e, order, motion, occupant as Entity)
         else this.startGoto(e, order, motion, cell, occ, team)
       } else if (order.kind === 'attack' && order.queue.length === 0 && !attacking) {
-        // A move issued on an un-queued attacking piece suspends the attack:
-        // park the target so it resumes after the regroup window.
+        // A move on an attacking piece replaces the attack (no parked target).
         this.startGoto(e, order, motion, cell, occ, team)
       } else {
         this.appendStep(e, order, motion, cell, attacking ? (occupant as Entity) : null, team)
@@ -1100,6 +1102,7 @@ export class Game {
     order.resumeTarget = null
     order.resumeTurn = -1
     motion.goal = null
+    motion.intent = 'none'
     motion.path = []
     motion.arrived = true
     // Plan the route to a firing position now so it is visible while paused.
@@ -1114,26 +1117,23 @@ export class Game {
     occ: Occupancy,
     team: TeamId,
   ): void {
-    const parked =
-      order.kind === 'attack' &&
-      order.target !== null &&
-      this.world.isAlive(order.target) &&
-      this.world.has(order.target, Cell)
-        ? order.target
-        : order.resumeTarget
+    // A move fully replaces any active attack — it does not park the target and
+    // resume later. A piece ordered to a healing square therefore stays there
+    // instead of kiting back to its old victim.
     order.kind = 'goto'
     order.dest = { x: cell.x, y: cell.y }
     order.target = null
-    order.resumeTarget = parked
+    order.resumeTarget = null
     order.resumeTurn = -1
-    // A plain move must not leave a stale combat target behind; a suspended
-    // attack keeps lastAttacker/underFire so it can still kite while retreating.
+    // Drop the stale combat target/retaliation too, so no engagement or parked
+    // line is left pointing at the old fight.
     const t = this.world.get(e, Target)
-    if (t && parked === null) {
+    if (t) {
       t.entity = null
       t.lastAttacker = null
     }
     motion.goal = { x: cell.x, y: cell.y }
+    motion.intent = 'order'
     // Fall back to a friendly-passable route when boxed in, so a blocked move
     // still shows a path instead of a bare straight line.
     this.planNow(e, motion, cell, occupiedExcept(this.board, occ, e), this.friendlyPass(occ, e, team))
@@ -1197,6 +1197,7 @@ export class Game {
       }
       if (motion) {
         motion.goal = null
+        motion.intent = 'none'
         motion.path = []
         motion.arrived = true
       }
@@ -1401,6 +1402,7 @@ export class Game {
     const reachable = firingPositionExists(this.board, cell, tcell, def.move, geometry, team)
     if (containsCell(fireCells(this.board, cell, geometry, team, blocked), tcell.x, tcell.y)) {
       motion.goal = null
+      motion.intent = 'none'
       motion.path = []
       return true
     }
@@ -1417,6 +1419,7 @@ export class Game {
       closestEmptyCell(this.board, cell, tcell, def.move, team, blocked) ??
       { x: tcell.x, y: tcell.y }
     motion.goal = goal
+    motion.intent = 'order'
     this.planNow(e, motion, goal, planOccupied)
     return reachable
   }
@@ -1599,8 +1602,16 @@ export class Game {
     const coord = (c: Vec2 | null | undefined): string | null =>
       c ? coordName(c.x, c.y, this.board.height) : null
 
+    // A goto can never be fulfilled if its destination is off this piece's
+    // movement geometry; mark it so the panel can flag it like an unreachable
+    // attack target.
+    const gotoReachable = (dest: Vec2 | null): boolean =>
+      dest === null || team === undefined ? true : destReachable(this.board, cell, def.move, team, dest)
+
     const queue = (order?.queue ?? []).map((step) => ({
       kind: step.kind,
+      source: 'manual' as const,
+      reachable: step.kind === 'attack' ? step.reachable : gotoReachable(step.dest),
       label:
         step.kind === 'goto'
           ? `move ${coord(step.dest) ?? '—'}`
@@ -1632,7 +1643,12 @@ export class Game {
         dest: order?.dest ?? null,
         destCoord: coord(order?.dest),
         target: order?.target != null ? this.pieceRef(order.target) : null,
-        reachable: order?.reachable ?? true,
+        reachable:
+          order?.kind === 'attack'
+            ? order.reachable
+            : order?.kind === 'goto'
+              ? gotoReachable(order.dest)
+              : true,
         regrouping: (order?.resumeTarget ?? null) !== null && (order?.resumeTurn ?? -1) >= 0,
         parked: order?.resumeTarget != null ? this.pieceRef(order.resumeTarget) : null,
         queue,
@@ -1640,6 +1656,7 @@ export class Game {
       motion: {
         goal: motion?.goal ?? null,
         goalCoord: coord(motion?.goal),
+        intent: motion?.intent ?? 'none',
         pathLength: motion?.path.length ?? 0,
         blocked: motion?.blocked ?? false,
         moving: motion?.moving ?? false,

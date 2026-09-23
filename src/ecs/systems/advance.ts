@@ -1,7 +1,7 @@
 import { containsCell, fireCells } from '../../game/geometry'
 import { buildOccupancy, cellIndex, makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS } from '../../game/pieces'
-import { Cell, Motion, Order, PieceType, Position, Team } from '../components'
+import { Cell, Motion, Order, PieceType, Position, Stance, Team } from '../components'
 import type { System } from '../pipeline'
 
 /**
@@ -45,6 +45,12 @@ const system: System = {
       const attackOrderOnVictim = order.kind === 'attack' && order.target === intent.victim
       if (order.kind !== 'none' && !attackOrderOnVictim) continue
 
+      // Capture advance is an Attack-mode behaviour only: a passive (none/move)
+      // piece is never pulled off a safe or healing square by a kill.
+      const team = ctx.world.require(killer, Team)
+      const stance = ctx.world.get(killer, Stance)
+      if (ctx.teams[team].controller !== 'ai' && stance?.mode !== 'attack' && order.kind !== 'attack') continue
+
       const dest = intent.cell
       if (dest.x === cell.x && dest.y === cell.y) continue
       if (!board.passable(dest.x, dest.y)) continue
@@ -54,7 +60,6 @@ const system: System = {
 
       const def = PIECES[ctx.world.require(killer, PieceType).kind]
       if (!def) continue
-      const team = ctx.world.require(killer, Team)
       // The victim stood on a firing ray; re-check the line is still clear so
       // the killer steps along a legal capture line, not over another piece.
       const occupied = makeOccupied(board, occupancy)
@@ -73,6 +78,7 @@ const system: System = {
         pos.y = center.y
       }
       motion.goal = null
+      motion.intent = 'none'
       motion.path = []
       motion.reserved = null
       motion.blocked = false

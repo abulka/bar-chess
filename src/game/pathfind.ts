@@ -188,6 +188,18 @@ function computeReachable(
 }
 
 /**
+ * Whether `dest` is ever reachable from `from` with the given movement geometry,
+ * ignoring other pieces (walls still block). A destination that fails this can
+ * never be fulfilled, so it is reported as unreachable rather than merely
+ * blocked. Shared by the orders system, the settled-order check and the panel.
+ */
+export function destReachable(board: Board, from: Vec2, geom: Geometry, team: TeamId, dest: Vec2): boolean {
+  const reach = reachableCells(board, from, geom, team)
+  const idx = dest.y * board.width + dest.x
+  return idx >= 0 && idx < reach.length && reach[idx] === 1
+}
+
+/**
  * A* over the graph induced by a piece's movement geometry. Other pieces are
  * passed in as `occupied` (excluding the moving piece itself), so routes respect
  * one-piece-per-square and only leaps may pass over blockers. If the goal is

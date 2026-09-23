@@ -42,7 +42,8 @@ const FORMAT_LEGEND =
   '# fmt: r|b + piece(PNBRQK) + cell; hp=cur/max; @M=move @A=attack stance; goto=<cell>; ' +
   'atk=#id(cell)[!]=attack order (! positionally unreachable); tgt=#id(cell) current target; ' +
   'fire=#id under retaliation; goal=<cell> path end; path=hop>hop (A* move hops); blk=route blocked; ' +
-  'moving=mid-hop; res=<cell> reserved next cell; park=#id suspended attack; ' +
+  'intent=<preserve|rally|defense|engage> why the goal was chosen (absent = explicit order or none); ' +
+  'moving=mid-hop; res=<cell> reserved next cell; ' +
   'q=step>step queued steps after the active order (cell=goto, atk#id(cell)=attack); ' +
   'w=weapon reload seconds; grid red=Upper blue=lower. terrain: . floor : road , sand ~ water # wall'
 
@@ -63,11 +64,13 @@ Reading a position block:
   <r|b><PNBRQK> <cell>   one unit (r=red, b=blue); grid uses Upper=red, lower=blue
   hp<cur>/<max>          present only when damaged
   @M | @A                stance: M=move (return fire only), A=attack (auto-engage nearby)
-  goto=<cell>            standing move order (park=<#id(cell)> if an attack is suspended for it)
+  goto=<cell>            standing move order
   atk=#id(cell)          standing attack order ('!' = target positionally unreachable, e.g. wrong colour)
   q=a>b>atk#id(cell)     queued steps after the active order (cell=goto, atk#id=attack), run in sequence
   tgt=#id(cell)          current auto-acquired or retaliated target
   goal=<cell>            current motion goal (where the planned path ends)
+  intent=<kind>          why the goal was chosen: preserve (self-preservation retreat),
+                         rally / defense / engage; absent = explicit order or no goal
   path=a>b>c             planned route waypoints; each is one move hop, not every traversed square
   blk / moving / res     route blocked and waiting / mid-hop / reserved destination cell
   w=<seconds>            weapon reload remaining
@@ -150,9 +153,6 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
 
     if (order.kind === 'goto') {
       flags.push(`goto=${order.dest ? cellName(width, height, order.dest) : '?'}`)
-      if (order.resumeTarget !== null && game.world.isAlive(order.resumeTarget)) {
-        flags.push(`park=${refName(game, width, height, order.resumeTarget)}`)
-      }
     } else if (order.kind === 'attack' && order.target !== null) {
       flags.push(`atk=${refName(game, width, height, order.target)}${order.reachable ? '' : '!'}`)
     }
@@ -175,6 +175,7 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
     }
 
     if (motion.goal) flags.push(`goal=${cellName(width, height, motion.goal)}`)
+    if (motion.intent !== 'none' && motion.intent !== 'order') flags.push(`intent=${motion.intent}`)
     if (motion.blocked) flags.push('blk')
     if (motion.moving) flags.push('moving')
     if (motion.reserved) flags.push(`res=${cellName(width, height, motion.reserved)}`)

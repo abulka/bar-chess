@@ -65,9 +65,18 @@ export interface WeaponData {
   fired: boolean
 }
 
+/**
+ * Why the current motion goal was chosen. Lets the renderer colour and the
+ * properties panel label an order's provenance — most importantly a
+ * self-preservation retreat, which is not backed by an `Order`.
+ */
+export type MotionIntent = 'none' | 'order' | 'preserve' | 'defense' | 'engage' | 'rally'
+
 export interface MotionData {
   /** desired destination in tile coordinates, or null to hold */
   goal: Vec2 | null
+  /** source of the current goal (drives overlay colour + panel label) */
+  intent: MotionIntent
   /** cell currently being entered; occupancy reserves it until arrival */
   reserved: Vec2 | null
   /** upcoming cells in tile coordinates, excluding the current cell */

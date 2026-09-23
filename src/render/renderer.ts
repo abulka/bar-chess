@@ -25,7 +25,7 @@ import { coordName, fileLabel } from '../game/coords'
 import type { Game } from '../game/game'
 import { Camera } from './camera'
 import { firingLine, routePolyline, type FiringLine } from './overlays'
-import { BAR_BG, BAR_HIDE_THRESHOLD, RELOAD_FILL, RELOAD_MIN_COOLDOWN, healthColor } from './palette'
+import { BAR_BG, BAR_HIDE_THRESHOLD, PRESERVE_COLOR, RELOAD_FILL, RELOAD_MIN_COOLDOWN, healthColor } from './palette'
 import { bakeTerrain } from './terrain'
 
 const STANCE_COLORS: Record<string, string> = {
@@ -34,7 +34,6 @@ const STANCE_COLORS: Record<string, string> = {
 }
 const TRACK_COLOR = '#ff2d20'
 const UNREACHABLE_COLOR = '#a0a6ac'
-const REGROUP_COLOR = '#e3b341'
 /** Auto-acquired / retaliation target, distinct from an explicitly ordered one. */
 const ENGAGE_COLOR = '#e3b341'
 
@@ -216,26 +215,12 @@ export class Renderer {
     // the immediate plan always reads on top.
     if (order && order.queue.length > 0) this.drawQueuedRoute(ctx, game, e, pos, cell, full)
 
-    // A gold route for goto/autonomous moves; attack orders draw their own red
-    // route below so the two do not overlap.
+    // A gold route for goto/autonomous moves; a self-preservation retreat is
+    // drawn in bright yellow so it reads as an automatic dodge, not an order.
+    // Attack orders draw their own red route below so the two do not overlap.
     if (motion && motion.path.length > 0 && order?.kind !== 'attack') {
-      this.drawRoute(ctx, board, pos, motion.path, full)
-    }
-
-    // Suspended attack: an amber dashed chain to the parked target marks the
-    // regroup, so it is clear the piece will re-engage once it is safe.
-    if (order?.kind === 'goto' && order.resumeTarget !== null && game.world.isAlive(order.resumeTarget)) {
-      const rp = game.world.get(order.resumeTarget, Position)
-      if (rp) {
-        ctx.strokeStyle = full ? REGROUP_COLOR : 'rgba(227,179,65,0.6)'
-        ctx.lineWidth = (full ? 1.8 : 1.2) / this.camera.zoom
-        ctx.setLineDash([3 / this.camera.zoom, 5 / this.camera.zoom])
-        ctx.beginPath()
-        ctx.moveTo(pos.x, pos.y)
-        ctx.lineTo(rp.x, rp.y)
-        ctx.stroke()
-        ctx.setLineDash([])
-      }
+      const preserve = motion.intent === 'preserve'
+      this.drawRoute(ctx, board, pos, motion.path, full, preserve ? PRESERVE_COLOR : undefined)
     }
 
     // Attack order: a gold dashed movement route to the firing position, then a
@@ -276,7 +261,8 @@ export class Renderer {
     if (goal) {
       const center = board.cellCenter(goal.x, goal.y)
       const partial = motion?.blocked || !(order?.kind === 'goto' && order.dest && order.dest.x === goal.x && order.dest.y === goal.y)
-      ctx.strokeStyle = partial ? '#ffb347' : '#ffd166'
+      ctx.strokeStyle =
+        motion?.intent === 'preserve' ? PRESERVE_COLOR : partial ? '#ffb347' : '#ffd166'
       ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
       // Connect the route to the objective whenever the path does not already
       // end there (empty path, or a best-effort partial route).
@@ -370,9 +356,10 @@ export class Renderer {
     from: { x: number; y: number },
     path: readonly { x: number; y: number }[],
     full: boolean,
+    color?: string,
   ): void {
     if (path.length === 0) return
-    ctx.strokeStyle = full ? '#ffd166' : 'rgba(255,209,102,0.7)'
+    ctx.strokeStyle = color ?? (full ? '#ffd166' : 'rgba(255,209,102,0.7)')
     ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
     ctx.setLineDash([5 / this.camera.zoom, 4 / this.camera.zoom])
     ctx.beginPath()
@@ -646,14 +633,12 @@ export class Renderer {
     // (Attack stance or return fire) marks it amber so the difference is clear.
     const targeted = new Set<Entity>()
     const autoTargeted = new Set<Entity>()
-    const regrouping = new Set<Entity>()
     for (const { e } of scoped) {
       const od = game.world.get(e, Order)
       if (od?.kind === 'attack' && od.target !== null) {
         targeted.add(od.target)
         continue
       }
-      if (od?.kind === 'goto' && od.resumeTarget !== null) regrouping.add(od.resumeTarget)
       const auto = game.world.get(e, Target)?.entity ?? null
       if (auto !== null && game.world.isAlive(auto) && !targeted.has(auto)) autoTargeted.add(auto)
     }
@@ -683,14 +668,6 @@ export class Renderer {
         ctx.beginPath()
         ctx.arc(pos.x, pos.y, size * 0.62, 0, Math.PI * 2)
         ctx.stroke()
-      } else if (regrouping.has(e)) {
-        ctx.strokeStyle = REGROUP_COLOR
-        ctx.lineWidth = 2.2 / this.camera.zoom
-        ctx.setLineDash([3 / this.camera.zoom, 3 / this.camera.zoom])
-        ctx.beginPath()
-        ctx.arc(pos.x, pos.y, size * 0.62, 0, Math.PI * 2)
-        ctx.stroke()
-        ctx.setLineDash([])
       }
 
       ctx.fillStyle = render.tint

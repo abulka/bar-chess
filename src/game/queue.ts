@@ -101,6 +101,7 @@ export function promoteNext(order: OrderData, motion: MotionData): boolean {
     order.target = null
     order.resumeTurn = -1
     motion.goal = next.dest
+    motion.intent = 'order'
   } else {
     order.kind = 'attack'
     order.target = next.target
@@ -109,6 +110,7 @@ export function promoteNext(order: OrderData, motion: MotionData): boolean {
     order.resumeTarget = null
     order.resumeTurn = -1
     motion.goal = null
+    motion.intent = 'none'
   }
   motion.path = []
   motion.arrived = false

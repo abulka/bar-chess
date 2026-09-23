@@ -40,6 +40,7 @@ describe('Game integration', () => {
     const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
     const knight = createPiece(shim, 'blue', PIECES.knight, { x: 6, y: 3 }) // g5
     const pawn = createPiece(shim, 'red', PIECES.pawn, { x: 5, y: 1 }) // f7
+    game.world.require(knight, Stance).mode = 'attack'
     game.cmds.damage.push({ target: pawn, source: knight, amount: 999, kind: 'projectile', direct: true })
     game.setCaptureAdvance(true)
 
@@ -258,6 +259,7 @@ describe('Game integration', () => {
     game.selected = [queen]
     game.setPieceStance('attack')
     game.orderAt({ x: 5, y: 4 }, 'move')
+    game.orderAt({ x: 3, y: 4 }, 'move')
 
     const info = game.snapshot().pieceInfo
     expect(info).not.toBeNull()
@@ -267,6 +269,10 @@ describe('Game integration', () => {
     expect(info!.commandable).toBe(true)
     expect(info!.order.kind).toBe('goto')
     expect(info!.order.destCoord).toBe('f4')
+    expect(info!.order.reachable).toBe(true)
+    expect(info!.motion.intent).toBe('order')
+    expect(info!.order.queue).toHaveLength(1)
+    expect(info!.order.queue[0].source).toBe('manual')
     expect(info!.health.max).toBeGreaterThan(0)
     expect(game.snapshot().selectionCount).toBe(1)
   })

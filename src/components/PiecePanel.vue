@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { GameSnapshot } from '../game/game'
 import type { StanceMode } from '../game/types'
-import { healthColor } from '../render/palette'
+import { PRESERVE_COLOR, healthColor } from '../render/palette'
 
 const props = defineProps<{
   snapshot: GameSnapshot
@@ -19,11 +19,26 @@ const stances: Array<{ id: StanceMode; label: string; title: string }> = [
   { id: 'attack', label: 'Attack', title: 'Attack: auto-engage nearby enemies, flee when low' },
 ]
 
+/** Human labels for the source of the current motion goal. */
+const INTENT_LABEL: Record<string, string> = {
+  none: '',
+  order: 'ordered',
+  preserve: 'self-preservation',
+  defense: 'AI defense',
+  engage: 'engaging',
+  rally: 'rally',
+}
+
 const info = computed(() => props.snapshot.pieceInfo)
 const summary = computed(() => props.snapshot.stanceSummary)
 const activeStance = computed<StanceMode | null>(() =>
   info.value && !summary.value.mixed ? info.value.stance : null,
 )
+const intent = computed(() => info.value?.motion.intent ?? 'none')
+const intentLabel = computed(() => INTENT_LABEL[intent.value] ?? intent.value)
+/** An autonomous goal (not a player order) — shown as an "auto" pseudo-order. */
+const isAuto = computed(() => intent.value !== 'none' && intent.value !== 'order')
+const orderIdle = computed(() => !info.value || info.value.order.kind === 'none')
 
 function pct(ratio: number): string {
   return `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`
@@ -100,15 +115,26 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
         <b>{{ info.order.kind }}</b>
         <span v-if="info.order.destCoord"> · dest {{ info.order.destCoord }}</span>
         <span v-if="info.order.target"> · target {{ info.order.target.coord }}</span>
-        <span v-if="info.order.kind === 'attack' && !info.order.reachable" class="muted"> (unreachable)</span>
-        <span v-if="info.order.regrouping" class="muted"> · regrouping</span>
+        <span v-if="info.order.kind !== 'none'" class="muted"> · manual</span>
+        <span v-if="info.order.kind !== 'none' && !info.order.reachable" class="unreachable"> (unreachable)</span>
       </p>
-      <p v-if="info.order.parked" class="line muted">parked target {{ info.order.parked.coord }}</p>
+      <p v-if="isAuto && orderIdle" class="line">
+        <b>auto</b> ·
+        <span class="intent" :style="intent === 'preserve' ? { color: PRESERVE_COLOR } : undefined">
+          {{ intentLabel }}
+        </span>
+        <span v-if="info.motion.goalCoord" class="muted"> → {{ info.motion.goalCoord }}</span>
+      </p>
 
       <div class="sub">movement</div>
       <p class="line">
         <span v-if="info.motion.goalCoord">goal {{ info.motion.goalCoord }} · </span>
         <span v-else>no goal · </span>
+        <span
+          v-if="intentLabel"
+          class="intent"
+          :style="intent === 'preserve' ? { color: PRESERVE_COLOR } : undefined"
+        >{{ intentLabel }} · </span>
         path {{ info.motion.pathLength }}
         <span v-if="info.motion.blocked"> · blocked</span>
         <span v-if="info.motion.moving"> · moving</span>
@@ -116,7 +142,11 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
 
       <div class="sub">queue ({{ info.order.queue.length }})</div>
       <ol v-if="info.order.queue.length" class="queue">
-        <li v-for="(q, i) in info.order.queue" :key="i">{{ q.label }}</li>
+        <li v-for="(q, i) in info.order.queue" :key="i">
+          {{ q.label }}
+          <span class="muted"> · {{ q.source }}</span>
+          <span v-if="!q.reachable" class="unreachable"> (unreachable)</span>
+        </li>
       </ol>
       <p v-else class="line muted">empty</p>
 
@@ -214,6 +244,14 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
 
 .line.warn {
   color: #ff9f43;
+}
+
+.line .unreachable {
+  color: #ff9f43;
+}
+
+.line .intent {
+  color: var(--muted);
 }
 
 .stance-row {
