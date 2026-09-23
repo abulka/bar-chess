@@ -978,14 +978,57 @@ export class Game {
   }
 
   /**
+   * Whether a piece's active order has done all it can: it has arrived, or it
+   * can make no further (theoretical) progress toward the objective. Other
+   * pieces are ignored, so a route merely blocked by a friendly still counts as
+   * progress and keeps waiting; only a parked best-effort order is "settled".
+   * Such an order yields to the next command instead of swallowing it in the
+   * queue (the fix for "I issued an impossible move and it ate every later
+   * order"). Best-effort routing itself is untouched.
+   */
+  private orderSettled(e: Entity): boolean {
+    const order = this.world.get(e, Order)
+    const motion = this.world.get(e, Motion)
+    const cell = this.world.get(e, Cell)
+    const kind = this.world.get(e, PieceType)?.kind
+    const team = this.world.get(e, Team)
+    if (!order || !motion || !cell || !kind || !team) return false
+    const def = PIECES[kind]
+    if (!def) return false
+    const never: OccupiedFn = () => false
+
+    if (order.kind === 'goto' && order.dest) {
+      return findPath(this.board, cell, order.dest, def.move, team, never).cells.length === 0
+    }
+    if (order.kind === 'attack' && order.target !== null && this.world.isAlive(order.target)) {
+      // Only a positionally impossible target settles: the piece has done all it
+      // can and is parked at the closest legal point. A *reachable* target that
+      // is merely in range is still being fulfilled, so a move suspends/regroups
+      // (resumes after) instead of abandoning it.
+      if (order.reachable) return false
+      const tcell = this.world.get(order.target, Cell)
+      if (!tcell) return false
+      const geometry = WEAPONS[def.weapon].geometry
+      const goal =
+        previewFiringCell(this.board, cell, tcell, def.move, geometry, team, never) ??
+        closestEmptyCell(this.board, cell, tcell, def.move, team, never) ??
+        { x: tcell.x, y: tcell.y }
+      return findPath(this.board, cell, goal, def.move, team, never).cells.length === 0
+    }
+    return false
+  }
+
+  /**
    * Issue an order at `cell` for every selected commandable piece.
    *
    * `command` is the resolved intent: an explicit `attack` (from an `a`
    * prefix or a right-click on an enemy) requires an enemy occupant, an explicit
    * `move` always creates a goto, and when omitted the square's occupant decides
    * (enemy → attack, friendly → ignored, empty → move). A piece with nothing
-   * planned starts the order; otherwise the click appends a queued step. A move
-   * on an un-queued attacker suspends/regroups instead of queueing behind it.
+   * planned starts the order; a piece whose order has settled (arrived, or
+   * parked at the closest legal point) replaces it; otherwise the click appends a
+   * queued step. A move on an un-queued attacker suspends/regroups instead of
+   * queueing behind it.
    */
   orderAt(cell: Vec2, command?: 'move' | 'attack'): void {
     if (!this.board.inBounds(cell.x, cell.y)) return
@@ -1013,8 +1056,21 @@ export class Game {
         continue
       }
       const activeEmpty = order.kind === 'none' && order.queue.length === 0
+      // An order that has settled (arrived, or parked at the closest legal
+      // point) yields to this new command instead of queueing behind it. An
+      // order still making progress (or merely blocked by friends) keeps its
+      // queue as before.
+      const settled = !activeEmpty && this.orderSettled(e)
 
-      if (activeEmpty) {
+      if (activeEmpty || settled) {
+        if (settled) {
+          order.queue.length = 0
+          order.target = null
+          order.resumeTarget = null
+          order.resumeTurn = -1
+          motion.path = []
+          motion.goal = null
+        }
         if (attacking) this.startAttack(e, order, motion, occupant as Entity)
         else this.startGoto(e, order, motion, cell, occ, team)
       } else if (order.kind === 'attack' && order.queue.length === 0 && !attacking) {

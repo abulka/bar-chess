@@ -62,6 +62,7 @@ The battle starts **paused**. Your team is blue (vs orange AI by default).
 - **Right-click an empty square** to order a move there (no need to micromanage the exact path — each piece advances as far as its geometry allows).
 - **Right-click an enemy** to order an attack (sticky target, shown with a red ring).
 - **Right-click again** (or shift-right-click) to append a step to the piece's order queue.
+- A piece best-efforts orders even to squares it cannot reach; once it is as close as it can get, your next order replaces the spent one instead of hiding behind it. Explicit orders also take priority over the automatic low-health retreat.
 - **`m` / `a` then left-click** forces a move / attack command; hold **Shift** to queue several.
 - Set a piece's persistent **stance** from the left panel: `M` Move (travel and return fire), `A` Attack (seek and engage nearby targets), or none (stand and fire in range only).
 - Press **`space`** to take a turn, **`p`** to pause/resume, **`s`** to step one tick.

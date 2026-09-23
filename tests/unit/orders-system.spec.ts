@@ -322,12 +322,9 @@ describe('orders system — automatic self-preservation', () => {
     const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 3, y: 6 }) // d7
     createPiece(ctx, 'red', PIECES.queen, { x: 2, y: 6 }) // c7: covers the rank
     createPiece(ctx, 'red', PIECES.knight, { x: 5, y: 5 }) // f6: knight-hits d7
-    const king = createPiece(ctx, 'red', PIECES.king, { x: 1, y: 6 })
-    // Above the knight's 40% bail threshold and not yet hit.
+    // Above the knight's 40% bail threshold, not yet hit, and no explicit order,
+    // so only the automatic pre-emptive bail can move it.
     ctx.world.require(knight, Health).cur = Math.floor(PIECES.knight.hp * 0.45)
-    const order = ctx.world.require(knight, Order)
-    order.kind = 'attack'
-    order.target = king
 
     run(ctx)
 
@@ -357,7 +354,7 @@ describe('orders system — automatic self-preservation', () => {
     expect(goal!.x).not.toBe(goal!.y)
   })
 
-  it('overrides an explicit attack order when badly hurt', () => {
+  it('follows an explicit attack order even when badly hurt', () => {
     const ctx = hurtContext(true)
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
     const knight = createPiece(ctx, 'red', PIECES.knight, { x: 5, y: 6 })
@@ -371,9 +368,25 @@ describe('orders system — automatic self-preservation', () => {
 
     const goal = ctx.world.require(queen, Motion).goal
     expect(goal).not.toBeNull()
-    // It retreats from the attacker rather than charging it.
+    // It closes on the ordered target instead of retreating under auto-preserve.
     const before = Math.hypot(4 - 5, 4 - 6)
-    expect(Math.hypot(goal!.x - 5, goal!.y - 6)).toBeGreaterThan(before)
+    expect(Math.hypot(goal!.x - 5, goal!.y - 6)).toBeLessThan(before)
+  })
+
+  it('follows an explicit move order even when badly hurt', () => {
+    const ctx = hurtContext(true)
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
+    ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.45)
+    const order = ctx.world.require(queen, Order)
+    order.kind = 'goto'
+    order.dest = { x: 7, y: 4 }
+    fireOn(ctx, queen, rook)
+
+    run(ctx)
+
+    // The player's destination wins over the automatic retreat.
+    expect(ctx.world.require(queen, Motion).goal).toEqual({ x: 7, y: 4 })
   })
 })
 

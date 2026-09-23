@@ -160,9 +160,11 @@ const system: System = {
       const team = ctx.world.require(e, Team)
       const target = ctx.world.require(e, Target)
 
-      // 0. Self-preservation: a hurt or outgunned piece steps out of the fire on
-      // its own, even with no order or an explicit one. Costly pieces bail
-      // earlier. The active order stays queued and resumes once the piece is safe.
+      // 0. Self-preservation: a hurt or outgunned *idle* piece steps out of the
+      // fire on its own. Costly pieces bail earlier. An explicit player order
+      // always wins — if you command a hurt piece to move to a healing square,
+      // it goes — so this only runs with no active order; it resumes once the
+      // piece is idle again.
       const hp = ctx.world.get(e, Health)
       const hpRatio = hp && hp.max > 0 ? hp.cur / hp.max : 1
       const attacker = target.lastAttacker
@@ -180,6 +182,7 @@ const system: System = {
       const valuable = kind !== undefined && isValuable(kind)
       if (
         ctx.autoPreserve &&
+        order.kind === 'none' &&
         kind &&
         !(ctx.teams[team].controller === 'ai' && kind === 'king') &&
         (valuable || underFire || hpRatio < preserve)
@@ -197,8 +200,9 @@ const system: System = {
           // when free; hold when every step is no safer (or nobody is near).
           // Pawns cannot retreat, so an "escape" only marches them into the enemy
           // and gives up the shot — they hold and fire instead.
-          const keepShot =
-            targetValid && (order.kind === 'attack' || stance.mode === 'attack') ? (target.entity as number) : null
+          // Idle piece only (an explicit order skips this block), so the target
+          // is kept in range only for an Attack stance.
+          const keepShot = targetValid && stance.mode === 'attack' ? (target.entity as number) : null
           motion.goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, keepShot)
           continue
         }

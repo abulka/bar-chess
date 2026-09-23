@@ -138,4 +138,82 @@ describe('order queue', () => {
     expect(order.kind).toBe('goto')
     expect(order.queue.map((s) => s.kind)).toEqual(['attack'])
   })
+
+  it('replaces a settled (unreachable) goto instead of queueing behind it', () => {
+    const game = new Game(8)
+    // A bishop already parked at the closest legal point to e5, a square it can
+    // never reach (wrong colour): the best-effort order has no progress left, so
+    // the next command replaces it rather than being swallowed by the queue.
+    const bishop = placePiece(game, 'bishop', 'blue', { x: 4, y: 4 })
+    game.selected = [bishop]
+
+    game.orderAt({ x: 4, y: 3 }) // e5
+    expect(game.world.require(bishop, Order).dest).toEqual({ x: 4, y: 3 })
+
+    game.orderAt({ x: 5, y: 5 })
+
+    const order = game.world.require(bishop, Order)
+    expect(order.kind).toBe('goto')
+    expect(order.dest).toEqual({ x: 5, y: 5 })
+    expect(order.queue).toHaveLength(0)
+  })
+
+  it('replaces a settled attack order with a move', () => {
+    const game = new Game(8)
+    // A bishop can never hit the king on the other colour; it is already at the
+    // closest legal point, so the attack has done all it can and yields to a move.
+    const bishop = placePiece(game, 'bishop', 'blue', { x: 4, y: 4 })
+    const king = placePiece(game, 'king', 'red', { x: 4, y: 3 })
+    game.selected = [bishop]
+
+    game.orderAt({ x: 4, y: 3 }) // attack a positionally unreachable target
+    const attack = game.world.require(bishop, Order)
+    expect(attack.kind).toBe('attack')
+    expect(attack.target).toBe(king)
+    expect(attack.reachable).toBe(false)
+
+    game.orderAt({ x: 5, y: 5 })
+
+    const order = game.world.require(bishop, Order)
+    expect(order.kind).toBe('goto')
+    expect(order.dest).toEqual({ x: 5, y: 5 })
+    expect(order.target).toBeNull()
+    expect(order.queue).toHaveLength(0)
+  })
+
+  it('suspends (does not abandon) a reachable attack when given a move', () => {
+    const game = new Game(8)
+    // A bishop already on a diagonal with the target: the attack is live, so a
+    // move parks it and it resumes afterwards rather than being replaced.
+    const bishop = placePiece(game, 'bishop', 'blue', { x: 5, y: 4 })
+    const king = placePiece(game, 'king', 'red', { x: 4, y: 3 })
+    game.selected = [bishop]
+
+    game.orderAt({ x: 4, y: 3 })
+    const attack = game.world.require(bishop, Order)
+    expect(attack.kind).toBe('attack')
+    expect(attack.reachable).toBe(true)
+
+    game.orderAt({ x: 5, y: 5 })
+
+    const order = game.world.require(bishop, Order)
+    expect(order.kind).toBe('goto')
+    expect(order.dest).toEqual({ x: 5, y: 5 })
+    expect(order.resumeTarget).toBe(king)
+  })
+
+  it('still queues behind an order that is merely blocked by a friendly', () => {
+    const game = new Game(8)
+    const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
+    placePiece(game, 'pawn', 'blue', { x: 0, y: 6 }) // blocks the a-file
+    game.selected = [rook]
+
+    game.orderAt({ x: 0, y: 4 })
+    game.orderAt({ x: 2, y: 4 })
+
+    const order = game.world.require(rook, Order)
+    expect(order.kind).toBe('goto')
+    expect(order.queue).toHaveLength(1)
+    if (order.queue[0].kind === 'goto') expect(order.queue[0].dest).toEqual({ x: 2, y: 4 })
+  })
 })

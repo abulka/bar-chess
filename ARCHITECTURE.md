@@ -326,8 +326,10 @@ cell/reservation during movement validation and path planning.
   them into the enemy and give up the shot, so they hold and fire instead. Valuable
   pieces run this scan every tick so they can bail before taking damage; cheap
   pieces only scan once hurt or actually under fire, and `coverageThreats` skips
-  any enemy beyond its weapon's reach, keeping the cost bounded. It runs even with
-  an explicit order, which stays queued and resumes when the piece is safe. When
+  any enemy beyond its weapon's reach, keeping the cost bounded. It runs only
+  while the piece has **no active order**: an explicit player order always wins
+  (command a hurt piece to a healing square and it goes), and preservation
+  resumes once the order completes and clears. When
   hurt, the scan widens to `COVER_RADIUS = 6` so nearby enemies count even before
   they can shoot; it then steps to the least-exposed nearby square (keeping its
   shot as a tie-break) and holds there rather than chasing or trekking home. Gated by
@@ -539,7 +541,11 @@ Ordering is BAR-style and **context-sensitive** — there is no global order mod
   `move, move, attack` can be planned with repeated right-clicks; only the first
   click on an unplanned piece replaces/creates the active order, and `c` clears
   the whole plan. A move on an un-queued attacker still suspends/regroups rather
-  than queueing behind the attack.
+  than queueing behind the attack. A piece whose active order has **settled**
+  (arrived, or parked at the closest legal point a best-effort route can reach —
+  `Game.orderSettled`) yields to the new command instead of hiding it in the
+  queue, so an impossible order can no longer swallow every later click; an order
+  that is still progressing, or merely blocked by friends, keeps its queue.
 - **`m` / `a` + left-click** arms a transient **pending command**
   (`Game.pendingCommand`) to force a move/attack: `Game.orderAt(cell, command)`.
   The prefix is consumed by the click unless **Shift** is held (kept armed to
