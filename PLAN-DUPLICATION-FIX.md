@@ -4,6 +4,13 @@ Handoff plan for a future session. Goal: collapse the duplicated movement /
 attack-rule logic into single sources of truth **without changing behaviour**.
 Every phase is a pure refactor behind the existing test suite.
 
+> **Reviewed (qwen):** all phase claims verified against current code; only
+> line numbers drifted from a5406f9 (game.ts now ~1748 LOC vs plan's ~1703).
+> Two corrections applied: dropped the stale `kiteCell` reference in Phase 7,
+> and Phase 1 now covers `inFiringGeometry`'s second caller (leash check).
+> Four small mechanical items added as Phase 12. Commit sequence reordered by
+> value/effort (mechanical deletions first, behaviour-sensitive refactors last).
+
 ## Context
 
 An architecture review found the chess-rule primitives are already well
@@ -106,7 +113,8 @@ export function attackPlan(
 Then rewrite each call site to consume it:
 
 - `pursue` (`orders.ts`): `const p = attackPlan(...); return p.inRange ? null : p.cell`.
-  Delete local `inFiringGeometry` (`orders.ts:63-72`) if no other caller.
+  Move the local `inFiringGeometry` (`orders.ts:73-82`) into `approach.ts` — it has a
+  second caller (the leash check at `orders.ts:412`), so rewrite both call sites.
 - `orderSettled` (`game.ts:1027-1034`): use `attackPlan(..., never)`; keep the
   "reachable → not settled" early return using `plan.reachable`.
 - `planAttack` (`game.ts:1415-1446`): use `attackPlan(..., blocked)`; keep its
@@ -255,7 +263,7 @@ npx fallow health --format json --quiet      # complexity hotspots
 Headline numbers: **23 unused exports, 1 unused type, 9 unused class members;
 25 clone groups (787 duplicated lines, 4.7%); top hotspots in `game.ts`,
 `orders.ts`, `renderer.ts`.** The new phases below are ordered by
-value/effort — 5, 6, 8 and 10 are cheap and high value; 7 and 9 are medium;
+value/effort — 5, 6, 8, 10 and 12 are cheap and high value; 7 and 9 are medium;
 11 is a separate larger effort.
 
 ---
@@ -309,26 +317,28 @@ the rest is reimplemented inline.
 `never` at `game.ts:1016`. Export one from `geometry.ts` (it already owns
 `OccupiedFn`) and import it.
 
-**6b. Cell index — one helper, ~20 raw expressions.**
-Canonical `cellIndex(board, x, y)` (`occupancy.ts:8`) but raw
-`y * width + x` is written at `game.ts:1054,1249,1438-39,1468,1484`;
-`pathfind.ts:140,145,212-13,248`; `approach.ts:24,48,77`; `targeting.ts:25`;
-`orders.ts:59,112`; `spawn.ts:9`; `kingDefense.ts:65`; `shorthand.ts:144`;
-`transcript.ts:25`. Replace all with `cellIndex`, then delete the dead
-`cellKey` (geometry) and `tileKey` (`math.ts:25`). Consider moving
-`cellIndex` next to `Board` since that is the only thing it needs.
+**6b. Cell index — one helper, ~28 raw expressions.**
+Canonical `cellIndex(board, x, y)` (`occupancy.ts:9`) but raw
+`y * width + x` is written at `game.ts:1060,1271,1462-63,1493,1509`;
+`pathfind.ts:139,174,228`; `approach.ts:24,56-61,87,89`;
+`targeting.ts:26`; `spawn.ts:9`; `preservation.ts:163-64`;
+`shorthand.ts:154,220`; `transcript.ts:30,38,40`; `record.ts:184,186`;
+`board.ts:83,92` (terrain accessors). Replace all with `cellIndex`, then
+delete the dead `cellKey` (geometry) and `tileKey` (`math.ts:25`). Consider
+moving `cellIndex` next to `Board` since that is the only thing it needs.
 
 **6c. Vector equality — three copies + ~12 inline.**
 `math.ts:21 vecEquals` is unused while `analysis.ts:52` and `transcript.ts:19`
 each define `sameCell`, and inline `a.x === b.x && a.y === b.y` appears in
 `game.ts:1194-95,1241`, `movement.ts:83`, `kingDefense.ts:68,74`,
 `advance.ts:49`, `pathfinding.ts:32`, `renderer.ts:278,284`. Adopt `vecEquals`.
-
 **6d. Distance — `dist2`/`dist` unused, reimplemented inline.**
-`(dx)**2 + (dy)**2` at `targeting.ts:28,59`, `approach.ts:51,79`,
-`study.ts:66`, `pathfind.ts:224,240`, `kingDefense.ts:75`, `game.ts:917`;
-`Math.hypot` at `orders.ts:117,122`, `preservation.ts:89,180`,
-`kingDefense.ts:156,170`. Adopt `dist2` (comparisons) / `dist` (magnitudes).
+`(dx)**2 + (dy)**2` at `targeting.ts`, `approach.ts:61,89`,
+`study.ts`, `pathfind.ts`, `kingDefense.ts`, `game.ts`;
+`Math.hypot` at `orders.ts`, `preservation.ts:91,227`,
+`kingDefense.ts:156,170`, `projectile.ts:68,91`, `camera.ts:116`,
+`pieces.ts:219`, `renderer.ts:954`. Adopt `dist2` (comparisons) / `dist`
+(magnitudes).
 
 **6e. Health ratio.**
 `hp.max > 0 ? hp.cur / hp.max : 1` appears at `targeting.ts:62` and
@@ -357,15 +367,15 @@ fallow clone groups `dup:3c6d9712` (20 lines) and `dup:f1f6430a` (11 lines):
 
 Differences to preserve: `ADJACENT_PENALTY = 5` + optional `keepsShot` +
 cover-seeking in `escapeGoal`; `30` / radius gradient + home bias + standoff in
-`aiKingGoal`. `kiteCell` (`orders.ts:103-135`) is a third variant of steps 4-5.
+`aiKingGoal`. (The old suspend/kite behaviour was removed — moves now replace
+attacks; `resumeTarget` is kept only for save compatibility.)
 
 Suggested shape: a new `src/ecs/systems/threatField.ts` exporting
 `buildCoverage(ctx, threats, occupied)`, `dangerAt(coverages, threats, x, y,
 penalty)`, `minThreatDist(threats, x, y)`, and a `bestSafeStep(options, score,
-tiebreak)` used by all three. Start with the two verified clones; leave
-`kiteCell` alone unless it drops in cleanly.
+tiebreak)` used by both goals. Constants stay per-caller.
 
-Safety net: `orders-system.spec.ts` asserts exact goal cells for escape/kite
+Safety net: `orders-system.spec.ts` asserts exact goal cells for escape
 scenarios. Run it after every step of this refactor.
 
 ---
@@ -438,9 +448,9 @@ characterization tests first.
 | Location | Metric | Note |
 | - | - | - |
 | `orders.ts:145 update` | cognitive **151** | the single biggest; the 5 numbered policy blocks (self-preservation, attack, goto/regroup, autonomous stance, king defense) are natural function boundaries |
-| `game.ts` (`orderAt:1051`, 1703 LOC, fan-in 25) | cognitive 47 | extract `orderAt`'s occupant triage and the order-settled branch; consider splitting view code (`snapshot`/`pieceInfo`) into a `gameView.ts` |
+| `game.ts` (`orderAt` ~1060, ~1748 LOC, fan-in 25) | cognitive 47 | extract `orderAt`'s occupant triage and the order-settled branch; consider splitting view code (`snapshot`/`pieceInfo`) into a `gameView.ts` |
 | `renderer.ts:158 drawPieceOverlay` | cognitive 90 | plus `drawPieces` 46 |
-| `shorthand.ts:96 formatShorthand` | cognitive 88 | shares grid/sort code with `transcript.ts` — see below |
+| `shorthand.ts:96 formatShorthand` | cognitive 88 | shares grid/sort code with `transcript.ts` — see Phase 12 |
 | `targeting.ts:89 update` | cognitive 40 | |
 | `movement.ts:10 update` | cognitive 46 | |
 | `pathfinding.ts:14 update` | cognitive 45 | |
@@ -449,34 +459,63 @@ characterization tests first.
 | `transcript.ts:51 formatTranscript` | 34 | |
 
 **Also worth pairing with these:** `renderer.ts:262-270` and `319-326` are an
-identical firing-segment stroke loop → `strokeFiringSegments()`. And
-`shorthand.ts` (grid at 144/204-218, sort at 223-226, team lowercase at 212)
-duplicates `transcript.ts` (grid at 24-43, sort at 107-110, lowercase at 39) —
-extract `teamLetter(team, kind)` and `compareByTeamThenCell` into `trace.ts`.
+identical firing-segment stroke loop → `strokeFiringSegments()`. The
+shorthand/transcript grid + sort duplication is pulled forward into Phase 12
+(small enough to do mechanically now).
 
 ---
 
-## Suggested commit sequence
+## Phase 12 — Small mechanical dedups (low effort; qwen additions)
 
-1. `refactor: single attack-navigation policy (attackPlan/inFiringGeometry)` — Phase 1
-2. `refactor: share movement stepping between moveDestinations and reachableCells` — Phase 2
-3. `refactor: single kingOf and laneMidpoint helpers` — Phase 3
-4. `chore: remove dead exports and un-export internal helpers` — Phase 5
-5. `refactor: one home for cell/vector/health primitives` — Phase 6
-6. `refactor: order and motion lifecycle helpers` — Phase 8
-7. `test: shared context/duel helpers for system specs` — Phase 10
+Four tiny items the scan missed:
+
+1. **`PIECE_LETTER` table duplicated** — `trace.ts:29` and `shorthand.ts:23`,
+   identical 6 entries. Import from `trace.ts` (already exported; `transcript.ts`
+   already does) and delete the `shorthand.ts` copy.
+2. **Grid render + team-then-cell sort duplicated** — `shorthand.ts:216-238` vs
+   `transcript.ts:28-49,176-179`. Extract `renderAsciiGrid(pieces, size, terrain?)`
+   and `compareByTeamThenCell(a, b)` into `trace.ts` (or a small `grid.ts`);
+   both call sites become one-liners. The sort shapes differ slightly (`cell` vs
+   `firstCell`) — map to a common `{team, x, y}` before comparing, or take a
+   key function.
+3. **`Knob.vue` local `clamp`** — `Knob.vue:29-31` duplicates `math.ts:13`.
+   `camera.ts` already imports `clamp` from there; do the same.
+4. **`cellName` dead `width` parameter** — `shorthand.ts:90-93` has
+   `void width`. Drop the param and update the ~10 internal call sites
+   (`refName` too).
+
+---
+
+## Suggested commit sequence (value/effort order)
+
+Baseline must be green first. Each commit passes
+`npm run test:run && npm run build && npm run test:e2e`.
+
+1. `chore: remove dead exports and un-export internal helpers` — Phase 5
+   (pure deletions, zero risk)
+2. `refactor: one home for cell/vector/health primitives` — Phase 6
+3. `refactor: order and motion lifecycle helpers` — Phase 8
+4. `refactor: single kingOf and laneMidpoint helpers` — Phase 3
+5. `test: shared context/duel helpers for system specs` — Phase 10
+6. `refactor: single attack-navigation policy (attackPlan/inFiringGeometry)` — Phase 1
+7. `refactor: share movement stepping between moveDestinations and reachableCells` — Phase 2
+   (guarded by `perf.spec.ts`; fall back to a minimal shared pawn-advance helper
+   if the flood fill regresses)
 8. `refactor: shared threat-field scoring for escape and king goals` — Phase 7
-9. (optional) `refactor: shared ray/bresenham helpers` — Phase 9 / Phase 2 follow-up
-10. (separate) complexity hotspot refactors — Phase 11
+9. `refactor: dedupe PIECE_LETTER, grid render/sort, clamp, cellName` — Phase 12
+10. (optional) `refactor: shared ray/bresenham helpers` — Phase 9 / Phase 2 follow-up
+11. (separate) complexity hotspot refactors — Phase 11 (out of scope; needs
+    characterization tests first)
 
-Each commit should pass the full gate on its own. If Phase 2 perf regresses,
-ship Phases 1 + 3 + 5–8 + 10 and document why Phase 2 was deferred.
+If Phase 2 perf regresses, ship everything else and document why Phase 2 was
+deferred.
 
 ## Definition of done
 
 - No duplicate spellings of: attack goal chain, movement stepping, pawn
   home-rank rule, `kingOf`, back-rank midpoint, `NEVER`, cell index, vector
-  equality, squared distance, health ratio, order clear, threat danger scoring.
+  equality, squared distance, health ratio, order clear, threat danger scoring,
+  piece letter table, grid render/sort, `clamp`.
 - `npx fallow dead-code` reports no verified-dead exports; `npx fallow dupes`
   has no clone group containing `src/` code (test-fixture clones may remain if
   Phase 10 is skipped).
