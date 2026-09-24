@@ -154,19 +154,10 @@ export function fireCells(
 ): Vec2[] {
   const g = resolveGeometry(geom, team)
   const out: Vec2[] = []
+  const push = (x: number, y: number) => out.push({ x, y })
 
   if (g.kind === 'slide') {
-    for (const dir of g.dirs) {
-      walkRay(
-        board,
-        from,
-        dir,
-        g.range,
-        (x, y) => out.push({ x, y }),
-        (x, y) => board.blocksVision(x, y),
-        (x, y) => occupied(x, y),
-      )
-    }
+    for (const dir of g.dirs) fireRay(board, from, dir, g.range, occupied, push)
     return out
   }
 
@@ -179,17 +170,7 @@ export function fireCells(
     return out
   }
 
-  for (const dir of pawnFireDirs(g.dy)) {
-    walkRay(
-      board,
-      from,
-      dir,
-      2,
-      (x, y) => out.push({ x, y }),
-      (x, y) => board.blocksVision(x, y),
-      (x, y) => occupied(x, y),
-    )
-  }
+  for (const dir of pawnFireDirs(g.dy)) fireRay(board, from, dir, 2, occupied, push)
   return out
 }
 
@@ -198,6 +179,29 @@ function pawnFireDirs(dy: number): Dir[] {
     [1, dy],
     [-1, dy],
   ]
+}
+
+/**
+ * Firing ray: stops before walls / out-of-bounds, and visits the first occupied
+ * cell before stopping, so the blocker counts as a hittable target.
+ */
+function fireRay(
+  board: Board,
+  from: Vec2,
+  dir: Dir,
+  range: number,
+  occupied: OccupiedFn,
+  visit: (x: number, y: number) => void,
+): void {
+  walkRay(
+    board,
+    from,
+    dir,
+    range,
+    visit,
+    (x, y) => board.blocksVision(x, y),
+    (x, y) => occupied(x, y),
+  )
 }
 
 /**
@@ -261,18 +265,11 @@ export function attackApproachCells(
         ? g.offsets
         : ([[0, g.dy], [1, g.dy], [-1, g.dy]] as Dir[])
   const range = g.kind === 'slide' ? g.range : 1
+  const push = (x: number, y: number) => {
+    if (!occupied(x, y) && board.passable(x, y)) out.push({ x, y })
+  }
   for (const [dx, dy] of dirs) {
-    walkRay(
-      board,
-      targetCell,
-      [-dx, -dy] as Dir,
-      range,
-      (x, y) => {
-        if (!occupied(x, y) && board.passable(x, y)) out.push({ x, y })
-      },
-      (x, y) => board.blocksVision(x, y),
-      (x, y) => occupied(x, y),
-    )
+    fireRay(board, targetCell, [-dx, -dy] as Dir, range, occupied, push)
   }
   return out
 }
