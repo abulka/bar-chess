@@ -148,10 +148,17 @@ The battle **starts paused**. Give orders, then take a turn:
 - `u` / `r` — **Undo / Redo** completed turns, stepping through a bounded history
   of turn-boundary states. Taking a new turn after undoing replaces the redo
   branch.
-- `y` — **Replay last turn**: the world + RNG + tick are snapshotted at turn
-  start (after the turn's setup mutations), so replay deterministically re-plays
-  the recorded ticks and returns to exactly the same end state. Because turns are
-  serialized, replay shows the moves one piece at a time at ~0.5× speed.
+- `y` — **Replay**: re-plays the turn that produced the state you are viewing —
+  at any point in the history, not just the latest. It restores that turn's exact
+  start snapshot (so orders and stances issued while paused are included),
+  re-applies any commands that were pending, re-runs the recorded ticks and
+  returns to exactly the same end state, leaving the cursor and redo branch
+  untouched. The selection is kept. Because turns are serialized, replay shows
+  the moves one piece at a time at ~0.5× speed.
+- **Save / load**: slots and **Export JSON** store the whole game including the
+  undo/redo history, so loading a slot lets you keep undoing, redoing and
+  replaying. If the browser storage is full, the slot falls back to a
+  position-only save (undo history is not kept).
 
 ## Seeds, self-play & game records
 
@@ -176,10 +183,11 @@ games" prompt, on the clipboard for an LLM session.
 ## Victory
 
 The game ends when a **king** dies. The defeating team's colour wins, a `win`
-event is logged, and play freezes: turn/pause/step/replay are disabled. Press
+event is logged, and play freezes: turn/pause/step are disabled. Press
 `u` (**Undo**) to step back before the fatal turn and keep playing (or `r` to
-redo it). A team that starts without a king has lost; if both kings fall at once
-it is a draw.
+redo it); `y` (**Replay**) still works and re-runs the fatal turn from its
+recorded start. A team that starts without a king has lost; if both kings fall
+at once it is a draw.
 
 A "move" is one application of the piece's movement geometry: a rook may slide
 several cells along a rank/file, and a pawn advances one square — or two from its

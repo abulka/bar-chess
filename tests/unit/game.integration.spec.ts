@@ -762,6 +762,267 @@ describe('Game integration — king guard lethality', () => {
   })
 })
 
+describe('Game replay from any history point', () => {
+  beforeEach(() => clearComponents())
+
+  function replayToEnd(game: Game): void {
+    game.replayTurn()
+    expect(game.snapshot().replaying).toBe(true)
+    let guard = 0
+    while (game.snapshot().replaying && guard++ < 5000) game.runTicks(1)
+    expect(guard).toBeLessThan(5000)
+  }
+
+  it('replays the turn at an undone cursor, keeping the cursor and redo branch', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    runTurn(game)
+    const after1 = JSON.stringify(game.toDebugJson())
+    runTurn(game)
+    runTurn(game)
+    const after3 = JSON.stringify(game.toDebugJson())
+
+    game.undoTurn()
+    game.undoTurn()
+    expect(game.snapshot().canReplay).toBe(true)
+
+    replayToEnd(game)
+
+    // It ended exactly on the boundary the cursor already points at.
+    expect(JSON.stringify(game.toDebugJson())).toBe(after1)
+    expect(game.snapshot().canRedo).toBe(true)
+    expect(game.snapshot().canUndo).toBe(true)
+
+    // The abandoned future is still there.
+    game.redoTurn()
+    game.redoTurn()
+    expect(JSON.stringify(game.toDebugJson())).toBe(after3)
+  })
+
+  it('walks undo 3x → replay, redo 2x → replay', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    const states = [JSON.stringify(game.toDebugJson())]
+    for (let i = 0; i < 4; i++) {
+      runTurn(game)
+      states.push(JSON.stringify(game.toDebugJson()))
+    }
+
+    game.undoTurn()
+    game.undoTurn()
+    game.undoTurn()
+    replayToEnd(game)
+    expect(JSON.stringify(game.toDebugJson())).toBe(states[1])
+
+    game.redoTurn()
+    game.redoTurn()
+    replayToEnd(game)
+    expect(JSON.stringify(game.toDebugJson())).toBe(states[3])
+  })
+
+  it('keeps the selection across a replay', () => {
+    const game = new Game(8)
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 3, y: 6 })
+    game.selected = [pawn]
+    game.orderAt({ x: 3, y: 4 }, 'move')
+    runTurn(game)
+    const end = JSON.stringify(game.toDebugJson())
+
+    replayToEnd(game)
+
+    expect(game.selected).toEqual([pawn])
+    expect(game.snapshot().pieceInfo?.entity).toBe(pawn)
+    // The replay reproduces the whole turn, not just the selection.
+    expect(JSON.stringify(game.toDebugJson())).toBe(end)
+  })
+
+  it('replays paused orders after undoing to the start and redoing one turn', () => {
+    // Regression: orders issued while paused live only in the live world, never
+    // in a history boundary, so replay must restore the recorded turn-start
+    // snapshot rather than reconstruct from the previous boundary.
+    const game = new Game(8) // human-vs-ai: blue is human
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 3, y: 6 })
+    game.selected = [pawn]
+    game.orderAt({ x: 3, y: 4 })
+    runTurn(game)
+    expect(game.world.require(pawn, Cell)).toEqual({ x: 3, y: 4 })
+    const end = JSON.stringify(game.toDebugJson())
+
+    game.undoTurn() // back to the opening state; the paused order is gone
+    game.redoTurn()
+    replayToEnd(game)
+
+    expect(game.world.require(pawn, Cell)).toEqual({ x: 3, y: 4 })
+    expect(JSON.stringify(game.toDebugJson())).toBe(end)
+  })
+
+  it('re-applies commands pending at turn start so the replay matches', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    const victim = placePiece(game, 'rook', 'red', { x: 0, y: 0 })
+    game.cmds.damage.push({
+      target: victim,
+      source: null,
+      amount: 100000,
+      kind: 'test',
+      lethal: true,
+    })
+    runTurn(game)
+    expect(game.world.isAlive(victim)).toBe(false)
+    const end = JSON.stringify(game.toDebugJson())
+
+    replayToEnd(game)
+
+    expect(game.world.isAlive(victim)).toBe(false)
+    expect(JSON.stringify(game.toDebugJson())).toBe(end)
+  })
+
+  it('reproduces a turn that began from a drifted world', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    // Free-run off the boundary, then start a turn from the drifted state.
+    game.runTicks(5)
+    runTurn(game)
+    const end = JSON.stringify(game.toDebugJson())
+
+    replayToEnd(game)
+
+    expect(JSON.stringify(game.toDebugJson())).toBe(end)
+  })
+
+  it('does not grow the event log or shot/kill counters during a replay', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    runTurn(game)
+    const shots = game.bus.count('shot')
+    const kills = game.bus.count('kill')
+    const tailShots = game.bus.tail(600).filter((e) => e.type === 'shot' || e.type === 'kill').length
+
+    replayToEnd(game)
+
+    // Only the replay's own info bookends are logged; its re-emitted sim events
+    // are duplicates and must not inflate the counters or the HUD stream.
+    expect(game.bus.count('shot')).toBe(shots)
+    expect(game.bus.count('kill')).toBe(kills)
+    expect(game.bus.tail(600).filter((e) => e.type === 'shot' || e.type === 'kill').length).toBe(
+      tailShots,
+    )
+    expect(game.snapshot().shots).toBe(shots)
+    expect(game.bus.tail(600).some((e) => e.msg === 'replay finished')).toBe(true)
+  })
+
+  it('cannot replay a boundary that was not a turn', () => {
+    const game = new Game(8)
+    const redKing = placePiece(game, 'king', 'red', { x: 4, y: 4 })
+    game.cmds.damage.push({ target: redKing, source: null, amount: 100000, kind: 'test' })
+    game.stepOnce()
+    expect(game.winner).toBe('blue')
+    expect(game.canReplay).toBe(false)
+
+    game.undoTurn()
+    expect(game.winner).toBeNull()
+    expect(game.canReplay).toBe(false)
+  })
+
+  it('replays the fatal turn after the game ends', () => {
+    const game = new Game(8)
+    const redKing = placePiece(game, 'king', 'red', { x: 4, y: 4 })
+    game.cmds.damage.push({ target: redKing, source: null, amount: 100000, kind: 'test' })
+    game.beginTurn()
+    let guard = 0
+    while (game.turnActive && guard++ < 3000) game.runTicks(1)
+    expect(game.winner).toBe('blue')
+    expect(game.canReplay).toBe(true)
+
+    // No undo needed: replay rewinds to the pre-fatal start and re-runs it.
+    game.replayTurn()
+    expect(game.snapshot().replaying).toBe(true)
+    guard = 0
+    while (game.snapshot().replaying && guard++ < 5000) game.runTicks(1)
+    expect(game.winner).toBe('blue')
+    expect(game.world.isAlive(redKing)).toBe(false)
+  })
+})
+
+describe('Game save/load with history', () => {
+  beforeEach(() => clearComponents())
+
+  it('restores the full undo history from a saved game', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    const states = [JSON.stringify(game.toDebugJson())]
+    for (let i = 0; i < 3; i++) {
+      runTurn(game)
+      states.push(JSON.stringify(game.toDebugJson()))
+    }
+
+    const saved = game.exportPosition({ history: true })
+    expect(saved.history).toHaveLength(4)
+    expect(saved.cursor).toBe(3)
+
+    const loaded = new Game(8)
+    const result = loaded.importPosition(JSON.parse(JSON.stringify(saved)))
+    expect(result.ok).toBe(true)
+    expect(JSON.stringify(loaded.toDebugJson())).toBe(states[3])
+    expect(loaded.snapshot().canUndo).toBe(true)
+
+    loaded.undoTurn()
+    expect(JSON.stringify(loaded.toDebugJson())).toBe(states[2])
+    loaded.undoTurn()
+    expect(JSON.stringify(loaded.toDebugJson())).toBe(states[1])
+    loaded.undoTurn()
+    expect(JSON.stringify(loaded.toDebugJson())).toBe(states[0])
+
+    // Replay metadata survives the round trip too.
+    loaded.redoTurn()
+    loaded.redoTurn()
+    expect(loaded.canReplay).toBe(true)
+    loaded.replayTurn()
+    let guard = 0
+    while (loaded.snapshot().replaying && guard++ < 5000) loaded.runTicks(1)
+    expect(JSON.stringify(loaded.toDebugJson())).toBe(states[2])
+  })
+
+  it('keeps the saved cursor and redo branch', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    runTurn(game)
+    const after1 = JSON.stringify(game.toDebugJson())
+    runTurn(game)
+    const after2 = JSON.stringify(game.toDebugJson())
+    game.undoTurn()
+
+    const saved = game.exportPosition({ history: true })
+    expect(saved.cursor).toBe(1)
+
+    const loaded = new Game(8)
+    loaded.importPosition(JSON.parse(JSON.stringify(saved)))
+    expect(JSON.stringify(loaded.toDebugJson())).toBe(after1)
+    expect(loaded.snapshot().canRedo).toBe(true)
+
+    loaded.redoTurn()
+    expect(JSON.stringify(loaded.toDebugJson())).toBe(after2)
+  })
+
+  it('leaves a position-only save without undo history', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    runTurn(game)
+    runTurn(game)
+    const saved = game.exportPosition()
+    expect(saved.history).toBeUndefined()
+
+    const loaded = new Game(8)
+    expect(loaded.importPosition(JSON.parse(JSON.stringify(saved))).ok).toBe(true)
+    expect(loaded.snapshot().canUndo).toBe(false)
+    expect(loaded.canReplay).toBe(false)
+  })
+
+  it('restores sim settings saved with the game', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    game.setAutoPreserve(false)
+    game.setChessKills(true)
+    const saved = game.exportPosition({ history: true })
+
+    const loaded = new Game(8)
+    loaded.importPosition(JSON.parse(JSON.stringify(saved)))
+    expect(loaded.autoPreserve).toBe(false)
+    expect(loaded.chessKills).toBe(true)
+  })
+})
+
 describe('hover readout', () => {
   beforeEach(() => clearComponents())
 

@@ -114,6 +114,10 @@ export class World {
     this.next = snapshot.next
     this.entities = new Set(snapshot.entities)
     for (const { store, entries } of snapshot.stores) {
+      // Register the store so a later `capture()` includes it even when this
+      // world never added a component of that type (e.g. a fresh world loading
+      // a position with in-flight projectiles).
+      this.track(store)
       store.map.clear()
       for (const [e, v] of entries) store.map.set(e, structuredClone(v))
     }

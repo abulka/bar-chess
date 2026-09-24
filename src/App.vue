@@ -459,12 +459,12 @@ function applyLoaded(data: unknown): void {
 }
 
 function onSaveSlot(): void {
-  const result = saveSlot(slotName.value, game.exportPosition())
+  const result = saveSlot(slotName.value, game.exportPosition({ history: true }))
   if (!result.ok) {
     ioMessage.value = result.error
     return
   }
-  ioMessage.value = ''
+  ioMessage.value = result.warning ?? ''
   slotName.value = ''
   refreshSlots()
 }
@@ -486,7 +486,7 @@ function onDeleteSlot(id: string): void {
 }
 
 function onExport(): void {
-  const json = JSON.stringify(game.exportPosition(), null, 2)
+  const json = JSON.stringify(game.exportPosition({ history: true }), null, 2)
   const blob = new Blob([json], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
@@ -795,7 +795,9 @@ onBeforeUnmount(() => {
             </div>
             <ul v-if="slots.length" class="slots">
               <li v-for="slot in slots" :key="slot.id">
-                <span class="slot-name" :title="new Date(slot.savedAt).toLocaleString()">{{ slot.name }}</span>
+                <span class="slot-name" :title="new Date(slot.savedAt).toLocaleString()">
+                  {{ slot.name }}<template v-if="slot.turns"> · {{ slot.turns }} turns</template>
+                </span>
                 <button class="ctl small" @click="onLoadSlot(slot.id)">Load</button>
                 <button class="ctl small" @click="onDeleteSlot(slot.id)">Del</button>
               </li>

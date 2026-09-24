@@ -156,27 +156,42 @@ requestAnimationFrame(frame):
   bar fades (mirrored in the stats bar).
 - `undoTurn()` (key `u`) and `redoTurn()` (key `r`) step backwards/forwards
   through that history, restoring whole turn-boundary states; beginning a new
-  turn replaces any undone branch. `replayTurn()` (key `y`) restores the last
-  completed turn's start snapshot and re-runs the recorded ticks at 0.5× speed
-  (moves read one by one), returning to the exact same end state. Live turns run
-  at 0.5× too.
+  turn replaces any undone branch. Each history entry is a `HistoryEntry`: the
+  end-of-turn boundary `state` (used by undo/redo), the exact turn-start
+  snapshot `start` (used by replay), the producing turn's `ticks`, and commands
+  pending at its start (`pending`).
+- `state` and `start` are deliberately both kept. They are different points in
+  time: orders/stances issued while paused mutate the live world but create no
+  boundary, so `start` has them and `state` does not; and `beginTurn` clears
+  every cooldown and sets `movedThisTurn`, overwriting values that only `state`
+  retains. Neither can be derived from the other.
+- `replayTurn()` (key `y`) works at **any** cursor: it replays the turn that
+  produced `history[cursor]` and returns to exactly that boundary, leaving the
+  cursor and redo branch untouched, so a turn can be re-watched after undoing.
+  It restores the recorded `start` snapshot (which already includes the paused
+  orders/stances and the turn's rules) and re-applies the recorded `pending`
+  commands so deferred work (e.g. a reinforcement deploy) is not lost. Live
+  turns and replays run at 0.5× speed (moves read one by one).
   `World.capture()/restore()` does a deep `structuredClone` of every component
   store; `Rng.getState()/setState()` restores the PRNG. `TurnState` also carries
   the sim-affecting rules in force (`autoPreserve`/`captureAdvance`/`chessKills`),
   restored on undo/redo/replay so a turn always re-runs under its original rules.
-  During replay
-  `ctx.turnActive` is forced true so the one-move-per-turn gate matches the
-  original turn — otherwise the replay would diverge. The transcript log ignores
-  events emitted while `game.replaying`, since they are duplicates of the turn
-  already recorded.
+  During replay `ctx.turnActive` is forced true so the one-move-per-turn gate
+  matches the original turn — otherwise the replay would diverge. `Game.step()`
+  sets `bus.replaying`, so replayed events are tagged and excluded from the HUD
+  event stream and shot/kill counters (they are duplicates) while still reaching
+  observers such as audio; the transcript log ignores them too. The selection is
+  preserved across replay (pieces absent from the restored start are pruned).
 - `togglePause()` cancels an active turn; `stepOnce()` cancels turn/replay.
 - **Victory** is chess-style: a team is defeated the moment it has no living
   king (`updateWinner`). When a king falls during a live turn the turn is closed
   (so the history boundary is the pre-fatal state), a `win` event is emitted and
-  the sim freezes: `beginTurn`/`stepOnce`/`togglePause`/`replayTurn` become
-  no-ops and the toolbar disables those controls. `undo` stays enabled and
-  restores the `winner` (part of `TurnState`) back to `null`, reopening play;
-  `redo` replays the fatal turn. If both kings fall on the same tick it is a
+  the sim freezes: `beginTurn`/`stepOnce`/`togglePause` become no-ops and the
+  toolbar disables turn/pause/step. `undo` stays enabled and restores the
+  `winner` (part of `TurnState`) back to `null`, reopening play; `redo` jumps
+  forward to it again. `replay` also stays enabled: it rewinds to the fatal
+  turn's recorded start (pre-death) and re-runs it, so the winning turn can be
+  watched without undoing first. If both kings fall on the same tick it is a
   draw and play continues.
 
 ### Team control & game modes
@@ -687,21 +702,25 @@ Chess coordinates (`coordName`) label the board margins.
 The right rail's **position** section saves and restores whole battles. The unit
 of transfer is `SavedPosition` (`src/game/position.ts`): terrain, every component
 store (via `World.capture`, so entity ids and references survive), RNG state,
-tick/turn, teams, mode and overlays. It is plain JSON and versioned
-(`POSITION_VERSION`); `validatePosition` rejects unknown versions/stores before
-anything is mutated.
+tick/turn, teams, mode, overlays and sim rules. It is plain JSON and versioned
+(`POSITION_VERSION`); `validatePosition` rejects unknown versions/stores (and
+malformed history) before anything is mutated.
 
-- `Game.exportPosition()` / `Game.importPosition(data)` build and apply it.
-  Import rebuilds the `Board`, restores the world (mapping serialized store names
-  back through a registry), resets all transient turn/replay/selection state,
-  pauses and rebuilds `ctx`.
+- `Game.exportPosition({ history: true })` also serializes the full undo/redo
+  history (`SavedHistoryEntry[]`) and cursor, so loading restores undo/redo and
+  replay exactly. `Game.importPosition(data)` rebuilds the `Board`, restores the
+  world (mapping serialized store names back through a registry), reapplies the
+  saved sim settings, restores the history/cursor (trimming to `HISTORY_LIMIT`),
+  resets all transient turn/replay/selection state, pauses and rebuilds `ctx`.
+  A position-only save (no `history`) still loads, starting a fresh history.
 - **Save/Load**: named slots in `localStorage` (`src/game/storage.ts`), keys
   `bar-chess.positions.index` and `bar-chess.positions.<id>`; a same-named save
-  overwrites. Load/Delete confirm first.
-- **Copy / Export / Import**: the **Copy state (JSON)** button and **Export
-  JSON** emit the same `SavedPosition` (so copied/exported JSON can be
-  re-imported); **Import JSON** reads a file. `Game.toDebugJson()` remains the
-  terse debug view.
+  overwrites. Slots save the full game by default and record a turn count
+  (`SlotMeta.turns`); if the storage quota rejects the history, the save falls
+  back to position-only and reports it. Load/Delete confirm first.
+- **Copy / Export / Import**: **Copy state (JSON)** emits a position-only
+  `SavedPosition` for LLM/debug, while **Export JSON** includes the full history;
+  both re-import. `Game.toDebugJson()` remains the terse debug view.
 
 `Rng.getState()` is canonicalized to 32 bits so a save/restore produces a
 byte-identical stream (see §10).

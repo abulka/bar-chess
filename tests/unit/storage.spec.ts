@@ -48,4 +48,31 @@ describe('position storage', () => {
     if (!result.ok) expect(result.error).toContain('quota')
     spy.mockRestore()
   })
+
+  it('saves the turn count for a full game and loads its history', () => {
+    const game = { ...position(7), turn: 7, history: [{ ticks: 40 }], cursor: 0 } as unknown as SavedPosition
+    const result = saveSlot('full', game)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.slot.turns).toBe(1)
+
+    const loaded = loadSlot(result.slot.id)
+    expect(loaded?.history).toHaveLength(1)
+    expect(loaded?.cursor).toBe(0)
+  })
+
+  it('falls back to a position-only save when storage rejects the history', () => {
+    const spy = vi.spyOn(localStorage, 'setItem').mockImplementation((_key, value) => {
+      if (typeof value === 'string' && value.includes('"history"')) throw new Error('quota exceeded')
+    })
+    const game = { ...position(7), history: [{ ticks: 40 }], cursor: 0 } as unknown as SavedPosition
+    const result = saveSlot('full', game)
+    spy.mockRestore()
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.warning).toContain('storage is full')
+    expect(result.slot.turns).toBeUndefined()
+    expect(loadSlot(result.slot.id)?.history).toBeUndefined()
+  })
 })

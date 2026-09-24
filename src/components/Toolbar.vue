@@ -107,7 +107,7 @@ function onSoundChange(event: Event): void {
     <button class="ctl" :disabled="!!props.snapshot.winner" @click="emit('step')">⏭ Step</button>
     <button class="ctl" :disabled="!props.snapshot.canUndo" @click="emit('undo')">↶ Undo</button>
     <button class="ctl" :disabled="!props.snapshot.canRedo" @click="emit('redo')">↷ Redo</button>
-    <button class="ctl" :disabled="!props.snapshot.canReplay || !!props.snapshot.winner" @click="emit('replay')">↺ Replay</button>
+    <button class="ctl" :disabled="!props.snapshot.canReplay" @click="emit('replay')">↺ Replay</button>
 
     <div class="speed-group">
       <button

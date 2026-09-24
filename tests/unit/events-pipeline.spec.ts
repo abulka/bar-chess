@@ -45,6 +45,26 @@ describe('EventBus', () => {
     expect(() => bus.emit('info', 'a')).not.toThrow()
     expect(seen).toEqual(['a'])
   })
+
+  it('tags replay events and keeps them out of the live log and counters', () => {
+    const bus = new EventBus()
+    bus.emit('shot', 'live')
+    const seen: string[] = []
+    bus.subscribe((e) => seen.push(e))
+
+    bus.replaying = true
+    bus.emit('shot', 'replayed')
+    bus.replaying = false
+    bus.emit('shot', 'live again')
+
+    expect(bus.total).toBe(2)
+    expect(bus.count('shot')).toBe(2)
+    expect(bus.tail().map((e) => e.msg)).toEqual(['live', 'live again'])
+    // Subscribers still see every event; replay ones are tagged.
+    expect(seen.map((e) => e.msg)).toEqual(['replayed', 'live again'])
+    expect(seen[0].replay).toBe(true)
+    expect(seen[1].replay).toBeUndefined()
+  })
 })
 
 describe('Pipeline', () => {

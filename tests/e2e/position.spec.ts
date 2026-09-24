@@ -11,7 +11,7 @@ test('saves a named slot, survives reload, loads and deletes it', async ({ page 
   await page.evaluate(() => (window as any).game.loadSize(16))
   await page.getByPlaceholder('slot name').fill('e2e position')
   await page.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(page.locator('.slot-name')).toHaveText('e2e position')
+  await expect(page.locator('.slot-name')).toContainText('e2e position')
 
   await page.evaluate(() => (window as any).game.loadSize(8))
   expect(await page.evaluate(() => (window as any).game.board.width)).toBe(8)
@@ -22,10 +22,33 @@ test('saves a named slot, survives reload, loads and deletes it', async ({ page 
 
   await page.reload()
   await page.waitForFunction(() => Boolean((window as any).game))
-  await expect(page.locator('.slot-name')).toHaveText('e2e position')
+  await expect(page.locator('.slot-name')).toContainText('e2e position')
 
   await page.getByRole('button', { name: 'Del', exact: true }).click()
   await expect(page.locator('.slot-name')).toHaveCount(0)
+})
+
+test('loads a saved game together with its undo history', async ({ page }) => {
+  await page.evaluate(() => {
+    const g = (window as any).game
+    g.beginTurn()
+    let guard = 0
+    while (g.turnActive && guard++ < 4000) g.runTicks(1)
+  })
+  expect(await page.evaluate(() => (window as any).game.snapshot().canUndo)).toBe(true)
+
+  await page.getByPlaceholder('slot name').fill('e2e full game')
+  await page.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page.locator('.slot-name')).toContainText('1 turns')
+
+  await page.reload()
+  await page.waitForFunction(() => Boolean((window as any).game))
+  expect(await page.evaluate(() => (window as any).game.snapshot().canUndo)).toBe(false)
+
+  page.on('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: 'Load', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().canUndo)).toBe(true)
+  expect(await page.evaluate(() => (window as any).game.canReplay)).toBe(true)
 })
 
 test('exports the position as a .json download', async ({ page }) => {

@@ -32,6 +32,8 @@ export interface EventRecord {
   entity?: Entity
   team?: TeamId
   data?: Record<string, unknown>
+  /** True for events re-emitted while replaying a recorded turn. */
+  replay?: boolean
 }
 
 export interface EmitOptions {
@@ -57,13 +59,18 @@ export class EventBus {
   tick = 0
   phase = 'boot'
   max: number
+  /**
+   * Set by the game while it re-runs a recorded turn. Replay events are tagged
+   * and kept out of the live buffer/counters (they duplicate events already in
+   * the log) but are still delivered to observers, so audio plays the replay.
+   */
+  replaying = false
 
   constructor(max = 6000) {
     this.max = max
   }
 
   emit(type: EventType, msg: string, opts: EmitOptions = {}): void {
-    this.total++
     const record: EventRecord = {
       seq: ++this.seq,
       tick: this.tick,
@@ -74,11 +81,16 @@ export class EventBus {
     if (opts.entity !== undefined) record.entity = opts.entity
     if (opts.team !== undefined) record.team = opts.team
     if (opts.data !== undefined) record.data = opts.data
-    this.buffer.push(record)
-    if (this.buffer.length > this.max) {
-      this.buffer.splice(0, this.buffer.length - this.max)
+    if (this.replaying) {
+      record.replay = true
+    } else {
+      this.total++
+      this.buffer.push(record)
+      if (this.buffer.length > this.max) {
+        this.buffer.splice(0, this.buffer.length - this.max)
+      }
+      this.counts.set(type, (this.counts.get(type) ?? 0) + 1)
     }
-    this.counts.set(type, (this.counts.get(type) ?? 0) + 1)
 
     // Observers (audio, metrics, …) are read-only: a throwing listener must never
     // interrupt the simulation, so each is isolated.

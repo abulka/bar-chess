@@ -51,8 +51,14 @@ import type { OrderKind, StanceMode, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { destReachable, findPath } from './pathfind'
 import { anchorFor, clearMotion, clearOrder, noteOrder, planStep } from './queue'
-import { buildBoard, buildWorldSnapshot, serializePosition, validatePosition } from './position'
-import type { SavedPosition } from './position'
+import {
+  buildBoard,
+  buildWorldSnapshot,
+  serializePosition,
+  serializeWorldSnapshot,
+  validatePosition,
+} from './position'
+import type { SavedHistoryEntry, SavedPosition, SerializedTurnState } from './position'
 import { formatForLlm, formatShorthand } from './shorthand'
 import type { GameSettings, SettingsPatch, SimSettings } from './settings'
 import { Rng, DEFAULT_SEED } from './rng'
@@ -209,6 +215,28 @@ interface TurnState {
   settings: SimSettings
 }
 
+/**
+ * One undo/redo boundary plus the metadata needed to replay the turn that
+ * produced it.
+ *
+ * `state` is the end-of-turn boundary used by undo/redo. `start` is the exact
+ * post-setup turn-start snapshot used by replay. They are deliberately separate:
+ * the start also carries paused player commands (orders/stances) that never
+ * create a boundary, while the end carries the previous cooldowns that the
+ * turn setup overwrote — so neither can be derived from the other. `pending`
+ * holds commands queued outside the pipeline at turn start (e.g. a reinforcement
+ * deploy) so a replay re-applies them instead of losing them.
+ */
+interface HistoryEntry {
+  state: TurnState
+  /** Exact turn-start snapshot (post-setup, orders included); null for non-turns. */
+  start: TurnState | null
+  /** Ticks the producing turn ran for; 0 for a non-turn boundary. */
+  ticks: number
+  /** Commands pending at turn start (cloned on replay). */
+  pending: Commands | null
+}
+
 export interface GameSnapshot {
   running: boolean
   paused: boolean
@@ -361,7 +389,6 @@ export class Game {
   hoverAttackTarget: Entity | null = null
 
   turnActive = false
-  canReplay = false
   /** Unified turn/replay progress (0..1) shown by the wide bar. */
   barProgress = 0
   // Last two tick values for per-frame render interpolation.
@@ -374,13 +401,16 @@ export class Game {
   private turnTicks = 0
   private turnMovesSeen = 0
   private turnNoProgressTicks = 0
-  private lastTurn: { snapshot: TurnState; ticks: number } | null = null
-  /** True while the last turn is being replayed; observers can ignore its events. */
+  /** Commands queued outside the pipeline when the current turn began. */
+  private turnPending: Commands | null = null
+  /** True while a recorded turn is being replayed; observers can ignore its events. */
   replaying = false
   private replayTicks = 0
+  /** Tick count of the turn currently being replayed. */
+  private replayTotal = 0
   // Turn-boundary states for undo/redo. `history[cursor]` is the state the game
   // is currently showing; `history.length - 1 === cursor` means "at the latest".
-  private history: TurnState[] = []
+  private history: HistoryEntry[] = []
   private cursor = 0
   /** Cap on retained turn states so long AI-vs-AI runs cannot grow unbounded. */
   private static readonly HISTORY_LIMIT = 100
@@ -432,7 +462,7 @@ export class Game {
     this.board = new Board(createBoardData(size))
     this.ctx = this.buildContext()
     this.placeArmy(initialArmy(size))
-    this.history = [this.captureTurn()]
+    this.history = [this.boundary()]
     this.cursor = 0
     this.paused = true
     this.bus.emit('map', `loaded ${this.board.data.name}`)
@@ -548,10 +578,24 @@ export class Game {
    */
   beginTurn(): void {
     if (this.turnActive || this.replaying || this.winner !== null) return
-    // Mutate first, then snapshot: replay must start from the exact turn-start
-    // state (cooldowns cleared, movedThisTurn set) or it diverges.
-    this.turn++
+    // Snapshot after the setup mutations: replay must start from the exact
+    // turn-start state, including the orders/stances issued while paused (which
+    // never create a history boundary) and the cleared cooldowns/movedThisTurn.
+    this.turnPending = structuredClone(this.cmds)
     this.turnTicks = 0
+    this.applyTurnSetup()
+    this.turnSnapshot = this.captureTurn()
+    this.turnActive = true
+    this.barProgress = 0
+    this.turnMovesSeen = this.teams.red.movesMade + this.teams.blue.movesMade
+    this.turnNoProgressTicks = 0
+    this.paused = false
+    this.bus.emit('info', 'turn started')
+  }
+
+  /** The deterministic per-turn setup every piece's one-move gate depends on. */
+  private applyTurnSetup(): void {
+    this.turn++
     for (const e of this.world.query(Motion)) {
       const motion = this.world.get(e, Motion)
       if (!motion) continue
@@ -560,14 +604,6 @@ export class Game {
     }
     this.teams.red.movesThisTurn = 0
     this.teams.blue.movesThisTurn = 0
-    this.turnSnapshot = this.captureTurn()
-    this.canReplay = false
-    this.turnActive = true
-    this.barProgress = 0
-    this.turnMovesSeen = this.teams.red.movesMade + this.teams.blue.movesMade
-    this.turnNoProgressTicks = 0
-    this.paused = false
-    this.bus.emit('info', 'turn started')
   }
 
   /** Step back one completed turn in the history. */
@@ -586,26 +622,47 @@ export class Game {
   private stepHistory(delta: -1 | 1, label: 'undo' | 'redo'): void {
     this.queuedTurns = 0
     this.cursor += delta
-    this.restoreTurn(this.history[this.cursor])
+    this.restoreTurn(this.history[this.cursor].state)
     this.barProgress = 0
     this.paused = true
-    this.canReplay = this.cursor === this.history.length - 1 && this.lastTurn !== null
     this.bus.emit('info', `${label} (turn ${this.cursor}/${this.history.length - 1})`)
   }
 
+  /**
+   * Replay the turn that produced the state at the history cursor, ending on
+   * exactly that boundary. Works at any cursor, so a turn can be re-watched
+   * after undoing; the cursor and redo branch are left untouched.
+   */
   replayTurn(): void {
-    if (!this.lastTurn || this.replaying || this.turnActive || this.winner !== null) return
-    // Replay only makes sense from the latest state: rewinding first would let
-    // the replayed turn land ahead of the cursor and desync the history.
-    if (this.cursor !== this.history.length - 1) return
+    const entry = this.history[this.cursor]
+    const start = entry?.start
+    // Allowed even after a win: replay rewinds to the pre-fatal start and re-runs
+    // the turn, so the fatal turn can be watched without undoing first.
+    if (!start || entry.ticks <= 0 || this.replaying || this.turnActive) return
     this.queuedTurns = 0
-    this.restoreTurn(this.lastTurn.snapshot)
-    this.selected = []
+    // The recorded start already carries the turn's orders/stances and rules.
+    this.restoreTurn(start)
+    if (entry.pending) this.restoreCommands(entry.pending)
     this.replaying = true
     this.replayTicks = 0
+    this.replayTotal = entry.ticks
     this.barProgress = 0
     this.paused = false
-    this.bus.emit('info', `replaying last turn (${this.lastTurn.ticks} ticks)`)
+    this.bus.emit('info', `replaying turn ${this.turn} (${entry.ticks} ticks)`)
+  }
+
+  private applySimSettings(settings: SimSettings): void {
+    this.autoPreserve = settings.autoPreserve
+    this.captureAdvance = settings.captureAdvance
+    this.chessKills = settings.chessKills
+  }
+
+  /** Re-apply commands that were pending at a recorded turn's start. */
+  private restoreCommands(cmds: Commands): void {
+    this.cmds.damage.push(...structuredClone(cmds.damage))
+    this.cmds.deploy.push(...structuredClone(cmds.deploy))
+    this.cmds.destroy.push(...structuredClone(cmds.destroy))
+    this.cmds.advance.push(...structuredClone(cmds.advance))
   }
 
   private advanceTurn(): void {
@@ -693,16 +750,18 @@ export class Game {
     this.turnActive = false
     this.barProgress = 1
     this.paused = true
-    if (this.turnSnapshot) {
-      this.lastTurn = { snapshot: this.turnSnapshot, ticks: this.turnTicks }
-      this.turnSnapshot = null
-      // A completed turn is a new history boundary; anything undone is replaced.
-      this.history.length = this.cursor + 1
-      this.history.push(this.captureTurn())
-      if (this.history.length > Game.HISTORY_LIMIT) this.history.shift()
-      this.cursor = this.history.length - 1
-      this.canReplay = true
-    }
+    // A completed turn is a new history boundary; anything undone is replaced.
+    this.history.length = this.cursor + 1
+    this.history.push({
+      state: this.captureTurn(),
+      start: this.turnSnapshot,
+      ticks: this.turnTicks,
+      pending: this.turnPending,
+    })
+    if (this.history.length > Game.HISTORY_LIMIT) this.history.shift()
+    this.cursor = this.history.length - 1
+    this.turnSnapshot = null
+    this.turnPending = null
     this.bus.emit('info', `turn ended after ${this.turnTicks} ticks`)
     // Deterministic turn boundary for observers (the live log samples here, so
     // back-to-back queued turns are never missed by polling).
@@ -724,6 +783,11 @@ export class Game {
       winner: this.winner,
       settings: this.simSettings(),
     }
+  }
+
+  /** A non-turn history boundary (the opening state, or a step where a king fell). */
+  private boundary(): HistoryEntry {
+    return { state: this.captureTurn(), start: null, ticks: 0, pending: null }
   }
 
   /** The sim-affecting settings currently in force. */
@@ -748,11 +812,7 @@ export class Game {
     this.winner = state.winner
     // Re-run undo/redo/replay under the rules the turn was captured with, not
     // whatever is toggled now.
-    if (state.settings) {
-      this.autoPreserve = state.settings.autoPreserve
-      this.captureAdvance = state.settings.captureAdvance
-      this.chessKills = state.settings.chessKills
-    }
+    if (state.settings) this.applySimSettings(state.settings)
     this.occupancy.clear()
     this.selected = this.selected.filter((e) => this.world.isAlive(e))
     // Drop commands queued outside the pipeline (e.g. a chess kill issued while
@@ -922,7 +982,12 @@ export class Game {
     this.ctx.turnActive = this.turnActive || this.replaying
     this.bus.tick = this.tick
     this.bus.phase = 'tick'
+    // Replay events are duplicates of ones already in the log: tag them and keep
+    // them out of the live buffer/stats, but still deliver them to observers
+    // (audio plays the replay's shots).
+    this.bus.replaying = this.replaying
     this.pipeline.run(this.ctx)
+    this.bus.replaying = false
     this.tick++
     this.ticksThisSecond++
     const before = this.winner
@@ -931,18 +996,26 @@ export class Game {
     // A king just fell during a live turn: close the turn (so the history
     // boundary is the pre-fatal state) and freeze. Undo reopens the game.
     if (this.winner !== null && before === null && !this.replaying) {
+      // This tick ran but returns before `advanceTurn`, so count it explicitly —
+      // otherwise a first-tick death records 0 ticks and cannot be replayed.
+      if (this.turnActive) this.turnTicks++
       this.endGame(this.winner)
       return
     }
 
     if (this.replaying) {
       this.replayTicks++
-      const total = this.lastTurn?.ticks ?? 0
+      const total = this.replayTotal
       this.barProgress = total > 0 ? Math.min(1, this.replayTicks / total) : 1
       if (this.replayTicks >= total) {
         this.replaying = false
         this.barProgress = 1
         this.paused = true
+        // Replayed pieces may have died in the turn; keep the panel focused on a
+        // live piece and settle the rules on the boundary we ended at.
+        this.selected = this.selected.filter((e) => this.world.isAlive(e))
+        const settled = this.history[this.cursor]?.state.settings
+        if (settled) this.applySimSettings(settled)
         this.bus.emit('info', 'replay finished')
         // A space press during the replay starts the queued turn right after it.
         if (this.queuedTurns > 0 && !this.winner) {
@@ -977,7 +1050,7 @@ export class Game {
       // A king can also fall while single-stepping outside a turn; record a
       // boundary so undo still has somewhere to go.
       this.history.length = this.cursor + 1
-      this.history.push(this.captureTurn())
+      this.history.push(this.boundary())
       if (this.history.length > Game.HISTORY_LIMIT) this.history.shift()
       this.cursor = this.history.length - 1
     }
@@ -1005,14 +1078,15 @@ export class Game {
     this.winner = null
     this.turnActive = false
     this.replaying = false
-    this.canReplay = false
-    this.lastTurn = null
     this.turnSnapshot = null
+    this.turnPending = null
+    this.replayTicks = 0
+    this.replayTotal = 0
     this.queuedTurns = 0
     this.paused = true
     this.ctx = this.buildContext()
     this.placeArmy(initialArmy(size))
-    this.history = [this.captureTurn()]
+    this.history = [this.boundary()]
     this.cursor = 0
     this.terrainVersion++
     this.bus.emit('map', `loaded ${this.board.data.name}`)
@@ -1494,10 +1568,77 @@ export class Game {
   /**
    * A complete, JSON-serializable snapshot of the battle (terrain, every
    * component, RNG, teams). Round-trips through `importPosition`; used by save
-   * slots and export/copy.
+   * slots and export/copy. Pass `{ history: true }` to include the undo/redo
+   * history (and replay metadata) so the whole game can be restored.
    */
-  exportPosition(): SavedPosition {
-    return serializePosition(this)
+  exportPosition(options: { history?: boolean } = {}): SavedPosition {
+    const saved = serializePosition(this)
+    saved.settings = this.simSettings()
+    if (options.history) {
+      saved.history = this.history.map((entry) => this.serializeHistoryEntry(entry))
+      saved.cursor = this.cursor
+    }
+    return saved
+  }
+
+  private serializeTurnState(state: TurnState): SerializedTurnState {
+    return {
+      world: serializeWorldSnapshot(state.world),
+      rng: state.rng,
+      tick: state.tick,
+      turn: state.turn,
+      teams: state.teams,
+      winner: state.winner,
+      settings: state.settings,
+    }
+  }
+
+  private deserializeTurnState(saved: SerializedTurnState): TurnState {
+    return {
+      world: buildWorldSnapshot(saved),
+      rng: saved.rng,
+      tick: saved.tick,
+      turn: saved.turn,
+      teams: saved.teams,
+      winner: saved.winner,
+      settings: saved.settings,
+    }
+  }
+
+  private serializeHistoryEntry(entry: HistoryEntry): SavedHistoryEntry {
+    return {
+      state: this.serializeTurnState(entry.state),
+      start: entry.start ? this.serializeTurnState(entry.start) : null,
+      ticks: entry.ticks,
+      pending: entry.pending,
+    }
+  }
+
+  private deserializeHistoryEntry(saved: SavedHistoryEntry): HistoryEntry {
+    return {
+      state: this.deserializeTurnState(saved.state),
+      start: saved.start ? this.deserializeTurnState(saved.start) : null,
+      ticks: saved.ticks,
+      pending: saved.pending ?? null,
+    }
+  }
+
+  /** Rebuild the undo/redo history from a save (empty for position-only saves). */
+  private restoreHistory(saved: SavedPosition): void {
+    if (!saved.history || saved.history.length === 0) {
+      this.history = [this.boundary()]
+      this.cursor = 0
+      return
+    }
+    const entries = saved.history.map((entry) => this.deserializeHistoryEntry(entry))
+    let cursor = saved.cursor ?? entries.length - 1
+    if (entries.length > Game.HISTORY_LIMIT) {
+      const drop = entries.length - Game.HISTORY_LIMIT
+      entries.splice(0, drop)
+      cursor -= drop
+    }
+    this.history = entries
+    this.cursor = Math.max(0, Math.min(cursor, entries.length - 1))
   }
 
   /** Compact, read-oriented position dump for debugging (not importable). */
@@ -1533,6 +1674,7 @@ export class Game {
     this.playerTeam = saved.playerTeam
     this.pendingCommand = 'none'
     this.overlays = { ...this.overlays, ...saved.overlays }
+    if (saved.settings) this.applySimSettings(saved.settings)
 
     this.occupancy.clear()
     this.selected = []
@@ -1546,23 +1688,23 @@ export class Game {
 
     this.turnActive = false
     this.replaying = false
-    this.canReplay = false
     this.queuedTurns = 0
     this.turnSnapshot = null
-    this.lastTurn = null
+    this.turnPending = null
     this.turnTicks = 0
     this.barProgress = 0
     this.replayTicks = 0
+    this.replayTotal = 0
     this.accumulator = 0
     this.paused = true
 
     this.terrainVersion++
     this.ctx = this.buildContext()
-    this.history = [this.captureTurn()]
-    this.cursor = 0
+    this.restoreHistory(saved)
 
     this.bus.emit('map', `loaded position ${this.board.data.name}`)
-    this.bus.emit('info', `position loaded (tick ${this.tick})`)
+    const turns = this.cursor > 0 ? `, ${this.cursor} turn(s) of history` : ''
+    this.bus.emit('info', `position loaded (tick ${this.tick}${turns})`)
     return { ok: true }
   }
 
@@ -1679,6 +1821,12 @@ export class Game {
     return this.replaying
   }
 
+  /** Whether the boundary at the cursor has a recorded turn that can be replayed. */
+  get canReplay(): boolean {
+    const entry = this.history[this.cursor]
+    return !!entry && entry.ticks > 0 && entry.start != null
+  }
+
   snapshot(): GameSnapshot {
     const pieces = this.world.query(Position, Cell).length
     const projectiles = this.world.query(Projectile, Position).length
@@ -1758,7 +1906,7 @@ export class Game {
       hover: this.hoverInfo(),
       turnActive: this.turnActive,
       queuedTurns: this.queuedTurns,
-      canReplay: this.canReplay,
+      canReplay: this.canReplay && !this.turnActive && !this.replaying,
       canUndo: this.cursor > 0 && !this.turnActive && !this.replaying,
       canRedo: this.cursor < this.history.length - 1 && !this.turnActive && !this.replaying,
       replaying: this.replaying,
