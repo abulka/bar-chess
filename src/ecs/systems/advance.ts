@@ -1,6 +1,7 @@
 import { containsCell, fireCells } from '../../game/geometry'
 import { vecEquals } from '../../game/math'
 import { buildOccupancy, makeOccupied } from '../../game/occupancy'
+import { clearMotion } from '../../game/queue'
 import { PIECES, WEAPONS } from '../../game/pieces'
 import { Cell, Motion, Order, PieceType, Position, Stance, Team } from '../components'
 import type { System } from '../pipeline'
@@ -78,8 +79,7 @@ const system: System = {
         pos.x = center.x
         pos.y = center.y
       }
-      motion.goal = null
-      motion.intent = 'none'
+      clearMotion(motion)
       motion.path = []
       motion.reserved = null
       motion.blocked = false

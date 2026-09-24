@@ -22,6 +22,26 @@ export function noteOrder(order: OrderData, tick: number, text: string): void {
   if (order.log.length > MAX_ORDER_LOG) order.log.splice(0, order.log.length - MAX_ORDER_LOG)
 }
 
+/**
+ * Reset the active order slot to idle (`kind: 'none'`). Stance and the order
+ * log are left alone; pass `queue: true` to also drop queued steps (player
+ * clear — completion paths promote the queue first).
+ */
+export function clearOrder(order: OrderData, opts?: { queue?: boolean }): void {
+  order.kind = 'none'
+  order.dest = null
+  order.target = null
+  order.resumeTarget = null
+  order.resumeTurn = -1
+  if (opts?.queue) order.queue.length = 0
+}
+
+/** Drop the current motion goal and mark the intent idle (no path change). */
+export function clearMotion(motion: MotionData): void {
+  motion.goal = null
+  motion.intent = 'none'
+}
+
 /** Endpoint of a step's planned path (falls back to its objective). */
 function stepEnd(step: OrderStep): Vec2 | null {
   const last = step.path[step.path.length - 1]
@@ -121,8 +141,7 @@ export function promoteNext(order: OrderData, motion: MotionData): boolean {
     order.reachable = next.reachable
     order.resumeTarget = null
     order.resumeTurn = -1
-    motion.goal = null
-    motion.intent = 'none'
+    clearMotion(motion)
   }
   motion.path = []
   motion.arrived = false

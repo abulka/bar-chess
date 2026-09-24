@@ -4,8 +4,8 @@ import { containsCell, fireCells } from '../../game/geometry'
 import { dist2, healthRatio } from '../../game/math'
 import { buildOccupancy, makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS, weaponVision } from '../../game/pieces'
-import { noteOrder } from '../../game/queue'
-import { Cell, Health, Order, PieceType, Stance, Target, Team } from '../components'
+import { noteOrder, clearOrder } from '../../game/queue'
+import { Cell, Health, Order, PieceType, Stance, Target, Team, hasLiveCell } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
@@ -106,7 +106,7 @@ const system: System = {
       // A specific attack order is sticky: keep the exact enemy until it dies.
       if (order.kind === 'attack') {
         const t = order.target
-        if (t !== null && ctx.world.isAlive(t) && ctx.world.has(t, Cell)) {
+        if (hasLiveCell(ctx.world, t)) {
           target.entity = t
           target.retargetAt = ctx.tick + RETARGET_TICKS
           // Keep the reachability flag current as the target moves.
@@ -118,10 +118,7 @@ const system: System = {
           continue
         }
         if (t !== null) noteOrder(order, ctx.tick, `target #${t} lost — attack abandoned`)
-        order.kind = 'none'
-        order.target = null
-        order.resumeTarget = null
-        order.resumeTurn = -1
+        clearOrder(order)
         target.entity = null
         // The order is done, but the stance is kept (the player can change it).
         continue
@@ -137,8 +134,7 @@ const system: System = {
         continue
       }
 
-      const valid =
-        target.entity !== null && ctx.world.isAlive(target.entity) && ctx.world.has(target.entity, Cell)
+      const valid = hasLiveCell(ctx.world, target.entity)
       if (!valid) {
         if (target.entity !== null) {
           target.entity = null

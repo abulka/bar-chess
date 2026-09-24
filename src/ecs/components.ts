@@ -1,5 +1,5 @@
 import type { OrderKind, ProjectileShape, StanceMode, TeamId, Trajectory, Vec2 } from '../game/types'
-import type { Entity } from './world'
+import type { Entity, World } from './world'
 import { defineComponent } from './world'
 
 export interface PositionData {
@@ -151,6 +151,11 @@ export const Motion = defineComponent<MotionData>('Motion')
 export const Projectile = defineComponent<ProjectileData>('Projectile')
 export const Fx = defineComponent<FxData>('Fx')
 export const Dead = defineComponent<true>('Dead')
+
+/** True when `entity` is non-null, still alive, and has a board cell. */
+export function hasLiveCell(world: World, entity: Entity | null): entity is Entity {
+  return entity !== null && world.isAlive(entity) && world.has(entity, Cell)
+}
 
 /** Every component store, in declaration order. */
 export const ALL_STORES = [

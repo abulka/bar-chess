@@ -7,8 +7,8 @@ import { closestEmptyCell, previewFiringCell } from '../../game/approach'
 import { coordName } from '../../game/coords'
 import { PIECES, WEAPONS } from '../../game/pieces'
 import { destReachable as canReach } from '../../game/pathfind'
-import { noteOrder, promoteNext, rechainQueue } from '../../game/queue'
-import { Cell, Health, Motion, Order, PieceType, Stance, Target, Team } from '../components'
+import { noteOrder, clearMotion, clearOrder, promoteNext, rechainQueue } from '../../game/queue'
+import { Cell, Health, Motion, Order, PieceType, Stance, Target, Team, hasLiveCell } from '../components'
 import type { MotionIntent, OrderData } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
@@ -142,11 +142,9 @@ const system: System = {
       const underFire =
         attacker !== null &&
         ctx.tick < target.underFireUntil &&
-        ctx.world.isAlive(attacker) &&
-        ctx.world.has(attacker, Cell)
+        hasLiveCell(ctx.world, attacker)
       const kind = ctx.world.get(e, PieceType)?.kind
-      const targetValid =
-        target.entity !== null && ctx.world.isAlive(target.entity) && ctx.world.has(target.entity, Cell)
+      const targetValid = hasLiveCell(ctx.world, target.entity)
       const preserve = kind ? preserveThreshold(kind) : 0
       // Valuable pieces scan every tick so they can bail *before* taking damage;
       // cheap pieces only bother once hurt or actually under fire.
@@ -274,7 +272,7 @@ const system: System = {
       // 1. Explicit attack order: glue to the target until it dies.
       if (order.kind === 'attack') {
         const t = order.target
-        if (t !== null && ctx.world.isAlive(t) && ctx.world.has(t, Cell)) {
+        if (hasLiveCell(ctx.world, t)) {
           // Best-effort approach: stop and fire when in geometry, else head to a
           // firing cell, else the closest reachable empty square. A positionally
           // unreachable target (e.g. a bishop on the wrong colour) is therefore
@@ -294,10 +292,7 @@ const system: System = {
           continue
         }
         noteOrder(order, ctx.tick, 'attack target lost — order complete')
-        order.kind = 'none'
-        order.target = null
-        order.resumeTarget = null
-        order.resumeTurn = -1
+        clearOrder(order)
       }
 
       // 2. Goto order: advance toward the objective (best effort if unreachable).
@@ -336,12 +331,8 @@ const system: System = {
           continue
         }
         noteOrder(order, ctx.tick, 'move complete')
-        order.kind = 'none'
-        order.dest = null
-        order.resumeTarget = null
-        order.resumeTurn = -1
-        motion.goal = null
-        motion.intent = 'none'
+        clearOrder(order)
+        clearMotion(motion)
         continue
       }
 
@@ -350,8 +341,7 @@ const system: System = {
       const mode = controller === 'ai' ? 'attack' : stance.mode
 
       if (mode !== 'attack') {
-        motion.goal = null
-        motion.intent = 'none'
+        clearMotion(motion)
         continue
       }
 
@@ -371,8 +361,7 @@ const system: System = {
         if (king !== null && king !== e && kc && chebyshev(cell.x, cell.y, kc.x, kc.y) <= KING_GUARD_RADIUS) {
           // Already blocking a shot: stay planted rather than chasing.
           if (isScreening(ctx, e, team, kc)) {
-            motion.goal = null
-            motion.intent = 'none'
+            clearMotion(motion)
             continue
           }
           const threats = kingThreats(ctx, king, team, kingThreatMemo)

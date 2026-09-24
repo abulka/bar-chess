@@ -47,7 +47,7 @@ import { underFireAttacker } from './underFire'
 import type { OrderKind, StanceMode, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { destReachable, findPath } from './pathfind'
-import { anchorFor, noteOrder, planStep } from './queue'
+import { anchorFor, clearMotion, clearOrder, noteOrder, planStep } from './queue'
 import { buildBoard, buildWorldSnapshot, serializePosition, validatePosition } from './position'
 import type { SavedPosition } from './position'
 import { formatForLlm, formatShorthand } from './shorthand'
@@ -1096,8 +1096,7 @@ export class Game {
           order.resumeTarget = null
           order.resumeTurn = -1
           motion.path = []
-          motion.goal = null
-          motion.intent = 'none'
+          clearMotion(motion)
         }
         if (attacking) this.startAttack(e, order, motion, occupant as Entity)
         else this.startGoto(e, order, motion, cell, occ, team)
@@ -1125,13 +1124,10 @@ export class Game {
   }
 
   private startAttack(e: Entity, order: OrderData, motion: MotionData, target: Entity): void {
+    clearOrder(order)
     order.kind = 'attack'
     order.target = target
-    order.dest = null
-    order.resumeTarget = null
-    order.resumeTurn = -1
-    motion.goal = null
-    motion.intent = 'none'
+    clearMotion(motion)
     motion.holdUntilHp = 0
     motion.path = []
     motion.arrived = true
@@ -1232,16 +1228,10 @@ export class Game {
       const motion = this.world.get(e, Motion)
       if (order) {
         noteOrder(order, this.tick, 'orders cleared (player)')
-        order.kind = 'none'
-        order.dest = null
-        order.target = null
-        order.resumeTarget = null
-        order.resumeTurn = -1
-        order.queue.length = 0
+        clearOrder(order, { queue: true })
       }
       if (motion) {
-        motion.goal = null
-        motion.intent = 'none'
+        clearMotion(motion)
         motion.holdUntilHp = 0
         motion.path = []
         motion.arrived = true
@@ -1450,8 +1440,7 @@ export class Game {
     const blocked = occupiedExcept(this.board, occ, e)
     const reachable = firingPositionExists(this.board, cell, tcell, def.move, geometry, team)
     if (containsCell(fireCells(this.board, cell, geometry, team, blocked), tcell.x, tcell.y)) {
-      motion.goal = null
-      motion.intent = 'none'
+      clearMotion(motion)
       motion.path = []
       return true
     }

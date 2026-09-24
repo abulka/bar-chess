@@ -2,7 +2,7 @@ import { containsCell, fireCells } from '../../game/geometry'
 import { makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS, projectileDef } from '../../game/pieces'
 import type { Vec2 } from '../../game/types'
-import { Cell, PieceType, Position, Projectile, Target, Team, Weapon } from '../components'
+import { Cell, PieceType, Position, Projectile, Target, Team, Weapon, hasLiveCell } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
@@ -72,7 +72,7 @@ const system: System = {
       }
 
       const target = ctx.world.require(e, Target).entity
-      if (target === null || !ctx.world.isAlive(target) || !ctx.world.has(target, Cell)) continue
+      if (!hasLiveCell(ctx.world, target)) continue
 
       const kind = ctx.world.require(e, PieceType).kind
       const def = PIECES[kind]
