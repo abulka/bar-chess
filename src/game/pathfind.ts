@@ -1,9 +1,8 @@
 import type { Board } from './board'
-import { NEVER, moveDestinations, pawnHomeRank } from './geometry'
+import { NEVER, forEachMoveDestination, moveDestinations } from './geometry'
 import type { OccupiedFn } from './geometry'
 import { dist2 } from './math'
 import type { Geometry, TeamId, Vec2 } from './types'
-import { resolveGeometry } from './types'
 
 class MinHeap {
   private items: number[] = []
@@ -163,55 +162,24 @@ function computeReachable(
   const seen = new Uint8Array(w * h)
   const dist = new Int32Array(w * h).fill(-1)
   if (!board.inBounds(from.x, from.y)) return { seen, dist }
-  const g = resolveGeometry(geom, team)
   const start = board.cellIndex(from.x, from.y)
   seen[start] = 1
   dist[start] = 0
   const queue: number[] = [start]
 
-  const visit = (x: number, y: number, parentIdx: number): boolean => {
-    const idx = board.cellIndex(x, y)
-    if (seen[idx]) return false
-    seen[idx] = 1
-    dist[idx] = dist[parentIdx] + 1
-    queue.push(idx)
-    return true
-  }
-
+  // Flood fill over the shared one-move visitor: occupancy is ignored (walls
+  // still block via `passable`), matching the theoretical reachability contract.
   for (let qi = 0; qi < queue.length; qi++) {
     const current = queue[qi]
     const cx = current % w
     const cy = (current - cx) / w
-
-    if (g.kind === 'slide') {
-      for (const [dx, dy] of g.dirs) {
-        for (let k = 1; k <= g.range; k++) {
-          const x = cx + dx * k
-          const y = cy + dy * k
-          if (!board.passable(x, y)) break
-          if (!visit(x, y, current)) continue
-        }
-      }
-      continue
-    }
-
-    if (g.kind === 'leap') {
-      for (const [dx, dy] of g.offsets) {
-        const x = cx + dx
-        const y = cy + dy
-        if (board.passable(x, y)) visit(x, y, current)
-      }
-      continue
-    }
-
-    // Pawn: advance up to `forward` squares, but the two-square first move is
-    // only legal from the home rank.
-    const advance = cy === pawnHomeRank(board, team) ? g.forward : 1
-    for (let k = 1; k <= advance; k++) {
-      const y = cy + g.dy * k
-      if (!board.passable(cx, y)) break
-      if (!visit(cx, y, current)) continue
-    }
+    forEachMoveDestination(board, { x: cx, y: cy }, geom, team, NEVER, true, (x, y) => {
+      const idx = board.cellIndex(x, y)
+      if (seen[idx]) return
+      seen[idx] = 1
+      dist[idx] = dist[current] + 1
+      queue.push(idx)
+    })
   }
   return { seen, dist }
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { moveDestinations } from '../../src/game/geometry'
 import { findPath, moveDistances, reachableCells } from '../../src/game/pathfind'
 import { PIECES, WEAPONS } from '../../src/game/pieces'
 import { flatBoard, occupiedCells } from '../helpers'
@@ -90,5 +91,37 @@ describe('reachableCells', () => {
     const first = reachableCells(flatBoard(), { x: 0, y: 0 }, PIECES.rook.move, 'blue')
     const second = reachableCells(flatBoard(), { x: 0, y: 0 }, PIECES.rook.move, 'blue')
     expect(second).not.toBe(first)
+  })
+
+  it('matches the transitive closure of moveDestinations', () => {
+    // Parity: the flood fill and the one-move collector must agree on the set.
+    const board = flatBoard()
+    for (let y = 0; y < board.height; y++) board.setTerrain(3, y, 4) // wall column
+    const cases = [
+      { from: { x: 0, y: 0 }, geom: PIECES.rook.move, team: 'blue' as const },
+      { from: { x: 4, y: 4 }, geom: PIECES.bishop.move, team: 'blue' as const },
+      { from: { x: 2, y: 5 }, geom: PIECES.knight.move, team: 'blue' as const },
+      { from: { x: 3, y: 6 }, geom: PIECES.pawn.move, team: 'blue' as const },
+      { from: { x: 3, y: 1 }, geom: PIECES.pawn.move, team: 'red' as const },
+    ]
+    for (const { from, geom, team } of cases) {
+      const seen = reachableCells(board, from, geom, team)
+      const closure = new Uint8Array(board.width * board.height)
+      const start = board.cellIndex(from.x, from.y)
+      closure[start] = 1
+      const queue = [start]
+      for (let qi = 0; qi < queue.length; qi++) {
+        const current = queue[qi]
+        const cx = current % board.width
+        const cy = (current - cx) / board.width
+        for (const n of moveDestinations(board, { x: cx, y: cy }, geom, team)) {
+          const idx = board.cellIndex(n.x, n.y)
+          if (closure[idx]) continue
+          closure[idx] = 1
+          queue.push(idx)
+        }
+      }
+      expect(Array.from(closure)).toEqual(Array.from(seen))
+    }
   })
 })

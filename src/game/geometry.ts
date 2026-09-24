@@ -16,6 +16,55 @@ export function pawnHomeRank(board: Board, team: TeamId): number {
 }
 
 /**
+ * Visit every legal one-move destination of `from` without allocating. Shared
+ * by the collecting `moveDestinations` and the reachability flood fill so the
+ * slide/leap/pawn rules (incl. pawnHomeRank) live in exactly one place.
+ */
+export function forEachMoveDestination(
+  board: Board,
+  from: Vec2,
+  geom: Geometry,
+  team: TeamId,
+  occupied: OccupiedFn,
+  ignoreOccupancy: boolean,
+  visit: (x: number, y: number) => void,
+): void {
+  const g = resolveGeometry(geom, team)
+  const free = (x: number, y: number) => board.passable(x, y) && (ignoreOccupancy || !occupied(x, y))
+
+  if (g.kind === 'slide') {
+    for (const [dx, dy] of g.dirs) {
+      for (let k = 1; k <= g.range; k++) {
+        const x = from.x + dx * k
+        const y = from.y + dy * k
+        if (!board.passable(x, y)) break
+        if (!ignoreOccupancy && occupied(x, y)) break
+        visit(x, y)
+      }
+    }
+    return
+  }
+
+  if (g.kind === 'leap') {
+    for (const [dx, dy] of g.offsets) {
+      const x = from.x + dx
+      const y = from.y + dy
+      if (free(x, y)) visit(x, y)
+    }
+    return
+  }
+
+  // A pawn advances up to `forward` squares, but the two-square first move is
+  // only legal from its home rank; the first blocker stops the advance.
+  const advance = from.y === pawnHomeRank(board, team) ? g.forward : 1
+  for (let k = 1; k <= advance; k++) {
+    const y = from.y + g.dy * k
+    if (!free(from.x, y)) break
+    visit(from.x, y)
+  }
+}
+
+/**
  * Cells a piece can legally step to with one application of its movement
  * geometry. Another piece on a cell blocks it (one piece per square) unless
  * `ignoreOccupancy` is set, which path planning uses so routes may be planned
@@ -29,40 +78,10 @@ export function moveDestinations(
   occupied: OccupiedFn = NEVER,
   ignoreOccupancy = false,
 ): Vec2[] {
-  const g = resolveGeometry(geom, team)
   const out: Vec2[] = []
-  const free = (x: number, y: number) => board.passable(x, y) && (ignoreOccupancy || !occupied(x, y))
-
-  if (g.kind === 'slide') {
-    for (const [dx, dy] of g.dirs) {
-      for (let k = 1; k <= g.range; k++) {
-        const x = from.x + dx * k
-        const y = from.y + dy * k
-        if (!board.passable(x, y)) break
-        if (!ignoreOccupancy && occupied(x, y)) break
-        out.push({ x, y })
-      }
-    }
-    return out
-  }
-
-  if (g.kind === 'leap') {
-    for (const [dx, dy] of g.offsets) {
-      const x = from.x + dx
-      const y = from.y + dy
-      if (free(x, y)) out.push({ x, y })
-    }
-    return out
-  }
-
-  // A pawn advances up to `forward` squares, but the two-square first move is
-  // only legal from its home rank; the first blocker stops the advance.
-  const advance = from.y === pawnHomeRank(board, team) ? g.forward : 1
-  for (let k = 1; k <= advance; k++) {
-    const y = from.y + g.dy * k
-    if (!free(from.x, y)) break
-    out.push({ x: from.x, y })
-  }
+  forEachMoveDestination(board, from, geom, team, occupied, ignoreOccupancy, (x, y) => {
+    out.push({ x, y })
+  })
   return out
 }
 
