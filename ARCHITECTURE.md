@@ -519,18 +519,30 @@ are shown, giving the board the full width when both are hidden. Toggling either
 resizes the canvas and recomputes the fit floor without re-fitting, so a
 zoomed-in view keeps its zoom and centre (`BoardView.resize()`).
 
-The HUD bottom panel (stats + event log) is resizable: a draggable `.splitter`
-row sits between the stage and the panel, its height driven by `.app`'s inline
-`grid-template-rows` from a local `bottomHeight` ref (clamped to a minimum panel
-and stage size). Dragging sets the height from the pointer, double-click resets,
-and the result is persisted as `bottomFraction` of the viewport.
+The HUD bottom panel (stats + event log) is resizable: a draggable
+`.splitter.horizontal` row sits between the stage and the panel, its height
+driven by `.app`'s inline `grid-template-rows` from a local `bottomHeight` ref
+(clamped to a minimum panel and stage size). Dragging sets the height from the
+pointer, double-click resets, and the result is persisted as `bottomFraction`
+of the viewport.
+
+The side rails are resizable the same way: each rail sits in a `.rail-stack`
+flex row with a `.splitter.vertical` on its inner edge, and `.stage`'s inline
+`gridTemplateColumns` (from local `leftWidth`/`rightWidth` refs) sizes the
+columns. Dragging sets the width from the pointer, double-click resets, and the
+widths persist as `leftRailFraction`/`rightRailFraction` of the viewport, clamped
+to leave a minimum board width. Within the left rail the **controls** hints list
+and within the right rail the **stance** legend are wrapped in
+`CollapsibleSection.vue` — a clickable rail-title header that hides its body and
+persists its state as `controlsCollapsed`/`stanceCollapsed`.
 
 `GameSnapshot` fields (`src/game/game.ts`): `running paused tick fps tps speed
 boardId boardSize boardSizes teams timings events eventCount shots kills
 warnings selected selectedLines counts winner overlays hudVisible autoPreserve
-captureAdvance soundEnabled railsVisible playerTeam turnActive queuedTurns canReplay canUndo
-canRedo replaying barProgress pendingCommand selectionCount stanceSummary
-pieceInfo terrainVersion`.
+captureAdvance soundEnabled railsVisible controlsCollapsed stanceCollapsed
+playerTeam turnActive queuedTurns canReplay canUndo canRedo replaying
+barProgress pendingCommand selectionCount stanceSummary pieceInfo
+terrainVersion`.
 
 | Component | Responsibility |
 | --------- | -------------- |
@@ -540,6 +552,7 @@ pieceInfo terrainVersion`.
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
 | `StatsBar.vue` | turn/tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Sound config panel, Inspector for the selection |
+| `CollapsibleSection.vue` | clickable rail-title header with a caret that hides its slot body; state owned/persisted by `App.vue` |
 
 ### Overlay scope and legend
 
@@ -656,10 +669,13 @@ UI/session preferences survive a reload (and a dev-server restart) via
 `src/game/settings.ts`: `Game.settings()` snapshots them and `Game.applySettings`
 applies a validated patch. Stored under `bar-chess.settings`:
 `overlays` (all flags), `hudVisible`, `railsVisible`, `speed`, `gameMode`,
-`soundEnabled` and `bottomFraction` (the HUD splitter height; per-piece stance
-lives in the world, not here). `loadSettings` drops malformed or out-of-range fields (unknown
+`soundEnabled`, `bottomFraction` (the HUD splitter height),
+`leftRailFraction`/`rightRailFraction` (side-rail widths) and
+`controlsCollapsed`/`stanceCollapsed` (the left controls hints and right stance
+legend sections; per-piece stance lives in the world, not here). `loadSettings`
+drops malformed or out-of-range fields (unknown
 overlay keys, non-boolean flags, speeds outside `SPEEDS`, unknown modes,
-`bottomFraction` outside 0.1–0.9), and
+`bottomFraction` outside 0.1–0.9, rail fractions outside 0.08–0.45), and
 `saveSettings` swallows storage failures (private mode, quota) so persistence can
 never break the game. `App.vue` applies the patch once at startup and re-saves on
 every toolbar/hotkey change. This is separate from `SavedPosition`, which still

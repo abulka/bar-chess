@@ -30,6 +30,9 @@ import {
   FIXED_DT,
   MAX_STEPS_PER_FRAME,
   PATH_BUDGET_PER_TICK,
+  RAIL_FRACTION_DEFAULT,
+  RAIL_FRACTION_MAX,
+  RAIL_FRACTION_MIN,
   SPEEDS,
   TEAM_COLORS,
   TEAM_IDS,
@@ -212,6 +215,9 @@ export interface GameSnapshot {
   soundEnabled: boolean
   /** Whether the left/right side rails (controls, stance, position) are shown. */
   railsVisible: boolean
+  /** Whether the left "controls" hints and right "stance" legend are collapsed. */
+  controlsCollapsed: boolean
+  stanceCollapsed: boolean
   playerTeam: TeamId
   gameMode: GameMode
   gameModes: Array<{ id: GameMode; label: string }>
@@ -281,9 +287,14 @@ export class Game {
   paused = false
   hudVisible = false
   railsVisible = true
+  controlsCollapsed = false
+  stanceCollapsed = false
   soundEnabled = false
   /** HUD bottom-panel height as a fraction of the viewport. */
   bottomFraction = BOTTOM_FRACTION_DEFAULT
+  /** Left/right side-rail widths as a fraction of the viewport. */
+  leftRailFraction = RAIL_FRACTION_DEFAULT
+  rightRailFraction = RAIL_FRACTION_DEFAULT
   winner: TeamId | null = null
   terrainVersion = 0
   playerTeam: TeamId = 'blue'
@@ -706,6 +717,10 @@ export class Game {
       captureAdvance: this.captureAdvance,
       soundEnabled: this.soundEnabled,
       bottomFraction: this.bottomFraction,
+      leftRailFraction: this.leftRailFraction,
+      rightRailFraction: this.rightRailFraction,
+      controlsCollapsed: this.controlsCollapsed,
+      stanceCollapsed: this.stanceCollapsed,
     }
   }
 
@@ -722,6 +737,8 @@ export class Game {
     }
     if (typeof settings.hudVisible === 'boolean') this.hudVisible = settings.hudVisible
     if (typeof settings.railsVisible === 'boolean') this.railsVisible = settings.railsVisible
+    if (typeof settings.controlsCollapsed === 'boolean') this.controlsCollapsed = settings.controlsCollapsed
+    if (typeof settings.stanceCollapsed === 'boolean') this.stanceCollapsed = settings.stanceCollapsed
     if (typeof settings.speed === 'number' && SPEEDS.includes(settings.speed)) this.speed = settings.speed
     if (typeof settings.autoPreserve === 'boolean') this.autoPreserve = settings.autoPreserve
     if (typeof settings.captureAdvance === 'boolean') this.captureAdvance = settings.captureAdvance
@@ -733,6 +750,22 @@ export class Game {
       settings.bottomFraction <= BOTTOM_FRACTION_MAX
     ) {
       this.bottomFraction = settings.bottomFraction
+    }
+    if (
+      typeof settings.leftRailFraction === 'number' &&
+      Number.isFinite(settings.leftRailFraction) &&
+      settings.leftRailFraction >= RAIL_FRACTION_MIN &&
+      settings.leftRailFraction <= RAIL_FRACTION_MAX
+    ) {
+      this.leftRailFraction = settings.leftRailFraction
+    }
+    if (
+      typeof settings.rightRailFraction === 'number' &&
+      Number.isFinite(settings.rightRailFraction) &&
+      settings.rightRailFraction >= RAIL_FRACTION_MIN &&
+      settings.rightRailFraction <= RAIL_FRACTION_MAX
+    ) {
+      this.rightRailFraction = settings.rightRailFraction
     }
     if (settings.gameMode && GAME_MODES.some((m) => m.id === settings.gameMode)) {
       this.setGameMode(settings.gameMode)
@@ -1574,6 +1607,8 @@ export class Game {
       captureAdvance: this.captureAdvance,
       soundEnabled: this.soundEnabled,
       railsVisible: this.railsVisible,
+      controlsCollapsed: this.controlsCollapsed,
+      stanceCollapsed: this.stanceCollapsed,
       playerTeam: this.playerTeam,
       gameMode: this.gameMode,
       gameModes: GAME_MODES,

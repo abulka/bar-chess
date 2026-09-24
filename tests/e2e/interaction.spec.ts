@@ -147,7 +147,7 @@ test('right-click on an enemy issues an attack order (context-sensitive)', async
 
 test('the HUD splitter resizes the bottom panel and persists', async ({ page }) => {
   await page.keyboard.press('h')
-  const splitter = page.locator('.splitter')
+  const splitter = page.locator('.splitter.horizontal')
   await expect(splitter).toBeVisible()
 
   const before = await page.locator('.bottom').evaluate((el) => el.clientHeight)
@@ -164,5 +164,44 @@ test('the HUD splitter resizes the bottom panel and persists', async ({ page }) 
   await page.waitForFunction(() => Boolean((window as any).game && (window as any).__renderer))
   const restored = await page.locator('.bottom').evaluate((el) => el.clientHeight)
   expect(restored).toBeGreaterThan(before + 100)
+})
+
+test('the rail splitter resizes a side rail and persists', async ({ page }) => {
+  const rail = page.locator('.rail-stack.left aside.rail')
+  const splitter = page.locator('.rail-stack.left .splitter.vertical')
+  await expect(splitter).toBeVisible()
+
+  const before = await rail.evaluate((el) => el.clientWidth)
+  const box = (await splitter.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 140, box.y + box.height / 2, { steps: 5 })
+  await page.mouse.up()
+
+  const after = await rail.evaluate((el) => el.clientWidth)
+  expect(after).toBeGreaterThan(before + 60)
+
+  await page.reload()
+  await page.waitForFunction(() => Boolean((window as any).game && (window as any).__renderer))
+  const restored = await page.locator('.rail-stack.left aside.rail').evaluate((el) => el.clientWidth)
+  expect(restored).toBeGreaterThan(before + 60)
+})
+
+test('the controls and stance sections collapse and persist', async ({ page }) => {
+  const hints = page.locator('.rail.left .hints')
+  const stanceLegend = page.locator('.rail.right .legend').first()
+  await expect(hints).toBeVisible()
+  await expect(stanceLegend).toBeVisible()
+
+  await page.getByRole('button', { name: 'controls' }).click()
+  await expect(hints).toBeHidden()
+  await page.getByRole('button', { name: 'stance' }).click()
+  await expect(stanceLegend).toBeHidden()
+
+  await page.reload()
+  await page.waitForFunction(() => Boolean((window as any).game && (window as any).__renderer))
+  await expect(page.locator('.rail.left .hints')).toBeHidden()
+  await expect(page.locator('.rail.right .legend').first()).toBeHidden()
+  await expect(page.getByRole('button', { name: 'controls' })).toHaveAttribute('aria-expanded', 'false')
 })
 

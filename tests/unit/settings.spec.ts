@@ -22,6 +22,10 @@ describe('settings persistence', () => {
       captureAdvance: true,
       soundEnabled: true,
       bottomFraction: 0.4,
+      leftRailFraction: 0.2,
+      rightRailFraction: 0.25,
+      controlsCollapsed: true,
+      stanceCollapsed: true,
     })
     saveSettings(game.settings())
 
@@ -42,6 +46,10 @@ describe('settings persistence', () => {
     expect(restored.captureAdvance).toBe(true)
     expect(restored.soundEnabled).toBe(true)
     expect(restored.bottomFraction).toBe(0.4)
+    expect(restored.leftRailFraction).toBe(0.2)
+    expect(restored.rightRailFraction).toBe(0.25)
+    expect(restored.controlsCollapsed).toBe(true)
+    expect(restored.stanceCollapsed).toBe(true)
     expect(restored.teams.red.controller).toBe('ai')
   })
 
@@ -66,6 +74,10 @@ describe('settings persistence', () => {
         captureAdvance: 'yes',
         soundEnabled: 'yes',
         bottomFraction: 2,
+        leftRailFraction: 'wide',
+        rightRailFraction: 0.01,
+        controlsCollapsed: 'yes',
+        stanceCollapsed: 1,
       }),
     )
     const loaded = loadSettings()
@@ -79,6 +91,10 @@ describe('settings persistence', () => {
     expect(loaded?.captureAdvance).toBeUndefined()
     expect(loaded?.soundEnabled).toBeUndefined()
     expect(loaded?.bottomFraction).toBeUndefined()
+    expect(loaded?.leftRailFraction).toBeUndefined()
+    expect(loaded?.rightRailFraction).toBeUndefined()
+    expect(loaded?.controlsCollapsed).toBeUndefined()
+    expect(loaded?.stanceCollapsed).toBeUndefined()
   })
 
   it('defaults auto-preserve on and honors an explicit off', () => {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import BoardView from './components/BoardView.vue'
+import CollapsibleSection from './components/CollapsibleSection.vue'
 import EventLog from './components/EventLog.vue'
 import PiecePanel from './components/PiecePanel.vue'
 import ReinforcementBar from './components/ReinforcementBar.vue'
@@ -13,6 +14,9 @@ import {
   BOTTOM_FRACTION_DEFAULT,
   BOTTOM_FRACTION_MAX,
   BOTTOM_FRACTION_MIN,
+  RAIL_FRACTION_DEFAULT,
+  RAIL_FRACTION_MAX,
+  RAIL_FRACTION_MIN,
   SNAPSHOT_INTERVAL_MS,
 } from './game/constants'
 import { Game } from './game/game'
@@ -51,18 +55,58 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const MIN_BOTTOM_PX = 120
 const MIN_STAGE_PX = 180
 
+/** Pixel clamps for the resizable side rails. */
+const MIN_RAIL_PX = 120
+const MIN_BOARD_PX = 260
+const SPLITTER_PX = 6
+const ROSTER_PX = 200
+
+const stageEl = ref<HTMLElement | null>(null)
+
 const bottomHeight = ref(clampBottomPx(game.bottomFraction * window.innerHeight))
+const leftWidth = ref(clampRailPx(game.leftRailFraction * window.innerWidth, 0))
+const rightWidth = ref(clampRailPx(game.rightRailFraction * window.innerWidth, leftWidth.value))
 
 const gridRows = computed(() =>
   snapshot.value.hudVisible
-    ? `auto auto minmax(${MIN_STAGE_PX}px, 1fr) 6px ${bottomHeight.value}px`
+    ? `auto auto minmax(${MIN_STAGE_PX}px, 1fr) ${SPLITTER_PX}px ${bottomHeight.value}px`
     : 'auto auto minmax(0, 1fr)',
 )
+
+/** Stage columns, adapting to which side stacks (rails, rosters) are visible. */
+const stageColumns = computed(() => {
+  const left = `calc(${leftWidth.value}px + ${SPLITTER_PX}px)`
+  const right = `calc(${rightWidth.value}px + ${SPLITTER_PX}px)`
+  const roster = `${ROSTER_PX}px`
+  if (snapshot.value.railsVisible && snapshot.value.hudVisible) {
+    return `${left} ${roster} minmax(0, 1fr) ${roster} ${right}`
+  }
+  if (snapshot.value.railsVisible) return `${left} minmax(0, 1fr) ${right}`
+  if (snapshot.value.hudVisible) return `${roster} minmax(0, 1fr) ${roster}`
+  return 'minmax(0, 1fr)'
+})
 
 let timer = 0
 
 function clampBottomPx(px: number): number {
   return Math.round(Math.max(MIN_BOTTOM_PX, Math.min(px, window.innerHeight - MIN_STAGE_PX)))
+}
+
+/** Available width for a rail: viewport minus the board floor, rosters and splitters. */
+function railReserve(): number {
+  const rosters = snapshot.value.hudVisible ? ROSTER_PX * 2 : 0
+  return MIN_BOARD_PX + rosters + SPLITTER_PX * 2
+}
+
+function clampRailPx(px: number, otherPx: number): number {
+  const max = Math.max(MIN_RAIL_PX, window.innerWidth - railReserve() - otherPx)
+  return Math.round(Math.max(MIN_RAIL_PX, Math.min(px, max)))
+}
+
+/** Re-clamp both rails after a layout change (HUD/rails toggle, resize). */
+function reclampRails(): void {
+  rightWidth.value = clampRailPx(rightWidth.value, leftWidth.value)
+  leftWidth.value = clampRailPx(leftWidth.value, rightWidth.value)
 }
 
 let splitterDrag = false
@@ -96,8 +140,50 @@ function persistBottomHeight(): void {
   persistSettings()
 }
 
+let railDrag: 'left' | 'right' | null = null
+
+function onRailDown(side: 'left' | 'right', event: PointerEvent): void {
+  railDrag = side
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  event.preventDefault()
+}
+
+function onRailMove(side: 'left' | 'right', event: PointerEvent): void {
+  if (railDrag !== side) return
+  const rect = stageEl.value?.getBoundingClientRect()
+  const left = rect?.left ?? 0
+  const right = rect?.right ?? window.innerWidth
+  if (side === 'left') leftWidth.value = clampRailPx(event.clientX - left, rightWidth.value)
+  else rightWidth.value = clampRailPx(right - event.clientX, leftWidth.value)
+}
+
+function onRailUp(side: 'left' | 'right', event: PointerEvent): void {
+  if (railDrag !== side) return
+  railDrag = null
+  ;(event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId)
+  persistRailWidths()
+}
+
+function onRailReset(side: 'left' | 'right'): void {
+  const other = side === 'left' ? rightWidth.value : leftWidth.value
+  const px = clampRailPx(window.innerWidth * RAIL_FRACTION_DEFAULT, other)
+  if (side === 'left') leftWidth.value = px
+  else rightWidth.value = px
+  persistRailWidths()
+}
+
+function persistRailWidths(): void {
+  const clamp = (fraction: number) =>
+    Math.max(RAIL_FRACTION_MIN, Math.min(RAIL_FRACTION_MAX, fraction))
+  game.leftRailFraction = clamp(leftWidth.value / window.innerWidth)
+  game.rightRailFraction = clamp(rightWidth.value / window.innerWidth)
+  persistSettings()
+}
+
 function onWindowResize(): void {
   bottomHeight.value = clampBottomPx(game.bottomFraction * window.innerHeight)
+  leftWidth.value = clampRailPx(game.leftRailFraction * window.innerWidth, rightWidth.value)
+  rightWidth.value = clampRailPx(game.rightRailFraction * window.innerWidth, leftWidth.value)
 }
 
 /** Resume the audio context on the first user gesture (autoplay policy). */
@@ -217,14 +303,32 @@ function onToggleHud(): void {
   game.hudVisible = !game.hudVisible
   persistSettings()
   refresh()
-  nextTick(() => boardView.value?.resize())
+  nextTick(() => {
+    reclampRails()
+    boardView.value?.resize()
+  })
 }
 
 function onToggleRails(): void {
   game.railsVisible = !game.railsVisible
   persistSettings()
   refresh()
-  nextTick(() => boardView.value?.resize())
+  nextTick(() => {
+    reclampRails()
+    boardView.value?.resize()
+  })
+}
+
+function onToggleControls(): void {
+  game.controlsCollapsed = !game.controlsCollapsed
+  persistSettings()
+  refresh()
+}
+
+function onToggleStance(): void {
+  game.stanceCollapsed = !game.stanceCollapsed
+  persistSettings()
+  refresh()
 }
 
 function onToggleAutoPreserve(): void {
@@ -489,27 +593,44 @@ onBeforeUnmount(() => {
     </div>
 
     <div
+      ref="stageEl"
       class="stage"
       :class="{ 'no-rosters': !snapshot.hudVisible, 'no-rails': !snapshot.railsVisible }"
+      :style="{ gridTemplateColumns: stageColumns }"
     >
-      <aside v-if="snapshot.railsVisible" class="rail left">
-        <div class="rail-title">controls</div>
-        <ul class="hints">
-          <li><b>left-click</b> select · <b>shift-click</b> add · <b>drag</b> box</li>
-          <li><b>right-click</b> empty → move · enemy → attack</li>
-          <li><b>right-click</b> again (or shift) → queue next step</li>
-          <li><b>m</b>/<b>a</b> then left-click → move / attack · shift to queue</li>
-          <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
-          <li><b>space</b> turn · <b>p</b> pause · <b>s</b> step</li>
-          <li><b>u</b> undo · <b>r</b> redo · <b>y</b> replay · <b>c</b>/<b>Backspace</b> clear orders</li>
-          <li><b>o</b> my orders · <b>e</b> enemy · <b>h</b> HUD · <b>tab</b> panels · <b>esc</b> cancel</li>
-        </ul>
-        <PiecePanel
-          :snapshot="snapshot"
-          @set-stance="onSetPieceStance"
-          @clear-orders="onClearOrders"
-        />
-      </aside>
+      <div v-if="snapshot.railsVisible" class="rail-stack left">
+        <aside class="rail left">
+          <CollapsibleSection
+            title="controls"
+            :open="!snapshot.controlsCollapsed"
+            @toggle="onToggleControls"
+          >
+            <ul class="hints">
+              <li><b>left-click</b> select · <b>shift-click</b> add · <b>drag</b> box</li>
+              <li><b>right-click</b> empty → move · enemy → attack</li>
+              <li><b>right-click</b> again (or shift) → queue next step</li>
+              <li><b>m</b>/<b>a</b> then left-click → move / attack · shift to queue</li>
+              <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
+              <li><b>space</b> turn · <b>p</b> pause · <b>s</b> step</li>
+              <li><b>u</b> undo · <b>r</b> redo · <b>y</b> replay · <b>c</b>/<b>Backspace</b> clear orders</li>
+              <li><b>o</b> my orders · <b>e</b> enemy · <b>h</b> HUD · <b>tab</b> panels · <b>esc</b> cancel</li>
+            </ul>
+          </CollapsibleSection>
+          <PiecePanel
+            :snapshot="snapshot"
+            @set-stance="onSetPieceStance"
+            @clear-orders="onClearOrders"
+          />
+        </aside>
+        <div
+          class="splitter vertical"
+          title="drag to resize · double-click to reset"
+          @pointerdown="onRailDown('left', $event)"
+          @pointermove="onRailMove('left', $event)"
+          @pointerup="onRailUp('left', $event)"
+          @dblclick="onRailReset('left')"
+        ></div>
+      </div>
 
       <ReinforcementBar
         v-if="snapshot.hudVisible"
@@ -537,16 +658,30 @@ onBeforeUnmount(() => {
         @deploy="onDeploy('blue', $event)"
       />
 
-      <aside v-if="snapshot.railsVisible" class="rail right">
-        <div class="rail-title">stance</div>
-        <ul class="legend">
-          <li><span class="dot" style="background: #4ad991"></span><b>M</b> Move — travel, return fire only</li>
-          <li><span class="dot" style="background: #ff3b30"></span><b>A</b> Attack — engage nearby, flee when low</li>
-          <li><b>no badge</b> — no order (stand &amp; fire in range)</li>
-          <li><span class="dot" style="background: #ff2d20"></span><b>red ring</b> ordered attack target</li>
-          <li><span class="dot" style="background: #e3b341"></span><b>amber ring</b> auto-acquired / retaliation target</li>
-        </ul>
-        <div class="rail-title">hover</div>
+      <div v-if="snapshot.railsVisible" class="rail-stack right">
+        <div
+          class="splitter vertical"
+          title="drag to resize · double-click to reset"
+          @pointerdown="onRailDown('right', $event)"
+          @pointermove="onRailMove('right', $event)"
+          @pointerup="onRailUp('right', $event)"
+          @dblclick="onRailReset('right')"
+        ></div>
+        <aside class="rail right">
+          <CollapsibleSection
+            title="stance"
+            :open="!snapshot.stanceCollapsed"
+            @toggle="onToggleStance"
+          >
+            <ul class="legend">
+              <li><span class="dot" style="background: #4ad991"></span><b>M</b> Move — travel, return fire only</li>
+              <li><span class="dot" style="background: #ff3b30"></span><b>A</b> Attack — engage nearby, flee when low</li>
+              <li><b>no badge</b> — no order (stand &amp; fire in range)</li>
+              <li><span class="dot" style="background: #ff2d20"></span><b>red ring</b> ordered attack target</li>
+              <li><span class="dot" style="background: #e3b341"></span><b>amber ring</b> auto-acquired / retaliation target</li>
+            </ul>
+          </CollapsibleSection>
+          <div class="rail-title">hover</div>
         <div class="hover-readout">
           <span>{{ snapshot.hoverName ?? '—' }}</span>
           <span v-if="snapshot.hoverKind" class="muted">· {{ snapshot.hoverKind }}</span>
@@ -604,12 +739,13 @@ onBeforeUnmount(() => {
           @change="onImportFile"
         />
         <p v-if="ioMessage" class="io-msg">{{ ioMessage }}</p>
-      </aside>
+        </aside>
+      </div>
     </div>
 
     <div
       v-if="snapshot.hudVisible"
-      class="splitter"
+      class="splitter horizontal"
       title="drag to resize the HUD · double-click to reset"
       @pointerdown="onSplitterDown"
       @pointermove="onSplitterMove"

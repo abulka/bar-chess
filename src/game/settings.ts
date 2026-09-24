@@ -1,4 +1,10 @@
-import { BOTTOM_FRACTION_MAX, BOTTOM_FRACTION_MIN, SPEEDS } from './constants'
+import {
+  BOTTOM_FRACTION_MAX,
+  BOTTOM_FRACTION_MIN,
+  RAIL_FRACTION_MAX,
+  RAIL_FRACTION_MIN,
+  SPEEDS,
+} from './constants'
 import { GAME_MODES } from './game'
 import type { GameMode, OverlayFlags } from './game'
 
@@ -14,6 +20,12 @@ export interface GameSettings {
   soundEnabled: boolean
   /** HUD bottom-panel height as a fraction of the viewport. */
   bottomFraction: number
+  /** Left/right side-rail widths as a fraction of the viewport. */
+  leftRailFraction: number
+  rightRailFraction: number
+  /** Whether the left "controls" hints and right "stance" legend are collapsed. */
+  controlsCollapsed: boolean
+  stanceCollapsed: boolean
 }
 
 /** A validated subset of settings to apply, as read from storage. */
@@ -27,6 +39,10 @@ export interface SettingsPatch {
   captureAdvance?: boolean
   soundEnabled?: boolean
   bottomFraction?: number
+  leftRailFraction?: number
+  rightRailFraction?: number
+  controlsCollapsed?: boolean
+  stanceCollapsed?: boolean
 }
 
 const SETTINGS_KEY = 'bar-chess.settings'
@@ -67,15 +83,22 @@ export function loadSettings(): SettingsPatch | null {
     out.gameMode = parsed.gameMode as GameMode
   }
   if (typeof parsed.soundEnabled === 'boolean') out.soundEnabled = parsed.soundEnabled
-  if (
-    typeof parsed.bottomFraction === 'number' &&
-    Number.isFinite(parsed.bottomFraction) &&
-    parsed.bottomFraction >= BOTTOM_FRACTION_MIN &&
-    parsed.bottomFraction <= BOTTOM_FRACTION_MAX
-  ) {
+  if (isFraction(parsed.bottomFraction, BOTTOM_FRACTION_MIN, BOTTOM_FRACTION_MAX)) {
     out.bottomFraction = parsed.bottomFraction
   }
+  if (isFraction(parsed.leftRailFraction, RAIL_FRACTION_MIN, RAIL_FRACTION_MAX)) {
+    out.leftRailFraction = parsed.leftRailFraction
+  }
+  if (isFraction(parsed.rightRailFraction, RAIL_FRACTION_MIN, RAIL_FRACTION_MAX)) {
+    out.rightRailFraction = parsed.rightRailFraction
+  }
+  if (typeof parsed.controlsCollapsed === 'boolean') out.controlsCollapsed = parsed.controlsCollapsed
+  if (typeof parsed.stanceCollapsed === 'boolean') out.stanceCollapsed = parsed.stanceCollapsed
   return out
+}
+
+function isFraction(value: unknown, min: number, max: number): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
 }
 
 /** Persist settings, ignoring storage failures (private mode, quota). */
