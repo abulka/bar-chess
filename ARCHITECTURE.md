@@ -717,7 +717,7 @@ malformed history) before anything is mutated.
   `bar-chess.positions.index` and `bar-chess.positions.<id>`; a same-named save
   overwrites. Slots save the full game by default and record a turn count
   (`SlotMeta.turns`); if the storage quota rejects the history, the save falls
-  back to position-only and reports it. Load/Delete confirm first.
+  back to position-only and reports it. Load/Delete apply immediately.
 - **Copy / Export / Import**: **Copy state (JSON)** emits a position-only
   `SavedPosition` for LLM/debug, while **Export JSON** includes the full history;
   both re-import. `Game.toDebugJson()` remains the terse debug view.

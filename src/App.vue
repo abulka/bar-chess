@@ -475,12 +475,10 @@ function onLoadSlot(id: string): void {
     ioMessage.value = 'slot not found'
     return
   }
-  if (!window.confirm('Load this position? Unsaved progress will be lost.')) return
   applyLoaded(data)
 }
 
 function onDeleteSlot(id: string): void {
-  if (!window.confirm('Delete this saved position?')) return
   deleteSlot(id)
   refreshSlots()
 }

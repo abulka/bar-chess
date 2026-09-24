@@ -16,7 +16,6 @@ test('saves a named slot, survives reload, loads and deletes it', async ({ page 
   await page.evaluate(() => (window as any).game.loadSize(8))
   expect(await page.evaluate(() => (window as any).game.board.width)).toBe(8)
 
-  page.on('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'Load', exact: true }).click()
   expect(await page.evaluate(() => (window as any).game.board.width)).toBe(16)
 
@@ -45,7 +44,6 @@ test('loads a saved game together with its undo history', async ({ page }) => {
   await page.waitForFunction(() => Boolean((window as any).game))
   expect(await page.evaluate(() => (window as any).game.snapshot().canUndo)).toBe(false)
 
-  page.on('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'Load', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().canUndo)).toBe(true)
   expect(await page.evaluate(() => (window as any).game.canReplay)).toBe(true)
