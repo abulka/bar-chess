@@ -71,6 +71,8 @@ export interface SavedPosition {
   history?: SavedHistoryEntry[]
   /** Index into `history` the save is showing. */
   cursor?: number
+  /** Beats already dropped by the history cap before this save was taken. */
+  trimmed?: number
 }
 
 /** Component stores keyed by name, so serialized entries can be resolved back. */

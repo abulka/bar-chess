@@ -243,6 +243,36 @@ interface HistoryEntry {
   continuous: boolean
 }
 
+/**
+ * Lightweight per-boundary metadata for the turn list. Built from the history
+ * entries (not serialized): counts and per-beat deltas are cheap to recompute
+ * whenever the history changes.
+ */
+export interface TurnSummary {
+  /** Boundary index into the undo/redo history. */
+  index: number
+  turn: number
+  tick: number
+  /** True when produced by a continuous "mega" beat. */
+  mega: boolean
+  ticks: number
+  /** Wall-clock length of the beat at 1x (ticks / tick rate). */
+  seconds: number
+  /** Whether this boundary has a recorded turn that can be replayed. */
+  replayable: boolean
+  pieces: number
+  redPieces: number
+  bluePieces: number
+  /** Pieces with an active (non-none) order at the boundary. */
+  orders: number
+  /** Total queued order steps across all pieces at the boundary. */
+  queuedOrders: number
+  /** Moves made during the beat (both teams). */
+  moves: number
+  kills: number
+  losses: number
+}
+
 export interface GameSnapshot {
   running: boolean
   paused: boolean
@@ -281,6 +311,8 @@ export interface GameSnapshot {
   /** Whether the left "controls" hints and right "stance" legend are collapsed. */
   controlsCollapsed: boolean
   stanceCollapsed: boolean
+  /** Whether the left-rail "turns" list is collapsed. */
+  turnsCollapsed: boolean
   /** Whether the right-rail legend / firing-lines / copy sections are collapsed. */
   legendCollapsed: boolean
   firingLinesCollapsed: boolean
@@ -301,6 +333,8 @@ export interface GameSnapshot {
   queuedTurns: number
   /** A play request buffered while a turn/replay finishes; starts a mega turn after. */
   queuedPlay: boolean
+  /** Buffered "next recorded beat" requests while replaying an earlier turn. */
+  queuedForward: number
   canReplay: boolean
   canUndo: boolean
   canRedo: boolean
@@ -314,6 +348,14 @@ export interface GameSnapshot {
   /** Focused selected piece (first in the selection), for the properties panel. */
   pieceInfo: PieceInfo | null
   terrainVersion: number
+  /** Per-boundary metadata for the turn list, oldest first. */
+  turns: TurnSummary[]
+  /** Boundary index the game is currently showing. */
+  historyIndex: number
+  /** Number of retained history boundaries. */
+  historyLength: number
+  /** Beats dropped off the front by the history cap (0 when nothing was lost). */
+  historyTrimmed: number
 }
 
 function createTeamRuntime(controller: TeamController): TeamRuntime {
@@ -364,6 +406,8 @@ export class Game {
   railsVisible = true
   controlsCollapsed = false
   stanceCollapsed = false
+  /** Whether the left-rail "turns" list section is collapsed. */
+  turnsCollapsed = false
   legendCollapsed = false
   firingLinesCollapsed = false
   copyCollapsed = false
@@ -413,6 +457,14 @@ export class Game {
   queuedTurns = 0
   /** A play request buffered while a turn/replay is already running. */
   queuedPlay = false
+  /** Extra "next beat" requests buffered while a replay is already running. */
+  queuedForward = 0
+  /**
+   * Play-forward mode (shift+space while viewing an earlier turn): replay the
+   * recorded beats one after another until the latest boundary, then continue
+   * into a live mega turn. No redo branch is discarded along the way.
+   */
+  private forwardPlay = false
 
   private turnSnapshot: TurnState | null = null
   private turnTicks = 0
@@ -438,6 +490,10 @@ export class Game {
   // is currently showing; `history.length - 1 === cursor` means "at the latest".
   private history: HistoryEntry[] = []
   private cursor = 0
+  /** Beats dropped off the front of the history by HISTORY_LIMIT. */
+  private historyTrimmed = 0
+  /** Lazily rebuilt turn-list metadata; null whenever the history changes. */
+  private summaries: TurnSummary[] | null = null
   /** Cap on retained turn states so long AI-vs-AI runs cannot grow unbounded. */
   private static readonly HISTORY_LIMIT = 100
   // Turns are serialized (one move at a time), so the cap is generous; the turn
@@ -570,6 +626,8 @@ export class Game {
   togglePause(): void {
     this.queuedTurns = 0
     this.queuedPlay = false
+    this.queuedForward = 0
+    this.forwardPlay = false
     if (this.turnActive) {
       this.turnActive = false
       this.paused = true
@@ -597,6 +655,8 @@ export class Game {
     if (this.winner !== null) return
     this.queuedTurns = 0
     this.queuedPlay = false
+    this.queuedForward = 0
+    this.forwardPlay = false
     if (this.turnActive) this.turnActive = false
     if (this.replaying) {
       this.replaying = false
@@ -638,15 +698,75 @@ export class Game {
    * Request play: start a continuous "mega" turn, or buffer it so it begins
    * once the current turn/replay finishes (shift+space). A mega turn records the
    * played interval as one history beat, replayable exactly.
+   *
+   * While viewing an earlier turn this instead plays forward through the
+   * recorded beats and only starts a live mega turn at the latest boundary, so
+   * no redo branch is ever discarded by a play request.
    */
   requestPlay(): void {
     if (this.winner) return
     if (this.megaActive) return
     if (this.turnActive || this.replaying) {
-      this.queuedPlay = true
+      if (this.cursor < this.history.length - 1) this.forwardPlay = true
+      else this.queuedPlay = true
+      return
+    }
+    if (this.cursor < this.history.length - 1) {
+      this.forwardPlay = true
+      this.replayNext()
       return
     }
     this.beginMegaTurn()
+  }
+
+  /**
+   * Space-bar step. At the latest boundary this starts a new turn (as before).
+   * While viewing an earlier turn it replays the next recorded beat forward
+   * instead of forking the timeline; forking needs an explicit `forkTurn()`.
+   */
+  advance(): void {
+    if (this.winner) return
+    if (this.turnActive || this.replaying) {
+      if (this.cursor < this.history.length - 1) {
+        this.queuedForward = Math.min(this.queuedForward + 1, Game.MAX_QUEUED_TURNS)
+      } else {
+        this.queuedTurns = Math.min(this.queuedTurns + 1, Game.MAX_QUEUED_TURNS)
+      }
+      return
+    }
+    if (this.cursor < this.history.length - 1) {
+      // A running play-forward chain: a space press stops it at the boundary
+      // it is heading for rather than piling on more beats.
+      if (this.forwardPlay) {
+        this.forwardPlay = false
+        this.queuedForward = 0
+        return
+      }
+      this.replayNext()
+      return
+    }
+    this.queueTurn()
+  }
+
+  /**
+   * Explicitly abandon the redo branch and start a new turn from the boundary
+   * being viewed. This is the only way to fork the timeline ('f' / Fork button).
+   */
+  forkTurn(): void {
+    if (this.winner || this.turnActive || this.replaying) return
+    if (this.megaActive) this.endMegaTurn()
+    if (this.turnActive || this.replaying) return
+    this.queuedTurns = 0
+    this.queuedPlay = false
+    this.queuedForward = 0
+    this.forwardPlay = false
+    if (this.cursor < this.history.length - 1) {
+      const dropped = this.history.length - 1 - this.cursor
+      this.history.length = this.cursor + 1
+      this.summaries = null
+      this.bus.emit('info', `forked at turn ${this.turn} \u2014 ${dropped} redone beat(s) discarded`)
+    }
+    this.beginTurn()
   }
 
   /**
@@ -716,8 +836,12 @@ export class Game {
   private pushHistory(entry: HistoryEntry): void {
     this.history.length = this.cursor + 1
     this.history.push(entry)
-    if (this.history.length > Game.HISTORY_LIMIT) this.history.shift()
+    if (this.history.length > Game.HISTORY_LIMIT) {
+      this.history.shift()
+      this.historyTrimmed++
+    }
     this.cursor = this.history.length - 1
+    this.summaries = null
   }
 
   /** Start any buffered beat once the current turn/replay/mega turn finishes. */
@@ -725,6 +849,19 @@ export class Game {
     if (this.winner !== null) {
       this.queuedPlay = false
       this.queuedTurns = 0
+      this.queuedForward = 0
+      this.forwardPlay = false
+      return
+    }
+    // Play-forward: keep replaying recorded beats until the latest boundary,
+    // then continue into a live mega turn from the tip (no redo can be lost).
+    if (this.forwardPlay) {
+      if (this.cursor < this.history.length - 1) {
+        this.replayNext()
+        return
+      }
+      this.forwardPlay = false
+      this.beginMegaTurn()
       return
     }
     if (this.queuedPlay) {
@@ -735,6 +872,12 @@ export class Game {
     if (this.queuedTurns > 0) {
       this.queuedTurns--
       this.beginTurn()
+      return
+    }
+    if (this.queuedForward > 0) {
+      this.queuedForward--
+      if (this.cursor < this.history.length - 1) this.replayNext()
+      else this.beginTurn()
     }
   }
 
@@ -778,11 +921,60 @@ export class Game {
   private stepHistory(delta: -1 | 1, label: 'undo' | 'redo'): void {
     this.queuedTurns = 0
     this.queuedPlay = false
+    this.queuedForward = 0
+    this.forwardPlay = false
     this.cursor += delta
     this.restoreTurn(this.history[this.cursor].state)
     this.barProgress = 0
     this.paused = true
     this.bus.emit('info', `${label} (turn ${this.cursor}/${this.history.length - 1})`)
+  }
+
+  /** Jump the view straight to any retained boundary (turn-list row click). */
+  jumpToTurn(index: number): void {
+    if (this.turnActive || this.replaying) return
+    // Close an in-flight mega turn so the burst being viewed becomes a boundary.
+    if (this.megaActive) this.endMegaTurn()
+    if (this.turnActive || this.replaying) return
+    const i = Math.max(0, Math.min(Math.trunc(index), this.history.length - 1))
+    if (i === this.cursor) return
+    this.queuedTurns = 0
+    this.queuedPlay = false
+    this.queuedForward = 0
+    this.forwardPlay = false
+    this.cursor = i
+    this.restoreTurn(this.history[i].state)
+    this.barProgress = 0
+    this.paused = true
+    const entry = this.history[i]
+    const label = entry.state.turn > 0 ? `${entry.continuous ? 'mega turn' : 'turn'} ${entry.state.turn}` : 'opening'
+    this.bus.emit('info', `jumped to ${label} (${i}/${this.history.length - 1})`)
+  }
+
+  /**
+   * Advance the cursor one boundary and replay the beat that produced it. A
+   * non-turn boundary has no beat to animate, so it is shown instantly. Returns
+   * false when already at the latest boundary. Used by space and play-forward.
+   */
+  private replayNext(): boolean {
+    if (this.turnActive || this.replaying) return false
+    const next = this.cursor + 1
+    if (next > this.history.length - 1) return false
+    this.cursor = next
+    const entry = this.history[next]
+    this.queuedTurns = 0
+    this.queuedPlay = false
+    if (!entry.start || entry.ticks <= 0) {
+      this.restoreTurn(entry.state)
+      this.barProgress = 0
+      this.paused = true
+      this.bus.emit('info', `advanced to boundary ${next}/${this.history.length - 1}`)
+      // Keep any play-forward chain moving across boundaries with no beat.
+      this.pump()
+      return true
+    }
+    this.startReplay(entry)
+    return true
   }
 
   /**
@@ -793,16 +985,31 @@ export class Game {
    * reproduced rather than turn-gated.
    */
   replayTurn(): void {
+    this.replayTurnAt(this.cursor)
+  }
+
+  /** Replay the beat ending at any boundary, moving the view there first. */
+  replayTurnAt(index: number): void {
     if (this.turnActive || this.replaying) return
     if (this.megaActive) this.endMegaTurn()
     if (this.turnActive || this.replaying) return
-    const entry = this.history[this.cursor]
-    const start = entry?.start
+    const i = Math.max(0, Math.min(Math.trunc(index), this.history.length - 1))
+    const entry = this.history[i]
     // Allowed even after a win: replay rewinds to the pre-fatal start and re-runs
     // the turn, so the fatal turn can be watched without undoing first.
-    if (!start || entry.ticks <= 0) return
+    if (!entry?.start || entry.ticks <= 0) return
+    this.cursor = i
     this.queuedTurns = 0
     this.queuedPlay = false
+    this.queuedForward = 0
+    this.forwardPlay = false
+    this.startReplay(entry)
+  }
+
+  /** Restore a recorded beat's exact start and run it back to its boundary. */
+  private startReplay(entry: HistoryEntry): void {
+    const start = entry.start
+    if (!start || entry.ticks <= 0) return
     // The recorded start already carries the turn's orders/stances and rules.
     this.restoreTurn(start)
     if (entry.pending) this.restoreCommands(entry.pending)
@@ -1007,6 +1214,7 @@ export class Game {
       rightRailFraction: this.rightRailFraction,
       controlsCollapsed: this.controlsCollapsed,
       stanceCollapsed: this.stanceCollapsed,
+      turnsCollapsed: this.turnsCollapsed,
       legendCollapsed: this.legendCollapsed,
       firingLinesCollapsed: this.firingLinesCollapsed,
       copyCollapsed: this.copyCollapsed,
@@ -1028,6 +1236,7 @@ export class Game {
     if (typeof settings.railsVisible === 'boolean') this.railsVisible = settings.railsVisible
     if (typeof settings.controlsCollapsed === 'boolean') this.controlsCollapsed = settings.controlsCollapsed
     if (typeof settings.stanceCollapsed === 'boolean') this.stanceCollapsed = settings.stanceCollapsed
+    if (typeof settings.turnsCollapsed === 'boolean') this.turnsCollapsed = settings.turnsCollapsed
     if (typeof settings.legendCollapsed === 'boolean') this.legendCollapsed = settings.legendCollapsed
     if (typeof settings.firingLinesCollapsed === 'boolean') {
       this.firingLinesCollapsed = settings.firingLinesCollapsed
@@ -1237,6 +1446,8 @@ export class Game {
     this.paused = true
     this.queuedTurns = 0
     this.queuedPlay = false
+    this.queuedForward = 0
+    this.forwardPlay = false
     this.bus.emit('win', `${TEAM_NAMES[winner]} wins \u2014 undo (u) to continue`, { team: winner })
   }
 
@@ -1268,11 +1479,15 @@ export class Game {
     this.megaTicks = 0
     this.queuedTurns = 0
     this.queuedPlay = false
+    this.queuedForward = 0
+    this.forwardPlay = false
     this.paused = true
     this.ctx = this.buildContext()
     this.placeArmy(initialArmy(size))
     this.history = [this.boundary()]
     this.cursor = 0
+    this.historyTrimmed = 0
+    this.summaries = null
     this.terrainVersion++
     this.bus.emit('map', `loaded ${this.board.data.name}`)
   }
@@ -1775,6 +1990,7 @@ export class Game {
     if (options.history) {
       saved.history = this.history.map((entry) => this.serializeHistoryEntry(entry))
       saved.cursor = this.cursor
+      saved.trimmed = this.historyTrimmed
     }
     return saved
   }
@@ -1825,20 +2041,81 @@ export class Game {
 
   /** Rebuild the undo/redo history from a save (empty for position-only saves). */
   private restoreHistory(saved: SavedPosition): void {
+    this.summaries = null
     if (!saved.history || saved.history.length === 0) {
       this.history = [this.boundary()]
       this.cursor = 0
+      this.historyTrimmed = 0
       return
     }
     const entries = saved.history.map((entry) => this.deserializeHistoryEntry(entry))
     let cursor = saved.cursor ?? entries.length - 1
+    let trimmed = saved.trimmed ?? 0
     if (entries.length > Game.HISTORY_LIMIT) {
       const drop = entries.length - Game.HISTORY_LIMIT
       entries.splice(0, drop)
       cursor -= drop
+      trimmed += drop
     }
     this.history = entries
     this.cursor = Math.max(0, Math.min(cursor, entries.length - 1))
+    this.historyTrimmed = trimmed
+  }
+
+  /** Turn-list metadata, rebuilt lazily whenever the history changes. */
+  private getTurnSummaries(): TurnSummary[] {
+    return (this.summaries ??= this.buildSummaries())
+  }
+
+  private buildSummaries(): TurnSummary[] {
+    const out: TurnSummary[] = []
+    let prevMoves = 0
+    let prevKills = 0
+    let prevLosses = 0
+    this.history.forEach((entry, index) => {
+      const { world, teams, tick, turn } = entry.state
+      let redPieces = 0
+      let bluePieces = 0
+      for (const id of TEAM_IDS) {
+        const alive = Object.values(teams[id]?.alive ?? {}).reduce((a, b) => a + b, 0)
+        if (id === 'red') redPieces = alive
+        else bluePieces = alive
+      }
+      let orders = 0
+      let queuedOrders = 0
+      const orderStore = world.stores.find((s) => s.store === Order)
+      if (orderStore) {
+        for (const [, value] of orderStore.entries) {
+          const order = value as OrderData
+          if (order.kind !== 'none') orders++
+          queuedOrders += order.queue.length
+        }
+      }
+      const moves = (teams.red?.movesMade ?? 0) + (teams.blue?.movesMade ?? 0)
+      const kills = (teams.red?.kills ?? 0) + (teams.blue?.kills ?? 0)
+      const losses = (teams.red?.losses ?? 0) + (teams.blue?.losses ?? 0)
+      out.push({
+        index,
+        turn,
+        tick,
+        mega: entry.continuous,
+        ticks: entry.ticks,
+        seconds: entry.ticks * FIXED_DT,
+        replayable: entry.start != null && entry.ticks > 0,
+        pieces: redPieces + bluePieces,
+        redPieces,
+        bluePieces,
+        orders,
+        queuedOrders,
+        moves: Math.max(0, moves - prevMoves),
+        kills: Math.max(0, kills - prevKills),
+        losses: Math.max(0, losses - prevLosses),
+      })
+      prevMoves = moves
+      prevKills = kills
+      prevLosses = losses
+    })
+    return out
   }
 
   /** Compact, read-oriented position dump for debugging (not importable). */
@@ -1891,6 +2168,8 @@ export class Game {
     this.replayContinuous = false
     this.queuedTurns = 0
     this.queuedPlay = false
+    this.queuedForward = 0
+    this.forwardPlay = false
     this.turnSnapshot = null
     this.turnPending = null
     this.turnTicks = 0
@@ -2103,6 +2382,7 @@ export class Game {
       railsVisible: this.railsVisible,
       controlsCollapsed: this.controlsCollapsed,
       stanceCollapsed: this.stanceCollapsed,
+      turnsCollapsed: this.turnsCollapsed,
       legendCollapsed: this.legendCollapsed,
       firingLinesCollapsed: this.firingLinesCollapsed,
       copyCollapsed: this.copyCollapsed,
@@ -2117,6 +2397,7 @@ export class Game {
         (!this.turnActive && (this.history[this.cursor]?.continuous ?? false)),
       queuedTurns: this.queuedTurns,
       queuedPlay: this.queuedPlay,
+      queuedForward: this.queuedForward,
       // A running mega turn can be closed into a boundary by undo/replay, so it
       // counts as an available beat even before it is recorded.
       canReplay:
@@ -2132,6 +2413,10 @@ export class Game {
       stanceSummary,
       pieceInfo,
       terrainVersion: this.terrainVersion,
+      turns: this.getTurnSummaries(),
+      historyIndex: this.cursor,
+      historyLength: this.history.length,
+      historyTrimmed: this.historyTrimmed,
     }
   }
 

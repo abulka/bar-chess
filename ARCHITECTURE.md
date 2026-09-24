@@ -197,6 +197,23 @@ requestAnimationFrame(frame):
   event stream and shot/kill counters (they are duplicates) while still reaching
   observers such as audio; the transcript log ignores them too. The selection is
   preserved across replay (pieces absent from the restored start are pruned).
+- `replayTurnAt(index)` replays the beat ending at any boundary (the turn-list
+  Play button). `jumpToTurn(index)` restores a boundary outright (row click).
+- **Forward playback without forking.** `Game.advance()` (space) starts a new
+  turn at the latest boundary but, while viewing an earlier turn, replays the
+  next recorded beat forward instead — chaining `replayNext()` calls until the
+  tip. `requestPlay()` (shift+space / Play) plays forward through the recorded
+  beats and only then continues into a live mega turn, so a play request can
+  never discard a redo branch. Extra presses while a replay runs buffer
+  `queuedForward` beats (`advance`) or `forwardPlay` (`requestPlay`).
+  Forking the timeline is explicit: `forkTurn()` (`f` / Fork button) truncates
+  the redo branch at the cursor and starts a new turn there.
+- `history` is a bounded list of `HistoryEntry` (cap `HISTORY_LIMIT = 100`);
+  `historyTrimmed` counts beats dropped off the front, and `snapshot().turns`
+  lazily exposes per-boundary `TurnSummary` metadata (turn, mega, ticks, piece
+  counts, active orders, moves/kills/losses) for the left-rail **turns** list.
+  The list is rebuilt whenever the history changes and is restored on import
+  (the trimmed count rides along in `SavedPosition.trimmed`).
 - `togglePause()` starts a mega turn when idle (Play) and closes the running one
   on pause; it cancels an active turn, and aborts a replay back to its boundary.
   `stepOnce()` closes any turn/replay/mega turn first, then advances one tick.
@@ -606,10 +623,11 @@ terrainVersion`.
 
 | Component | Responsibility |
 | --------- | -------------- |
-| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, reset |
+| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay/fork, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, reset |
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle |
 | `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed, `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. The **order / auto changes** list shows the piece's last few transitions with their tick, so it is clear *why* an order was issued/replaced/completed/abandoned (e.g. `target at e7 lost — attack abandoned`) and includes autonomous self-preservation retreats |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
+| `TurnList.vue` | left-rail **turns** section: newest-first history rows (jump on click, replay per row), backtrack warning + explicit Fork, trimmed-history hint, per-row piece/order/time info |
 | `StatsBar.vue` | turn/tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Sound config panel, Inspector for the selection |
 | `CollapsibleSection.vue` | clickable rail-title header with a caret that hides its slot body; state owned/persisted by `App.vue` |
@@ -839,7 +857,8 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   The seed is shown read-only in the stats bar.
 
 Keyboard: `m`/`a` arm a move/attack command (then left-click; Shift keeps it
-armed), `space` turn, `p` pause, `s` step, `u`/`r` undo/redo, `y` replay,
+armed), `space` next turn / replay forward, `shift+space` play forward then live,
+`p` pause, `s` step, `u`/`r` undo/redo, `y` replay, `f` fork (discards redo),
 `c`/`Backspace` clear orders, `o` my orders, `e` enemy plans, `h` HUD, `tab`
 side rails, `Esc` cancel the pending command else clear the selection. `Game.orderAt(cell,
 command?)` resolves the intent: an explicit `move` always gotos, an explicit
@@ -860,7 +879,9 @@ the legend groups these under "firing lines". When the target dies the order
 clears (stance unchanged), and `planAttack` routes immediately (visible while
 paused) against a fresh occupancy map. Left/right clicks never change the
 selection. `space` pressed while a turn/replay is running is buffered (up to 3) and runs
-after it rather than being dropped; `u`/`r` undo/redo completed turns.
+after it rather than being dropped; while viewing an earlier turn `space`
+replays forward instead of forking (see **Forward playback** above), and `f`
+forks explicitly. `u`/`r` undo/redo completed turns.
 
 Team colour is Orange vs Blue; **red marks an ordered attack**: the firing chain,
 the Attack stance badge, and the ring around a piece targeted by an explicit
@@ -1108,7 +1129,7 @@ src/
     overlays.ts                pure firingLine/routePolyline segment data
     renderer.ts                canvas draw pipeline + overlays
   components/
-    Toolbar.vue BoardView.vue PiecePanel.vue ReinforcementBar.vue StatsBar.vue EventLog.vue SoundPanel.vue SynthEditor.vue Knob.vue StudyPanel.vue
+    Toolbar.vue BoardView.vue PiecePanel.vue TurnList.vue ReinforcementBar.vue StatsBar.vue EventLog.vue SoundPanel.vue SynthEditor.vue Knob.vue StudyPanel.vue
 tests/
   unit/                        logic, systems, Game integration, perf guards,
                                settings/events + audio (fake AudioContext)

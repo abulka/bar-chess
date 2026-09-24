@@ -72,6 +72,9 @@ export class GameLog {
   /** Polling fallback (e.g. single-stepping outside a turn). */
   tick(): void {
     if (this.game.turnActive) return
+    // A replay re-runs a turn already in the log; without this guard the poll
+    // would sample its partial mid-replay state and overwrite the trace.
+    if (this.game.isReplaying) return
     // A mega turn is sampled when it closes (its `turn end` phase), not every
     // poll: `turn` already advanced at play start, so polling would churn.
     if (this.game.playing) return

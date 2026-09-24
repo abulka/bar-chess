@@ -38,6 +38,8 @@ export interface GameSettings {
   /** Whether the left "controls" hints and right "stance" legend are collapsed. */
   controlsCollapsed: boolean
   stanceCollapsed: boolean
+  /** Whether the left-rail "turns" list is collapsed. */
+  turnsCollapsed: boolean
   /** Whether the right-rail legend / firing-lines / copy sections are collapsed. */
   legendCollapsed: boolean
   firingLinesCollapsed: boolean
@@ -60,6 +62,7 @@ export interface SettingsPatch {
   rightRailFraction?: number
   controlsCollapsed?: boolean
   stanceCollapsed?: boolean
+  turnsCollapsed?: boolean
   legendCollapsed?: boolean
   firingLinesCollapsed?: boolean
   copyCollapsed?: boolean
@@ -115,6 +118,7 @@ export function loadSettings(): SettingsPatch | null {
   }
   if (typeof parsed.controlsCollapsed === 'boolean') out.controlsCollapsed = parsed.controlsCollapsed
   if (typeof parsed.stanceCollapsed === 'boolean') out.stanceCollapsed = parsed.stanceCollapsed
+  if (typeof parsed.turnsCollapsed === 'boolean') out.turnsCollapsed = parsed.turnsCollapsed
   if (typeof parsed.legendCollapsed === 'boolean') out.legendCollapsed = parsed.legendCollapsed
   if (typeof parsed.firingLinesCollapsed === 'boolean') {
     out.firingLinesCollapsed = parsed.firingLinesCollapsed

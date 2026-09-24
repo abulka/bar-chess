@@ -15,6 +15,7 @@ const emit = defineEmits<{
   (e: 'undo'): void
   (e: 'redo'): void
   (e: 'replay'): void
+  (e: 'fork'): void
   (e: 'set-speed', speed: number): void
   (e: 'toggle-overlay', key: keyof OverlayFlags): void
   (e: 'toggle-sound'): void
@@ -108,7 +109,7 @@ function onSoundChange(event: Event): void {
       {{ props.snapshot.megaTurn ? 'Mega' : 'Turn' }} <b>{{ props.snapshot.turn }}</b>
     </span>
 
-    <button class="ctl" :class="{ active: props.snapshot.turnActive }" :disabled="!!props.snapshot.winner" @click="emit('turn')" title="one serialized turn (space)">
+    <button class="ctl" :class="{ active: props.snapshot.turnActive }" :disabled="!!props.snapshot.winner" @click="emit('turn')" title="next turn — or replay forward while viewing an earlier turn (space)">
       {{ props.snapshot.turnActive ? '⏵ Turn…' : '⏵ Turn' }}
     </button>
     <button
@@ -116,7 +117,7 @@ function onSoundChange(event: Event): void {
       :class="{ active: props.snapshot.playing }"
       :disabled="!!props.snapshot.winner"
       @click="emit('toggle-pause')"
-      title="play continuously until paused — a mega turn (shift+space)"
+      title="play forward through history, then continuously — a mega turn (shift+space)"
     >
       {{ props.snapshot.paused ? '▶ Play' : '⏸ Pause' }}
     </button>
@@ -124,6 +125,14 @@ function onSoundChange(event: Event): void {
     <button class="ctl" :disabled="!props.snapshot.canUndo" @click="emit('undo')">↶ Undo</button>
     <button class="ctl" :disabled="!props.snapshot.canRedo" @click="emit('redo')">↷ Redo</button>
     <button class="ctl" :disabled="!props.snapshot.canReplay" @click="emit('replay')">↺ Replay</button>
+    <button
+      class="ctl"
+      :disabled="!props.snapshot.canRedo || props.snapshot.turnActive || props.snapshot.replaying"
+      @click="emit('fork')"
+      title="start a new path from here — discards the redone turns (f)"
+    >
+      ⑂ Fork
+    </button>
 
     <div class="speed-group">
       <button

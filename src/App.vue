@@ -8,6 +8,7 @@ import PiecePanel from './components/PiecePanel.vue'
 import ReinforcementBar from './components/ReinforcementBar.vue'
 import StatsBar from './components/StatsBar.vue'
 import Toolbar from './components/Toolbar.vue'
+import TurnList from './components/TurnList.vue'
 import type { BoardSize } from './game/boards'
 import { AudioEngine } from './audio/audio'
 import type { VoiceSpec } from './audio/voices'
@@ -206,9 +207,15 @@ const turnLabel = computed(() => {
   const turn = `${snapshot.value.megaTurn ? 'MEGA TURN' : 'TURN'} ${snapshot.value.turn}`
   const queued = snapshot.value.queuedTurns > 0 ? ` · +${snapshot.value.queuedTurns} queued` : ''
   const playQueued = snapshot.value.queuedPlay ? ' · play queued' : ''
+  const last = snapshot.value.turns.length - 1
+  const behind = snapshot.value.historyIndex < last
+  const forward = snapshot.value.queuedForward > 0 ? ` · +${snapshot.value.queuedForward} queued` : ''
   if (snapshot.value.playing) return `${turn} · PLAYING — space to pause`
   if (snapshot.value.turnActive) return `${turn}${queued}${playQueued}`
-  if (snapshot.value.replaying) return `${turn} · REPLAY${queued}${playQueued}`
+  if (snapshot.value.replaying) return `${turn} · REPLAY${queued}${playQueued}${forward}`
+  if (behind) {
+    return `${turn} · VIEWING ${snapshot.value.historyIndex}/${last} — space replays forward · f forks`
+  }
   return snapshot.value.canReplay
     ? `${turn} · READY — space for next turn`
     : `${turn} · press space for a turn`
@@ -352,6 +359,12 @@ function onToggleStance(): void {
   refresh()
 }
 
+function onToggleTurns(): void {
+  game.turnsCollapsed = !game.turnsCollapsed
+  persistSettings()
+  refresh()
+}
+
 function onToggleLegend(): void {
   game.legendCollapsed = !game.legendCollapsed
   persistSettings()
@@ -397,9 +410,38 @@ function onReset(): void {
 }
 
 function onTurn(): void {
-  // Starting while a turn/replay is running buffers the request instead of
-  // dropping it, so a double-tap plays two turns back-to-back.
-  game.queueTurn()
+  // At the latest boundary this starts a turn; while viewing an earlier turn it
+  // replays the next recorded beat forward instead of forking the timeline.
+  game.advance()
+  refresh()
+}
+
+function onPlayControl(): void {
+  if (snapshot.value.playing || snapshot.value.replaying) {
+    // Pause live play / abort a replay back to its boundary.
+    game.togglePause()
+  } else {
+    // Idle: play forward through history, then live (a mega turn).
+    game.requestPlay()
+  }
+  refresh()
+}
+
+function onFork(): void {
+  game.forkTurn()
+  liveLog.rewind(game.turn)
+  refresh()
+}
+
+function onJumpTurn(index: number): void {
+  game.jumpToTurn(index)
+  liveLog.rewind(game.turn)
+  refresh()
+}
+
+function onPlayTurn(index: number): void {
+  game.replayTurnAt(index)
+  liveLog.rewind(game.turn)
   refresh()
 }
 
@@ -526,12 +568,12 @@ function onKey(event: KeyboardEvent): void {
     event.preventDefault()
     onToggleRails()
   } else if (event.key === 'p') {
-    game.togglePause()
-    refresh()
+    onPlayControl()
   } else if (event.key === ' ') {
     event.preventDefault()
     if (event.shiftKey) {
-      // Shift+space: play continuously until the next pause (a mega turn).
+      // Shift+space: play continuously — forward through history first when
+      // viewing an earlier turn, then live from the tip.
       game.requestPlay()
       refresh()
     } else if (snapshot.value.playing) {
@@ -550,6 +592,8 @@ function onKey(event: KeyboardEvent): void {
     onRedo()
   } else if (event.key === 'y') {
     onReplay()
+  } else if (event.key === 'f') {
+    onFork()
   } else if (event.key === 'c' || event.key === 'Backspace') {
     event.preventDefault()
     game.clearOrders()
@@ -609,12 +653,13 @@ onBeforeUnmount(() => {
       :snapshot="snapshot"
       @select-size="onSelectSize"
       @set-game-mode="onSetGameMode"
-      @toggle-pause="game.togglePause(); refresh()"
+      @toggle-pause="onPlayControl"
       @step="game.stepOnce(); refresh()"
       @turn="onTurn"
       @undo="onUndo"
       @redo="onRedo"
       @replay="onReplay"
+      @fork="onFork"
       @set-speed="onSetSpeed"
       @toggle-overlay="onToggleOverlay"
       @toggle-sound="onToggleSound"
@@ -633,7 +678,9 @@ onBeforeUnmount(() => {
           ? 'playing — space to pause (makes a mega turn)'
           : snapshot.turnActive
             ? 'turn in progress (space)'
-            : 'press space for a turn, shift+space to play, u/r to undo/redo, y to replay'
+            : snapshot.historyIndex < snapshot.turns.length - 1
+              ? 'viewing an earlier turn — space replays forward, f forks (discards redo)'
+              : 'press space for a turn, shift+space to play, u/r to undo/redo, y to replay, f to fork'
       "
     >
       <div
@@ -671,9 +718,10 @@ onBeforeUnmount(() => {
               <li><b>right-click</b> again (or shift) → queue next step</li>
               <li><b>m</b>/<b>a</b> then left-click → move / attack · shift to queue</li>
               <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
-              <li><b>space</b> turn / pause play · <b>shift+space</b> play · <b>s</b> step</li>
-              <li><b>u</b> undo · <b>r</b> redo · <b>y</b> replay · <b>c</b>/<b>Backspace</b> clear orders</li>
-              <li><b>o</b> my orders · <b>e</b> enemy · <b>h</b> HUD · <b>tab</b> panels · <b>esc</b> cancel</li>
+              <li><b>space</b> next turn / replay forward · <b>shift+space</b> play · <b>s</b> step</li>
+              <li><b>u</b> undo · <b>r</b> redo · <b>y</b> replay · <b>f</b> fork (discards redo)</li>
+              <li><b>c</b>/<b>Backspace</b> clear orders · <b>o</b> my orders · <b>e</b> enemy</li>
+              <li><b>h</b> HUD · <b>tab</b> panels · <b>esc</b> cancel</li>
             </ul>
           </CollapsibleSection>
           <PiecePanel
@@ -681,6 +729,18 @@ onBeforeUnmount(() => {
             @set-stance="onSetPieceStance"
             @clear-orders="onClearOrders"
           />
+          <CollapsibleSection
+            title="turns"
+            :open="!snapshot.turnsCollapsed"
+            @toggle="onToggleTurns"
+          >
+            <TurnList
+              :snapshot="snapshot"
+              @jump="onJumpTurn"
+              @play="onPlayTurn"
+              @fork="onFork"
+            />
+          </CollapsibleSection>
         </aside>
         <div
           class="splitter vertical"
