@@ -1,5 +1,6 @@
 import { chebyshev, containsCell, fireCells, moveDestinations } from '../../game/geometry'
 import { HEAL_RADIUS } from '../../game/healing'
+import { dist, dist2 } from '../../game/math'
 import { makeOccupied, occupiedExcept } from '../../game/occupancy'
 import { reachableCells } from '../../game/pathfind'
 import { PIECES, WEAPONS, weaponVision } from '../../game/pieces'
@@ -88,7 +89,7 @@ export function coverageThreats(
     // sniper) or just hit it; otherwise it is not a threat yet.
     if (!canHitNow && !isLast && gap > radius) continue
     const adjacent = gap <= 1
-    const distance = Math.hypot(oc.x - cell.x, oc.y - cell.y)
+    const distance = dist(oc.x, oc.y, cell.x, cell.y)
     const damage = WEAPONS[def.weapon].damage
     threats.push({
       entity: other,
@@ -160,12 +161,12 @@ export function nearestHealingCell(
     for (let x = 0; x < w; x++) {
       if (chebyshev(x, y, kingCell.x, kingCell.y) > HEAL_RADIUS) continue
       if (!ctx.board.passable(x, y)) continue
-      if (reach[y * w + x] !== 1) continue
-      const free = !ctx.occupancy.has(y * w + x)
-      const dist = (x - cell.x) ** 2 + (y - cell.y) ** 2
-      if ((free && !bestFree) || (free === bestFree && dist < bestDist)) {
+      if (reach[ctx.board.cellIndex(x, y)] !== 1) continue
+      const free = !ctx.occupancy.has(ctx.board.cellIndex(x, y))
+      const d = dist2(x, y, cell.x, cell.y)
+      if ((free && !bestFree) || (free === bestFree && d < bestDist)) {
         best = { x, y }
-        bestDist = dist
+        bestDist = d
         bestFree = free
       }
     }
@@ -224,7 +225,7 @@ export function escapeGoal(
   }
   const minThreatDist = (x: number, y: number): number => {
     let min = Infinity
-    for (const t of threats) min = Math.min(min, Math.hypot(x - t.cell.x, y - t.cell.y))
+    for (const t of threats) min = Math.min(min, dist(x, y, t.cell.x, t.cell.y))
     return min
   }
 

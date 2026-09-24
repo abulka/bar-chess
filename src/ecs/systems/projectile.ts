@@ -1,3 +1,4 @@
+import { dist } from '../../game/math'
 import { PIECES } from '../../game/pieces'
 import { Cell, PieceType, Position, Projectile } from '../components'
 import type { Entity } from '../world'
@@ -65,7 +66,7 @@ const system: System = {
         }
         const dx = tp.x - pos.x
         const dy = tp.y - pos.y
-        const distance = Math.hypot(dx, dy)
+        const distance = dist(tp.x, tp.y, pos.x, pos.y)
         const radius = (proj.radius + 0.3) * board.tile
         if (distance <= step + radius) {
           pos.x = tp.x
@@ -88,7 +89,7 @@ const system: System = {
 
       const dx = wp.x - pos.x
       const dy = wp.y - pos.y
-      const distance = Math.hypot(dx, dy)
+      const distance = dist(wp.x, wp.y, pos.x, pos.y)
 
       if (distance <= step) {
         pos.x = wp.x

@@ -151,7 +151,7 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
     const order = game.world.require(e, Order)
     const target = game.world.require(e, Target)
     const motion = game.world.require(e, Motion)
-    byCell.set(cell.y * width + cell.x, e)
+    byCell.set(board.cellIndex(cell.x, cell.y), e)
 
     const flags: string[] = []
     if (health.cur < health.max) flags.push(`hp${Math.round(health.cur)}/${health.max}`)
@@ -217,7 +217,7 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
       const rank = String(height - y).padStart(String(height).length)
       const cells: string[] = []
       for (let x = 0; x < width; x++) {
-        const e = byCell.get(y * width + x)
+        const e = byCell.get(board.cellIndex(x, y))
         if (e !== undefined) {
           const team = game.world.require(e, Team)
           const letter = PIECE_LETTER[game.world.require(e, PieceType).kind] ?? '?'

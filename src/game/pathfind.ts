@@ -1,10 +1,9 @@
 import type { Board } from './board'
-import { moveDestinations, pawnHomeRank } from './geometry'
+import { NEVER, moveDestinations, pawnHomeRank } from './geometry'
 import type { OccupiedFn } from './geometry'
+import { dist2 } from './math'
 import type { Geometry, TeamId, Vec2 } from './types'
 import { resolveGeometry } from './types'
-
-const NEVER: OccupiedFn = () => false
 
 class MinHeap {
   private items: number[] = []
@@ -165,13 +164,13 @@ function computeReachable(
   const dist = new Int32Array(w * h).fill(-1)
   if (!board.inBounds(from.x, from.y)) return { seen, dist }
   const g = resolveGeometry(geom, team)
-  const start = from.y * w + from.x
+  const start = board.cellIndex(from.x, from.y)
   seen[start] = 1
   dist[start] = 0
   const queue: number[] = [start]
 
   const visit = (x: number, y: number, parentIdx: number): boolean => {
-    const idx = y * w + x
+    const idx = board.cellIndex(x, y)
     if (seen[idx]) return false
     seen[idx] = 1
     dist[idx] = dist[parentIdx] + 1
@@ -225,7 +224,7 @@ function computeReachable(
  */
 export function destReachable(board: Board, from: Vec2, geom: Geometry, team: TeamId, dest: Vec2): boolean {
   const reach = reachableCells(board, from, geom, team)
-  const idx = dest.y * board.width + dest.x
+  const idx = board.cellIndex(dest.x, dest.y)
   return idx >= 0 && idx < reach.length && reach[idx] === 1
 }
 
@@ -251,8 +250,8 @@ export function findPath(
   const closed = new Uint8Array(size)
   const heap = new MinHeap(size)
 
-  const startIdx = from.y * w + from.x
-  const goalIdx = to.y * w + to.x
+  const startIdx = board.cellIndex(from.x, from.y)
+  const goalIdx = board.cellIndex(to.x, to.y)
   if (startIdx === goalIdx) return { cells: [], found: true, expanded: 0 }
 
   gScore[startIdx] = 0
@@ -263,7 +262,7 @@ export function findPath(
   // one axis still counts as progress (e.g. a pawn advancing up its file toward
   // an off-file objective).
   let bestIdx = startIdx
-  let bestD = (from.x - to.x) ** 2 + (from.y - to.y) ** 2
+  let bestD = dist2(from.x, from.y, to.x, to.y)
 
   while (heap.size > 0) {
     const current = heap.pop()
@@ -279,7 +278,7 @@ export function findPath(
 
     const cx = current % w
     const cy = (current - cx) / w
-    const dd = (cx - to.x) ** 2 + (cy - to.y) ** 2
+    const dd = dist2(cx, cy, to.x, to.y)
     if (dd < bestD) {
       bestD = dd
       bestIdx = current
@@ -287,7 +286,7 @@ export function findPath(
 
     const neighbours = moveDestinations(board, { x: cx, y: cy }, geom, team, occupied)
     for (const n of neighbours) {
-      const nIdx = n.y * w + n.x
+      const nIdx = board.cellIndex(n.x, n.y)
       if (closed[nIdx]) continue
       const tentative = gScore[current] + board.moveCost(n.x, n.y)
       if (tentative < gScore[nIdx]) {

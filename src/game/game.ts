@@ -36,8 +36,9 @@ import {
   TEAM_NAMES,
 } from './constants'
 import { coordName } from './coords'
-import { containsCell, fireCells } from './geometry'
+import { containsCell, fireCells, NEVER } from './geometry'
 import type { OccupiedFn } from './geometry'
+import { dist2, healthRatio, vecEquals } from './math'
 import { closestEmptyCell, firingPositionExists, previewFiringCell } from './approach'
 import { createPiece } from './factory'
 import { buildOccupancy, occupiedExcept } from './occupancy'
@@ -921,7 +922,7 @@ export class Game {
     const maxDist = (this.board.tile * 0.6) ** 2
     for (const e of this.world.query(Position, Cell)) {
       const pos = this.world.require(e, Position)
-      const d = (pos.x - worldX) ** 2 + (pos.y - worldY) ** 2
+      const d = dist2(pos.x, pos.y, worldX, worldY)
       if (d < bestDist && d < maxDist) {
         bestDist = d
         best = e
@@ -1020,7 +1021,7 @@ export class Game {
     if (!order || !motion || !cell || !kind || !team) return false
     const def = PIECES[kind]
     if (!def) return false
-    const never: OccupiedFn = () => false
+    const never = NEVER
 
     if (order.kind === 'goto' && order.dest) {
       return findPath(this.board, cell, order.dest, def.move, team, never).cells.length === 0
@@ -1058,7 +1059,7 @@ export class Game {
   orderAt(cell: Vec2, command?: 'move' | 'attack'): void {
     if (!this.board.inBounds(cell.x, cell.y)) return
     const occ = buildOccupancy(this.world, this.board)
-    const occupant = occ.get(cell.y * this.board.width + cell.x)
+    const occupant = occ.get(this.board.cellIndex(cell.x, cell.y))
     let n = 0
     let skippedAttack = false
     for (const e of this.selected) {
@@ -1210,8 +1211,8 @@ export class Game {
     }
 
     if (
-      (order.kind === 'goto' && order.dest && order.dest.x === cell.x && order.dest.y === cell.y) ||
-      (last?.kind === 'goto' && last.dest.x === cell.x && last.dest.y === cell.y)
+      (order.kind === 'goto' && order.dest && vecEquals(order.dest, cell)) ||
+      (last?.kind === 'goto' && vecEquals(last.dest, cell))
     ) {
       return
     }
@@ -1261,7 +1262,7 @@ export class Game {
 
   /** Hover feedback and per-piece order preview (computed once per hovered cell). */
   setHover(cell: Vec2 | null): void {
-    if (cell && this.hoverCell && cell.x === this.hoverCell.x && cell.y === this.hoverCell.y) return
+    if (cell && this.hoverCell && vecEquals(cell, this.hoverCell)) return
     if (!cell && this.hoverCell === null) return
     this.hoverCell = cell ? { x: cell.x, y: cell.y } : null
     this.hoverPreview = []
@@ -1269,7 +1270,7 @@ export class Game {
     if (!cell || !this.board.inBounds(cell.x, cell.y) || this.selected.length === 0) return
 
     const occ = buildOccupancy(this.world, this.board)
-    const occupant = occ.get(cell.y * this.board.width + cell.x)
+    const occupant = occ.get(this.board.cellIndex(cell.x, cell.y))
     for (const e of this.selected) {
       if (!this.world.isAlive(e)) continue
       const team = this.world.get(e, Team)
@@ -1460,8 +1461,8 @@ export class Game {
     // so the goal is chosen against the live board (a firing cell, else the
     // closest empty reachable cell). The firing line itself is judged against
     // the live board: clear / blocked / out of reach.
-    const targetIdx = tcell.y * this.board.width + tcell.x
-    const planOccupied: OccupiedFn = (x, y) => y * this.board.width + x === targetIdx
+    const targetIdx = this.board.cellIndex(tcell.x, tcell.y)
+    const planOccupied: OccupiedFn = (x, y) => this.board.cellIndex(x, y) === targetIdx
     const goal =
       previewFiringCell(this.board, cell, tcell, def.move, geometry, team, blocked) ??
       closestEmptyCell(this.board, cell, tcell, def.move, team, blocked) ??
@@ -1491,7 +1492,7 @@ export class Game {
   /** Treats friendly pieces as passable (they move); enemies and walls block. */
   private friendlyPass(occ: Occupancy, self: Entity, team: TeamId): OccupiedFn {
     return (x, y) => {
-      const other = occ.get(y * this.board.width + x)
+      const other = occ.get(this.board.cellIndex(x, y))
       if (other === undefined || other === self) return false
       return this.world.get(other, Team) !== team
     }
@@ -1507,7 +1508,7 @@ export class Game {
   private hoverKind(): 'empty' | 'friendly' | 'enemy' | 'blocked' | null {
     const cell = this.hoverCell
     if (!cell || !this.board.inBounds(cell.x, cell.y)) return null
-    const occupant = buildOccupancy(this.world, this.board).get(cell.y * this.board.width + cell.x)
+    const occupant = buildOccupancy(this.world, this.board).get(this.board.cellIndex(cell.x, cell.y))
     if (occupant !== undefined) {
       return this.world.get(occupant, Team) === this.playerTeam ? 'friendly' : 'enemy'
     }
@@ -1634,7 +1635,7 @@ export class Game {
       team,
       color: TEAM_COLORS[team],
       coord: coordName(cell.x, cell.y, this.board.height),
-      health: hp ? { cur: hp.cur, max: hp.max, ratio: hp.max > 0 ? hp.cur / hp.max : 0 } : null,
+      health: hp ? { cur: hp.cur, max: hp.max, ratio: healthRatio(hp, 0) } : null,
     }
   }
 
@@ -1689,7 +1690,7 @@ export class Game {
       color: ref.color,
       cell: { x: cell.x, y: cell.y },
       coord: ref.coord,
-      health: hp ? { cur: hp.cur, max: hp.max, ratio: hp.max > 0 ? hp.cur / hp.max : 0 } : { cur: 0, max: 0, ratio: 0 },
+      health: hp ? { cur: hp.cur, max: hp.max, ratio: healthRatio(hp, 0) } : { cur: 0, max: 0, ratio: 0 },
       weapon: weapon
         ? { key: wdef.key, left: weapon.left, cooldown: wdef.cooldown, ready: weapon.left <= 0, fired: weapon.fired }
         : null,

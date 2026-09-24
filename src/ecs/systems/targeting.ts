@@ -1,6 +1,7 @@
 import { firingPositionExists } from '../../game/approach'
 import { ATTACK_LEASH } from '../../game/constants'
 import { containsCell, fireCells } from '../../game/geometry'
+import { dist2, healthRatio } from '../../game/math'
 import { buildOccupancy, makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS, weaponVision } from '../../game/pieces'
 import { noteOrder } from '../../game/queue'
@@ -23,10 +24,10 @@ function nearestInFireGeometry(
   let best: Entity | null = null
   let bestDist = Infinity
   for (const c of cells) {
-    const other = ctx.occupancy.get(c.y * ctx.board.width + c.x)
+    const other = ctx.occupancy.get(ctx.board.cellIndex(c.x, c.y))
     if (other === undefined || other === e) continue
     if (ctx.world.get(other, Team) === team) continue
-    const d = (c.x - cell.x) ** 2 + (c.y - cell.y) ** 2
+    const d = dist2(c.x, c.y, cell.x, cell.y)
     if (d < bestDist) {
       bestDist = d
       best = other
@@ -57,10 +58,10 @@ function acquireAttack(ctx: SimContext, e: Entity, team: 'red' | 'blue', weaponK
     if (other === e) continue
     if (ctx.world.require(other, Team) === team) continue
     const oc = ctx.world.require(other, Cell)
-    const d2 = (oc.x - cell.x) ** 2 + (oc.y - cell.y) ** 2
+    const d2 = dist2(oc.x, oc.y, cell.x, cell.y)
     if (d2 > maxDist2) continue
     const hp = ctx.world.get(other, Health)
-    const ratio = hp && hp.max > 0 ? hp.cur / hp.max : 1
+    const ratio = healthRatio(hp, 1)
     const canHit = containsCell(fireCells(ctx.board, cell, geometry, team, occupied), oc.x, oc.y)
     let score = Math.sqrt(d2) - (1 - ratio) * vision * 0.75
     if (canHit) score -= 1000

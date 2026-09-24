@@ -22,6 +22,10 @@ export function vecEquals(a: Vec2, b: Vec2): boolean {
   return a.x === b.x && a.y === b.y
 }
 
-export function tileKey(x: number, y: number, cols: number): number {
-  return y * cols + x
+/** HP fraction in `[0,1]`, or `fallback` when HP is missing / max is zero. */
+export function healthRatio(
+  hp: { cur: number; max: number } | null | undefined,
+  fallback: number,
+): number {
+  return hp && hp.max > 0 ? hp.cur / hp.max : fallback
 }

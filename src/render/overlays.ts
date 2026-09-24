@@ -1,9 +1,7 @@
 import type { Board } from '../game/board'
-import { containsCell, fireCells } from '../game/geometry'
+import { containsCell, fireCells, NEVER } from '../game/geometry'
 import type { OccupiedFn } from '../game/geometry'
 import type { Geometry, TeamId, Vec2 } from '../game/types'
-
-const NEVER: OccupiedFn = () => false
 
 /** Cell centres along a movement route, ready to be stroked as a polyline. */
 export function routePolyline(board: Board, path: readonly Vec2[]): Vec2[] {

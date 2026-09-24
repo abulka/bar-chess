@@ -1,6 +1,6 @@
 import { moveDestinations } from '../../game/geometry'
-import { lerp } from '../../game/math'
-import { buildOccupancy, cellIndex, occupiedExcept } from '../../game/occupancy'
+import { lerp, vecEquals } from '../../game/math'
+import { buildOccupancy, occupiedExcept } from '../../game/occupancy'
 import { PIECES } from '../../game/pieces'
 import { Cell, Motion, Order, PieceType, Position, Team } from '../components'
 import type { System } from '../pipeline'
@@ -45,12 +45,12 @@ const system: System = {
           pos.x = motion.toX
           pos.y = motion.toY
           // Release the origin only now that the piece has actually arrived.
-          occupancy.delete(cellIndex(board, cell.x, cell.y))
+          occupancy.delete(board.cellIndex(cell.x, cell.y))
           const dest = board.worldToCell(motion.toX, motion.toY)
           cell.x = dest.x
           cell.y = dest.y
           motion.reserved = null
-          occupancy.set(cellIndex(board, dest.x, dest.y), e)
+          occupancy.set(board.cellIndex(dest.x, dest.y), e)
           motion.cooldown = def.moveCooldown
           motion.arrived = motion.path.length === 0
         }
@@ -82,7 +82,7 @@ const system: System = {
       const blocked = occupiedExcept(board, occupancy, e)
       const next = motion.path[0]
       const legal = moveDestinations(board, cell, def.move, team, blocked)
-      const canStep = legal.some((c) => c.x === next.x && c.y === next.y)
+      const canStep = legal.some((c) => vecEquals(c, next))
       if (!canStep || blocked(next.x, next.y)) {
         motion.blocked = true
         // An attack route is re-planned by the pathfinding system (against live
@@ -113,7 +113,7 @@ const system: System = {
       ctx.teams[team].movesMade++
       motion.reserved = { x: next.x, y: next.y }
       motion.steps++
-      occupancy.set(cellIndex(board, next.x, next.y), e)
+      occupancy.set(board.cellIndex(next.x, next.y), e)
     }
   },
 }

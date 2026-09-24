@@ -1,3 +1,4 @@
+import { vecEquals } from '../../game/math'
 import { occupiedExcept } from '../../game/occupancy'
 import { findPath } from '../../game/pathfind'
 import { PIECES } from '../../game/pieces'
@@ -29,7 +30,7 @@ const system: System = {
         }
         continue
       }
-      if (goal.x === cell.x && goal.y === cell.y) {
+      if (vecEquals(goal, cell)) {
         motion.path = []
         continue
       }
@@ -44,7 +45,7 @@ const system: System = {
       const nextOccupied = next !== null && liveOccupied(next.x, next.y)
 
       const last = motion.path.length > 0 ? motion.path[motion.path.length - 1] : null
-      const goalChanged = !last || last.x !== goal.x || last.y !== goal.y
+      const goalChanged = !last || !vecEquals(last, goal)
       // An attack route is re-derived continuously: pieces move every turn, so a
       // stored route is stale. Re-plan on a goal change, an empty or blocked
       // route, or simply when the cadence elapses — never keep the old route.

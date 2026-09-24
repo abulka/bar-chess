@@ -1,5 +1,7 @@
 import { fileLabel, coordName } from './coords'
 import type { EventRecord } from '../ecs/events'
+import { cellIndex } from './board'
+import { vecEquals } from './math'
 import type { GameRecord } from './record'
 import { TERRAIN_CHAR } from './shorthand'
 import { PIECE_LETTER, pieceTag } from './trace'
@@ -21,13 +23,9 @@ export interface TranscriptInput {
 
 const ACTIVITY_TYPES = new Set(['shot', 'damage', 'kill', 'advance', 'warn'])
 
-function sameCell(a: { x: number; y: number }, b: { x: number; y: number }): boolean {
-  return a.x === b.x && a.y === b.y
-}
-
 function renderGrid(pieces: PieceTrace[], size: number, terrain?: number[]): string {
   const byCell = new Map<number, PieceTrace>()
-  for (const p of pieces) byCell.set(p.cell.y * size + p.cell.x, p)
+  for (const p of pieces) byCell.set(cellIndex(p.cell.x, p.cell.y, size), p)
   const files: string[] = []
   for (let x = 0; x < size; x++) files.push(fileLabel(x))
   const lines: string[] = ['  ' + files.join(' ')]
@@ -35,9 +33,9 @@ function renderGrid(pieces: PieceTrace[], size: number, terrain?: number[]): str
     const rank = String(size - y).padStart(String(size).length)
     const cells: string[] = []
     for (let x = 0; x < size; x++) {
-      const piece = byCell.get(y * size + x)
+      const piece = byCell.get(cellIndex(x, y, size))
       if (!piece) {
-        cells.push(terrain ? (TERRAIN_CHAR[terrain[y * size + x]] ?? '.') : '.')
+        cells.push(terrain ? (TERRAIN_CHAR[terrain[cellIndex(x, y, size)]] ?? '.') : '.')
         continue
       }
       const letter = PIECE_LETTER[piece.kind] ?? '?'
@@ -79,7 +77,7 @@ export function turnActivities(trace: TurnTrace[], events: EventRecord[], height
       text.replace(/#(\d+)/g, (_m, id: string) => labelAt(i, Number(id)))
     for (const piece of trace[i].pieces) {
       const prev = before.get(piece.entity)
-      if (prev && !sameCell(prev.cell, piece.cell)) {
+      if (prev && !vecEquals(prev.cell, piece.cell)) {
         tokens.push(
           `${pieceTag(piece.team, piece.kind)} ` +
             `${coordName(prev.cell.x, prev.cell.y, height)}->${coordName(piece.cell.x, piece.cell.y, height)}`,

@@ -4,7 +4,8 @@ import { resolveGeometry } from './types'
 
 export type OccupiedFn = (x: number, y: number) => boolean
 
-const NEVER: OccupiedFn = () => false
+/** Shared "nothing is occupied" predicate (theoretical routing, previews). */
+export const NEVER: OccupiedFn = () => false
 
 /**
  * Rank a pawn starts on: rank 2 for blue (bottom) and rank 7 for red (top),

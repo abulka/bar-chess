@@ -1,4 +1,4 @@
-import { clamp } from '../game/math'
+import { clamp, dist } from '../game/math'
 
 /**
  * Total inset (both sides) left around the board when fitting. It must clear
@@ -113,7 +113,7 @@ export class Camera {
     const k = 1 - Math.exp(-dt * 12)
     this.x += (target.x - this.x) * k
     this.y += (target.y - this.y) * k
-    if (Math.hypot(target.x - this.x, target.y - this.y) < 0.25) {
+    if (dist(target.x, target.y, this.x, this.y) < 0.25) {
       this.x = target.x
       this.y = target.y
       this.recenter = null

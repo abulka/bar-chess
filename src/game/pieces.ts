@@ -1,3 +1,4 @@
+import { dist } from './math'
 import type { Geometry, ProjectileShape, Trajectory } from './types'
 import { ALL_DIRS, DIAG_DIRS, KNIGHT_OFFSETS, ORTHO_DIRS } from './types'
 
@@ -212,7 +213,7 @@ export function weaponVision(geometry: Geometry): number {
   if (geometry.kind === 'slide') return geometry.range
   if (geometry.kind === 'leap') {
     let max = 0
-    for (const [dx, dy] of geometry.offsets) max = Math.max(max, Math.hypot(dx, dy))
+    for (const [dx, dy] of geometry.offsets) max = Math.max(max, dist(dx, dy, 0, 0))
     return max
   }
   return 2

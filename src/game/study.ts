@@ -7,6 +7,7 @@ import { GameLog } from './gameLog'
 import { Recorder } from './record'
 import type { GameRecord } from './record'
 import type { GameAnalysis } from './analysis'
+import { dist2 } from './math'
 import type { TurnTrace } from './trace'
 import type { TeamId } from './types'
 
@@ -61,7 +62,7 @@ const focusFirePolicy: StudyPolicy = (game) => {
     let best: { x: number; y: number } | null = null
     let bestDist = Infinity
     for (const target of enemies) {
-      const d = (target.x - cell.x) ** 2 + (target.y - cell.y) ** 2
+      const d = dist2(target.x, target.y, cell.x, cell.y)
       if (d < bestDist) {
         bestDist = d
         best = target

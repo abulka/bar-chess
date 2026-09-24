@@ -1,5 +1,5 @@
 import type { Board } from './board'
-import type { OccupiedFn } from './geometry'
+import { NEVER } from './geometry'
 import { closestEmptyCell, firingPositionExists, previewFiringCell } from './approach'
 import { findPath } from './pathfind'
 import { WEAPONS } from './pieces'
@@ -7,8 +7,6 @@ import type { PieceDef } from './pieces'
 import type { TeamId, Vec2 } from './types'
 import type { MotionData, OrderData, OrderStep } from '../ecs/components'
 import type { Entity } from '../ecs/world'
-
-const NEVER: OccupiedFn = () => false
 
 /** How many recent order transitions a piece keeps for the properties panel. */
 export const MAX_ORDER_LOG = 5

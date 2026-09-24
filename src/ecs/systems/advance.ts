@@ -1,5 +1,6 @@
 import { containsCell, fireCells } from '../../game/geometry'
-import { buildOccupancy, cellIndex, makeOccupied } from '../../game/occupancy'
+import { vecEquals } from '../../game/math'
+import { buildOccupancy, makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS } from '../../game/pieces'
 import { Cell, Motion, Order, PieceType, Position, Stance, Team } from '../components'
 import type { System } from '../pipeline'
@@ -52,9 +53,9 @@ const system: System = {
       if (ctx.teams[team].controller !== 'ai' && stance?.mode !== 'attack' && order.kind !== 'attack') continue
 
       const dest = intent.cell
-      if (dest.x === cell.x && dest.y === cell.y) continue
+      if (vecEquals(dest, cell)) continue
       if (!board.passable(dest.x, dest.y)) continue
-      const destIdx = cellIndex(board, dest.x, dest.y)
+      const destIdx = board.cellIndex(dest.x, dest.y)
       const occupant = occupancy.get(destIdx)
       if (occupant !== undefined && occupant !== killer) continue
 
@@ -67,7 +68,7 @@ const system: System = {
         continue
       }
 
-      occupancy.delete(cellIndex(board, cell.x, cell.y))
+      occupancy.delete(board.cellIndex(cell.x, cell.y))
       occupancy.set(destIdx, killer)
       const center = board.cellCenter(dest.x, dest.y)
       cell.x = dest.x

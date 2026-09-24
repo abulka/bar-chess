@@ -1,5 +1,10 @@
 import type { Vec2 } from './types'
 
+/** Flat index of `(x, y)` in a width-major grid (board terrain, reach masks, …). */
+export function cellIndex(x: number, y: number, width: number): number {
+  return y * width + x
+}
+
 export const TERRAIN = {
   floor: 0,
   road: 1,
@@ -78,9 +83,13 @@ export class Board {
     return x >= 0 && y >= 0 && x < this.width && y < this.height
   }
 
+  cellIndex(x: number, y: number): number {
+    return cellIndex(x, y, this.width)
+  }
+
   terrainAt(x: number, y: number): number {
     if (!this.inBounds(x, y)) return TERRAIN.wall
-    return this.terrain[y * this.width + x]
+    return this.terrain[this.cellIndex(x, y)]
   }
 
   defAt(x: number, y: number): TerrainDef {
@@ -89,7 +98,7 @@ export class Board {
 
   setTerrain(x: number, y: number, id: number): void {
     if (!this.inBounds(x, y)) return
-    this.terrain[y * this.width + x] = id
+    this.terrain[this.cellIndex(x, y)] = id
     this.terrainVersion++
   }
 

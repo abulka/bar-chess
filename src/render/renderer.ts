@@ -18,6 +18,7 @@ import { buildOccupancy, makeOccupied } from '../game/occupancy'
 import { fireCells, moveDestinations } from '../game/geometry'
 import type { OccupiedFn } from '../game/geometry'
 import { HEAL_COLOR, HEAL_RADIUS, healingTargets } from '../game/healing'
+import { healthRatio, dist, vecEquals } from '../game/math'
 import { PIECES, WEAPONS } from '../game/pieces'
 import { queueMarkers } from '../game/queue'
 import { resolveGeometry } from '../game/types'
@@ -280,14 +281,16 @@ export class Renderer {
     const goal = motion?.goal ?? null
     if (goal) {
       const center = board.cellCenter(goal.x, goal.y)
-      const partial = motion?.blocked || !(order?.kind === 'goto' && order.dest && order.dest.x === goal.x && order.dest.y === goal.y)
+      const partial =
+        motion?.blocked ||
+        !(order?.kind === 'goto' && order.dest && vecEquals(order.dest, goal))
       ctx.strokeStyle =
         motion?.intent === 'preserve' ? PRESERVE_COLOR : partial ? '#ffb347' : '#ffd166'
       ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
       // Connect the route to the objective whenever the path does not already
       // end there (empty path, or a best-effort partial route).
       const last = motion && motion.path.length > 0 ? motion.path[motion.path.length - 1] : null
-      const reachesGoal = last !== null && last.x === goal.x && last.y === goal.y
+      const reachesGoal = last !== null && vecEquals(last, goal)
       if (!reachesGoal) {
         const from = last ? board.cellCenter(last.x, last.y) : pos
         ctx.setLineDash([3 / this.camera.zoom, 5 / this.camera.zoom])
@@ -737,7 +740,7 @@ export class Renderer {
       const barY = pos.y - t * 0.4
       let barSlot = 0
       if (game.overlays.health) {
-        const ratio = health.cur / health.max
+        const ratio = healthRatio(health, 0)
         if (ratio < BAR_HIDE_THRESHOLD) {
           this.drawBar(ctx, pos.x, barY, barW, barH, ratio, healthColor(ratio))
           barSlot++
@@ -952,7 +955,7 @@ export class Renderer {
   ): void {
     const dx = to.x - from.x
     const dy = to.y - from.y
-    const len = Math.hypot(dx, dy) || 1
+    const len = dist(to.x, to.y, from.x, from.y) || 1
     const nx = -dy / len
     const ny = dx / len
     const segments = 24

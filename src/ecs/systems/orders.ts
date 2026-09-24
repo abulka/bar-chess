@@ -1,5 +1,6 @@
 import { ATTACK_LEASH } from '../../game/constants'
 import { chebyshev, containsCell, fireCells } from '../../game/geometry'
+import { healthRatio, vecEquals } from '../../game/math'
 import { makeOccupied } from '../../game/occupancy'
 import { HEAL_RADIUS } from '../../game/healing'
 import { closestEmptyCell, previewFiringCell } from '../../game/approach'
@@ -136,7 +137,7 @@ const system: System = {
       // healed; a medium wound only retreats while the danger is present, then
       // resumes its order. A new order clears the hold.
       const hp = ctx.world.get(e, Health)
-      const hpRatio = hp && hp.max > 0 ? hp.cur / hp.max : 1
+      const hpRatio = healthRatio(hp, 1)
       const attacker = target.lastAttacker
       const underFire =
         attacker !== null &&
@@ -304,7 +305,7 @@ const system: System = {
       // resume and no kiting away from the ordered square.
       if (order.kind === 'goto') {
         const arrived =
-          order.dest !== null && order.dest.x === cell.x && order.dest.y === cell.y && !motion.moving
+          order.dest !== null && vecEquals(order.dest, cell) && !motion.moving
         // A fulfilled waypoint yields to the queue. A waypoint this piece's
         // geometry can never reach is skipped too (best-effort would idle
         // forever); a waypoint merely blocked by pieces keeps waiting.

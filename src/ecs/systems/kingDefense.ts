@@ -1,5 +1,6 @@
 import { cellsBetween, chebyshev, containsCell, fireCells, moveDestinations } from '../../game/geometry'
 import type { OccupiedFn } from '../../game/geometry'
+import { dist, dist2, vecEquals } from '../../game/math'
 import { makeOccupied, occupiedExcept } from '../../game/occupancy'
 import { PIECES, WEAPONS } from '../../game/pieces'
 import type { TeamId, Vec2 } from '../../game/types'
@@ -61,18 +62,17 @@ export function screenPlan(
   const def = PIECES[ctx.world.get(guard, PieceType)?.kind ?? '']
   const gcell = ctx.world.get(guard, Cell)
   if (!def || !gcell) return { onSegment: false, cell: null }
-  const width = ctx.board.width
-  const key = (c: Vec2) => c.y * width + c.x
+  const key = (c: Vec2) => ctx.board.cellIndex(c.x, c.y)
   const seg = cellsBetween(ctx.board, threat.cell, kingCell).filter((c) => ctx.board.passable(c.x, c.y))
   if (seg.length === 0) return { onSegment: false, cell: null }
-  if (seg.some((c) => c.x === gcell.x && c.y === gcell.y)) return { onSegment: true, cell: null }
+  if (seg.some((c) => vecEquals(c, gcell))) return { onSegment: true, cell: null }
 
   let best: Vec2 | null = null
   let bestDist = Infinity
   for (const c of moveDestinations(ctx.board, gcell, def.move, team, occupied)) {
     if (claimed.has(key(c))) continue
-    if (!seg.some((s) => s.x === c.x && s.y === c.y)) continue
-    const d = (c.x - gcell.x) ** 2 + (c.y - gcell.y) ** 2
+    if (!seg.some((s) => vecEquals(s, c))) continue
+    const d = dist2(c.x, c.y, gcell.x, gcell.y)
     if (d < bestDist) {
       bestDist = d
       best = c
@@ -124,7 +124,7 @@ export function aiKingGoal(ctx: SimContext, king: Entity, team: TeamId, threats:
 
   const home = homeCell(ctx, team)
   if (threats.length === 0) {
-    return home && (cell.x !== home.x || cell.y !== home.y) ? home : null
+    return home && !vecEquals(cell, home) ? home : null
   }
 
   // Threat weight = damage, for every threat's firing geometry — including a
@@ -153,7 +153,7 @@ export function aiKingGoal(ctx: SimContext, king: Entity, team: TeamId, threats:
   }
   const minThreatDist = (x: number, y: number): number => {
     let min = Infinity
-    for (const t of threats) min = Math.min(min, Math.hypot(x - t.cell.x, y - t.cell.y))
+    for (const t of threats) min = Math.min(min, dist(x, y, t.cell.x, t.cell.y))
     return min
   }
 
@@ -166,16 +166,16 @@ export function aiKingGoal(ctx: SimContext, king: Entity, team: TeamId, threats:
   let bestHome = Infinity
   for (const c of options) {
     const danger = dangerAt(c.x, c.y)
-    const dist = minThreatDist(c.x, c.y)
-    const homeDist = home ? Math.hypot(c.x - home.x, c.y - home.y) : 0
+    const threatDist = minThreatDist(c.x, c.y)
+    const homeDist = home ? dist(c.x, c.y, home.x, home.y) : 0
     const better =
       danger < bestDanger ||
-      (danger === bestDanger && dist > bestDist + 1e-9) ||
-      (danger === bestDanger && dist > bestDist - 1e-9 && homeDist < bestHome)
+      (danger === bestDanger && threatDist > bestDist + 1e-9) ||
+      (danger === bestDanger && threatDist > bestDist - 1e-9 && homeDist < bestHome)
     if (better) {
       best = c
       bestDanger = danger
-      bestDist = dist
+      bestDist = threatDist
       bestHome = homeDist
     }
   }

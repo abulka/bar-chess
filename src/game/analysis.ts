@@ -1,5 +1,6 @@
 import { coordName } from './coords'
 import type { EventRecord } from '../ecs/events'
+import { vecEquals } from './math'
 import type { GameRecord } from './record'
 import { pieceTag } from './trace'
 import type { PieceTrace, TurnTrace } from './trace'
@@ -49,10 +50,6 @@ export function rangeLabel(turns: number[]): string {
   return parts.join(',')
 }
 
-function sameCell(a: Vec2, b: Vec2): boolean {
-  return a.x === b.x && a.y === b.y
-}
-
 /** Roll the per-turn trace plus the event stream into per-piece statistics. */
 export function summarizePieces(trace: TurnTrace[], events: EventRecord[]): PieceStats[] {
   const stats = new Map<number, PieceStats>()
@@ -88,10 +85,10 @@ export function summarizePieces(trace: TurnTrace[], events: EventRecord[]): Piec
     for (const piece of turn.pieces) {
       const s = ensure(piece)
       const before = prev.get(piece.entity)
-      if (before && !sameCell(before.cell, piece.cell)) s.moves++
+      if (before && !vecEquals(before.cell, piece.cell)) s.moves++
       if (piece.underFire) {
         s.underFireTurns++
-        if (before && sameCell(before.cell, piece.cell)) s.heldTurns.push(turn.turn)
+        if (before && vecEquals(before.cell, piece.cell)) s.heldTurns.push(turn.turn)
       }
       s.lastCell = { ...piece.cell }
       s.hp = piece.hp
@@ -216,7 +213,7 @@ export function analyzeGame(record: GameRecord, events: EventRecord[], trace: Tu
     let moved = 0
     for (const piece of trace[i].pieces) {
       const prevCell = before.get(piece.entity)
-      if (prevCell && !sameCell(prevCell, piece.cell)) moved++
+      if (prevCell && !vecEquals(prevCell, piece.cell)) moved++
     }
     const damaged = events.some((e) => e.type === 'damage' && turnForTick(trace, e.tick) === trace[i].turn)
     if (moved === 0 && !damaged) noProgressTurns++

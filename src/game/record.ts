@@ -181,9 +181,9 @@ function applyIntents(game: Game, intents: GameCommandIntent[]): void {
   const cells = new Map<number, number>()
   for (const e of game.world.query(Cell)) {
     const cell = game.world.get(e, Cell)
-    if (cell) cells.set(cell.y * game.board.width + cell.x, e)
+    if (cell) cells.set(game.board.cellIndex(cell.x, cell.y), e)
   }
-  const at = (cell: Vec2): number | null => cells.get(cell.y * game.board.width + cell.x) ?? null
+  const at = (cell: Vec2): number | null => cells.get(game.board.cellIndex(cell.x, cell.y)) ?? null
 
   for (const intent of intents) {
     switch (intent.t) {

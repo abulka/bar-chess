@@ -1,6 +1,7 @@
 import type { Board } from './board'
 import { attackApproachCells } from './geometry'
 import type { OccupiedFn } from './geometry'
+import { dist2, vecEquals } from './math'
 import { moveDistances, reachableCells } from './pathfind'
 import type { Geometry, TeamId, Vec2 } from './types'
 
@@ -19,9 +20,8 @@ export function firingPositionExists(
   team: TeamId,
 ): boolean {
   const reach = reachableCells(board, from, moveGeom, team)
-  const w = board.width
   for (const c of attackApproachCells(board, targetCell, weaponGeom, team)) {
-    if (reach[c.y * w + c.x]) return true
+    if (reach[board.cellIndex(c.x, c.y)]) return true
   }
   return false
 }
@@ -48,17 +48,16 @@ export function previewFiringCell(
   occupied: OccupiedFn,
 ): Vec2 | null {
   const reach = reachableCells(board, from, moveGeom, team)
-  const dist = moveDistances(board, from, moveGeom, team)
-  const w = board.width
+  const moves = moveDistances(board, from, moveGeom, team)
   const scored = attackApproachCells(board, targetCell, weaponGeom, team)
     // The piece's own square is never a "move to" candidate (a caller that is
     // already in firing geometry handles the hold itself).
-    .filter((c) => !(c.x === from.x && c.y === from.y) && !occupied(c.x, c.y) && reach[c.y * w + c.x])
+    .filter((c) => !vecEquals(c, from) && !occupied(c.x, c.y) && reach[board.cellIndex(c.x, c.y)])
     .map((c) => ({
       c,
-      moves: dist[c.y * w + c.x],
+      moves: moves[board.cellIndex(c.x, c.y)],
       // Euclidean total kept as a tie-break among equally-reachable cells.
-      s: (c.x - from.x) ** 2 + (c.y - from.y) ** 2 + (c.x - targetCell.x) ** 2 + (c.y - targetCell.y) ** 2,
+      s: dist2(c.x, c.y, from.x, from.y) + dist2(c.x, c.y, targetCell.x, targetCell.y),
     }))
     .sort((a, b) => a.moves - b.moves || a.s - b.s)
   return scored.length > 0 ? scored[0].c : null
@@ -79,14 +78,13 @@ export function closestEmptyCell(
   occupied: OccupiedFn,
 ): Vec2 | null {
   const reach = reachableCells(board, from, moveGeom, team)
-  const w = board.width
   const candidates: Array<{ c: Vec2; d: number }> = []
   for (let y = 0; y < board.height; y++) {
-    for (let x = 0; x < w; x++) {
+    for (let x = 0; x < board.width; x++) {
       if (x === targetCell.x && y === targetCell.y) continue
-      if (!reach[y * w + x]) continue
+      if (!reach[board.cellIndex(x, y)]) continue
       if (!board.passable(x, y) || occupied(x, y)) continue
-      candidates.push({ c: { x, y }, d: (x - targetCell.x) ** 2 + (y - targetCell.y) ** 2 })
+      candidates.push({ c: { x, y }, d: dist2(x, y, targetCell.x, targetCell.y) })
     }
   }
   candidates.sort((a, b) => a.d - b.d)
