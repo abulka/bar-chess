@@ -67,6 +67,12 @@ function clearAll(): void {
   if (window.confirm(`Clear ${overrideTotal.value} saved sound override(s)?`)) clearAllOverrides()
 }
 
+function damageText(w: PieceAudioEntry['weapon']): string {
+  return w.damageFraction !== undefined
+    ? `${Math.round(w.damageFraction * 100)}% of max HP`
+    : `${w.damage} dmg`
+}
+
 function stats(piece: PieceAudioEntry): Array<[string, string]> {
   const w = piece.weapon
   const proj = piece.projectile
@@ -74,7 +80,7 @@ function stats(piece: PieceAudioEntry): Array<[string, string]> {
     ['hp', `${piece.hp}`],
     ['move', `${piece.move.text} · ${piece.move.cooldown}s`],
     ['weapon', w.key],
-    ['damage', `${w.damage}`],
+    ['damage', damageText(w)],
     ['rate', `${w.rate.toFixed(2)}/s (${w.cooldown}s cooldown)`],
     ['reach', `${w.text} · vision ${w.vision}`],
     ['projectile', `${proj.key} · ${proj.trajectory} · ${proj.shape}`],
@@ -116,7 +122,7 @@ function stats(piece: PieceAudioEntry): Array<[string, string]> {
         <summary>
           <span class="glyph">{{ piece.glyph }}</span>
           <b>{{ piece.name }}</b>
-          <span class="muted">{{ piece.hp }} hp · {{ piece.weapon.damage }} dmg · {{ piece.weapon.cooldown }}s</span>
+          <span class="muted">{{ piece.hp }} hp · {{ damageText(piece.weapon) }} · {{ piece.weapon.cooldown }}s</span>
         </summary>
 
         <dl class="stats">

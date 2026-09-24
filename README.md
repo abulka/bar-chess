@@ -18,7 +18,7 @@ You command your pieces by giving them **intentions** (a destination or a target
 - **Game modes.** Human vs AI, AI vs AI and Human vs Human.
 - **Procedural audio.** WebAudio SFX driven by the event bus, with a synth editor to tweak every cue.
 - **Self-preservation, bodyguards and capture-advance** make fights feel tactical rather than static.
-- **King healing aura.** Pieces within two squares of their king slowly regenerate health, drawn with a green aura and wavy healing lines (`show healing` overlay). Badly wounded pieces walk back into the aura on their own to recover.
+- **King healing aura.** Pieces within two squares of their king slowly regenerate health (3× faster for human-controlled teams), drawn with a green aura and wavy healing lines (`show healing` overlay). The king is the source of the aura and does not heal itself. Badly wounded pieces walk back into the aura on their own to recover.
 
 ## Demo
 

@@ -938,7 +938,6 @@ export class Renderer {
 
       let index = 0
       for (const e of field.targets) {
-        if (e === field.king) continue
         const health = game.world.get(e, Health)
         if (!health || health.cur <= 0 || health.cur >= health.max) continue
         const pos = game.world.get(e, Position)

@@ -22,7 +22,10 @@ export interface ProjectileDef {
 export interface WeaponDef {
   key: string
   geometry: Geometry
+  /** Flat damage per hit; ignored (nominal value only) when `damageFraction` is set. */
   damage: number
+  /** Fraction of the target's max HP dealt per hit, overriding `damage`. */
+  damageFraction?: number
   /** seconds between shots */
   cooldown: number
   projectile: string
@@ -104,8 +107,9 @@ export const WEAPONS: Record<string, WeaponDef> = {
   kingGuard: {
     key: 'kingGuard',
     geometry: { kind: 'slide', dirs: ALL_DIRS, range: 1 },
-    damage: 14,
-    cooldown: 1.1,
+    damage: 80,
+    damageFraction: 0.8,
+    cooldown: 2.5,
     projectile: 'bolt',
   },
 }
@@ -221,4 +225,9 @@ export function weaponVision(geometry: Geometry): number {
 
 export function projectileDef(key: string): ProjectileDef {
   return PROJECTILES[key]
+}
+
+/** Damage `def` deals to a target: a flat value, or a fraction of the target's max HP. */
+export function weaponDamage(def: WeaponDef, maxHp: number): number {
+  return def.damageFraction !== undefined ? maxHp * def.damageFraction : def.damage
 }

@@ -3,7 +3,7 @@ import { Cell, Health, Motion, Order, Stance, Target, Weapon } from '../../src/e
 import type { SimContext } from '../../src/ecs/types'
 import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
-import { PIECES } from '../../src/game/pieces'
+import { PIECE_LIST, PIECES, WEAPONS, weaponDamage } from '../../src/game/pieces'
 import { MAX_ORDER_LOG, noteOrder } from '../../src/game/queue'
 import { clearComponents, duelSetup, orderAttack, placePiece } from '../helpers'
 
@@ -679,5 +679,58 @@ describe('Game integration — AI move budget', () => {
 
     expect(game.teams.blue.movesMade).toBe(1)
     expect(game.teams.red.movesMade).toBeLessThanOrEqual(game.teams.blue.movesMade)
+  })
+})
+
+describe('Game integration — king guard lethality', () => {
+  beforeEach(() => clearComponents())
+
+  it('deals 80% of a target’s max HP, so one hit is never fatal but two are', () => {
+    for (const piece of PIECE_LIST) {
+      const hit = weaponDamage(WEAPONS.kingGuard, piece.hp)
+      expect(hit).toBeLessThan(piece.hp)
+      expect(hit * 2).toBeGreaterThanOrEqual(piece.hp)
+    }
+  })
+
+  it('leaves a queen alive after one king shot but kills it with the second', () => {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    const king = createPiece(shim, 'blue', PIECES.king, { x: 4, y: 4 })
+    const queen = createPiece(shim, 'red', PIECES.queen, { x: 5, y: 4 })
+    const max = game.world.require(queen, Health).max
+    const hit = weaponDamage(WEAPONS.kingGuard, max)
+
+    game.cmds.damage.push({ target: queen, source: king, amount: hit, kind: 'projectile', direct: true })
+    game.runTicks(1)
+    expect(game.world.isAlive(queen)).toBe(true)
+
+    game.cmds.damage.push({ target: queen, source: king, amount: hit, kind: 'projectile', direct: true })
+    game.runTicks(1)
+    expect(game.world.isAlive(queen)).toBe(false)
+  })
+
+  it('fires only once per turn, giving the victim a turn to escape', () => {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    const king = createPiece(shim, 'blue', PIECES.king, { x: 4, y: 4 })
+    const queen = createPiece(shim, 'red', PIECES.queen, { x: 5, y: 4 })
+    // Keep the queen planted so the test measures the king's cadence, not a
+    // retreat, and unarmed so it cannot fight back.
+    game.world.remove(queen, Motion)
+    game.world.remove(queen, Weapon)
+    game.world.require(king, Stance).mode = 'attack'
+    orderAttack(game, king, queen, true)
+    game.world.require(king, Weapon).left = 0
+
+    // ~2.4s, just under the 2.5s recharge. At the old 1.1s cadence this turn
+    // landed two 80% hits and killed the queen.
+    game.runTicks(72)
+
+    const health = game.world.require(queen, Health)
+    expect(game.world.isAlive(queen)).toBe(true)
+    expect(health.cur).toBeLessThan(health.max)
   })
 })

@@ -1,8 +1,8 @@
 import { containsCell, fireCells } from '../../game/geometry'
 import { makeOccupied } from '../../game/occupancy'
-import { PIECES, WEAPONS, projectileDef } from '../../game/pieces'
+import { PIECES, WEAPONS, projectileDef, weaponDamage } from '../../game/pieces'
 import type { Vec2 } from '../../game/types'
-import { Cell, PieceType, Position, Projectile, Target, Team, Weapon, hasLiveCell } from '../components'
+import { Cell, Health, PieceType, Position, Projectile, Target, Team, Weapon, hasLiveCell } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
@@ -14,6 +14,7 @@ function spawnProjectile(
   weaponKey: string,
   target: Entity,
   targetCell: Vec2,
+  damage: number,
 ): Entity {
   const weapon = WEAPONS[weaponKey]
   const def = projectileDef(weapon.projectile)
@@ -40,7 +41,7 @@ function spawnProjectile(
   ctx.world.add(p, Position, { x: pos.x, y: pos.y })
   ctx.world.add(p, Projectile, {
     team,
-    damage: weapon.damage,
+    damage,
     ttl: def.ttl,
     maxTtl: def.ttl,
     speed: def.speed * ctx.board.tile,
@@ -85,7 +86,9 @@ const system: System = {
       const cells = fireCells(ctx.board, cell, wdef.geometry, team, occupied)
       if (!containsCell(cells, tcell.x, tcell.y)) continue
 
-      const projectile = spawnProjectile(ctx, e, team, def.weapon, target, tcell)
+      const targetHealth = ctx.world.get(target, Health)
+      const damage = weaponDamage(wdef, targetHealth?.max ?? 0)
+      const projectile = spawnProjectile(ctx, e, team, def.weapon, target, tcell, damage)
       weapon.left = wdef.cooldown
       weapon.fired = true
       ctx.bus.emit('shot', `#${e} fired ${wdef.key} at #${target}`, {

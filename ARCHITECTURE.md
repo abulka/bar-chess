@@ -449,11 +449,13 @@ cell/reservation during movement validation and path planning.
   **Attack-mode** behaviour only: a passive (`none`/`move`) piece never
   capture-advances, so a kill can never pull it off a safe or healing square.
 - **healing** — king aura regeneration: same-team pieces within two Chebyshev
-  cells of their living king (the king included) regain 5% of max HP per second,
-  clamped at max and never reviving a piece at zero HP. Membership comes from
-  `healingTargets` (`src/game/healing.ts`), shared with the renderer so the
-  overlay matches the mechanic. Deterministic (advances only by `ctx.dt`), so it
-  is captured by turn snapshots and replays like every other system.
+  cells of their living king (excluding the king itself, which is the aura source
+  and never regenerates) regain 5% of max HP per second, or 3× that for
+  human-controlled teams, clamped at max and never reviving a piece at zero HP.
+  Membership comes from `healingTargets` (`src/game/healing.ts`), shared with the
+  renderer so the overlay matches the mechanic. Deterministic (advances only by
+  `ctx.dt`), so it is captured by turn snapshots and replays like every other
+  system.
 
 ---
 

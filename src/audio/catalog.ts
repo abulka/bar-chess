@@ -26,6 +26,8 @@ export interface PieceAudioEntry {
   weapon: {
     key: string
     damage: number
+    /** Fraction of the target's max HP dealt per hit, if the weapon uses it. */
+    damageFraction?: number
     cooldown: number
     /** shots per second */
     rate: number
@@ -72,6 +74,7 @@ export function pieceAudioCatalog(): PieceAudioEntry[] {
       weapon: {
         key: weapon.key,
         damage: weapon.damage,
+        damageFraction: weapon.damageFraction,
         cooldown: weapon.cooldown,
         rate: weapon.cooldown > 0 ? 1 / weapon.cooldown : 0,
         text: describeGeometry(weapon.geometry),

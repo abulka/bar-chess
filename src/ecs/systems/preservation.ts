@@ -3,7 +3,7 @@ import { HEAL_RADIUS } from '../../game/healing'
 import { dist, dist2 } from '../../game/math'
 import { occupiedExcept } from '../../game/occupancy'
 import { reachableCells } from '../../game/pathfind'
-import { PIECES, WEAPONS, weaponVision } from '../../game/pieces'
+import { PIECES, WEAPONS, weaponDamage, weaponVision } from '../../game/pieces'
 import type { TeamId, Vec2 } from '../../game/types'
 import { Cell, Health, PieceType, Target, Team } from '../components'
 import type { Entity } from '../world'
@@ -70,6 +70,7 @@ export function coverageThreats(
   // Fire lines are judged with the piece itself removed so vacating its square
   // opens the same shots an escapee would have to dodge.
   const selfFree = occupiedExcept(ctx.board, ctx.occupancy, piece)
+  const selfMaxHp = ctx.world.get(piece, Health)?.max ?? 0
 
   const threats: Threat[] = []
   for (const other of ctx.world.query(Cell, Team, PieceType)) {
@@ -91,7 +92,7 @@ export function coverageThreats(
     if (!canHitNow && !isLast && gap > radius) continue
     const adjacent = gap <= 1
     const distance = dist(oc.x, oc.y, cell.x, cell.y)
-    const damage = WEAPONS[def.weapon].damage
+    const damage = weaponDamage(WEAPONS[def.weapon], selfMaxHp)
     threats.push({
       entity: other,
       team: otherTeam,
