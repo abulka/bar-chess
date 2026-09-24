@@ -1,10 +1,10 @@
-import { fileLabel, coordName } from './coords'
+import { coordName } from './coords'
 import type { EventRecord } from '../ecs/events'
 import { cellIndex } from './board'
+import { byTeamThenCell, renderAsciiGrid, TERRAIN_CHAR } from './grid'
 import { vecEquals } from './math'
 import type { GameRecord } from './record'
-import { TERRAIN_CHAR } from './shorthand'
-import { PIECE_LETTER, pieceTag } from './trace'
+import { pieceTag } from './trace'
 import type { PieceTrace, TurnTrace } from './trace'
 import { pieceLabel, rangeLabel, summarizePieces } from './analysis'
 
@@ -24,26 +24,9 @@ export interface TranscriptInput {
 const ACTIVITY_TYPES = new Set(['shot', 'damage', 'kill', 'advance', 'warn'])
 
 function renderGrid(pieces: PieceTrace[], size: number, terrain?: number[]): string {
-  const byCell = new Map<number, PieceTrace>()
-  for (const p of pieces) byCell.set(cellIndex(p.cell.x, p.cell.y, size), p)
-  const files: string[] = []
-  for (let x = 0; x < size; x++) files.push(fileLabel(x))
-  const lines: string[] = ['  ' + files.join(' ')]
-  for (let y = 0; y < size; y++) {
-    const rank = String(size - y).padStart(String(size).length)
-    const cells: string[] = []
-    for (let x = 0; x < size; x++) {
-      const piece = byCell.get(cellIndex(x, y, size))
-      if (!piece) {
-        cells.push(terrain ? (TERRAIN_CHAR[terrain[cellIndex(x, y, size)]] ?? '.') : '.')
-        continue
-      }
-      const letter = PIECE_LETTER[piece.kind] ?? '?'
-      cells.push(piece.team === 'red' ? letter : letter.toLowerCase())
-    }
-    lines.push(`${rank} ${cells.join(' ')}`)
-  }
-  return lines.join('\n')
+  return renderAsciiGrid(pieces, size, size, (x, y) =>
+    terrain ? (TERRAIN_CHAR[terrain[cellIndex(x, y, size)]] ?? '.') : '.',
+  )
 }
 
 /** One turn's activity line plus the end-of-turn piece layout. */
@@ -171,10 +154,9 @@ export function formatTranscript(input: TranscriptInput): string {
   }
 
   lines.push('# pieces')
-  const ordered = [...stats].sort((a, b) => {
-    if (a.team !== b.team) return a.team === 'red' ? -1 : 1
-    return a.firstCell.y - b.firstCell.y || a.firstCell.x - b.firstCell.x
-  })
+  const ordered = [...stats].sort(
+    byTeamThenCell((s) => ({ team: s.team, x: s.firstCell.x, y: s.firstCell.y })),
+  )
   for (const s of ordered) {
     const death = s.diedTurn !== null ? ` died=T${s.diedTurn}` : ''
     const held = s.heldTurns.length > 0 ? ` held=${rangeLabel(s.heldTurns)}` : ''

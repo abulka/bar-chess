@@ -13,29 +13,14 @@ import {
   Weapon,
 } from '../ecs/components'
 import { TERRAIN_DEFS } from './board'
-import { coordName, fileLabel } from './coords'
+import { coordName } from './coords'
+import { byTeamThenCell, renderAsciiGrid, TERRAIN_CHAR } from './grid'
 import { buildOccupancy } from './occupancy'
 import { underFireAttacker } from './underFire'
 import type { Game } from './game'
 import type { Entity } from '../ecs/world'
+import { pieceTag } from './trace'
 import type { TeamId, Vec2 } from './types'
-
-const PIECE_LETTER: Record<string, string> = {
-  pawn: 'P',
-  knight: 'N',
-  bishop: 'B',
-  rook: 'R',
-  queen: 'Q',
-  king: 'K',
-}
-
-export const TERRAIN_CHAR: Record<number, string> = {
-  0: '.',
-  1: ':',
-  2: ',',
-  3: '~',
-  4: '#',
-}
 
 const MAX_PATH = 16
 const MAX_TERRAIN = 256
@@ -87,8 +72,7 @@ Other lines: "# terrain" lists non-floor cells only; "# proj:" lists in-flight s
 Position follows:
 `
 
-function cellName(width: number, height: number, c: Vec2): string {
-  void width
+function cellName(height: number, c: Vec2): string {
   return coordName(c.x, c.y, height)
 }
 
@@ -139,7 +123,6 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
     text: string
   }
   const units: Unit[] = []
-  const byCell = new Map<number, Entity>()
   const occupancy = buildOccupancy(game.world, game.board)
 
   for (const e of game.world.query(Cell, Team, PieceType, Health, Stance, Order, Target, Motion)) {
@@ -151,7 +134,6 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
     const order = game.world.require(e, Order)
     const target = game.world.require(e, Target)
     const motion = game.world.require(e, Motion)
-    byCell.set(board.cellIndex(cell.x, cell.y), e)
 
     const flags: string[] = []
     if (health.cur < health.max) flags.push(`hp${Math.round(health.cur)}/${health.max}`)
@@ -159,36 +141,36 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
     else if (stance.mode === 'attack') flags.push('@A')
 
     if (order.kind === 'goto') {
-      flags.push(`goto=${order.dest ? cellName(width, height, order.dest) : '?'}`)
+      flags.push(`goto=${order.dest ? cellName(height, order.dest) : '?'}`)
     } else if (order.kind === 'attack' && order.target !== null) {
-      flags.push(`atk=${refName(game, width, height, order.target)}${order.reachable ? '' : '!'}`)
+      flags.push(`atk=${refName(game, height, order.target)}${order.reachable ? '' : '!'}`)
     }
     if (order.queue.length > 0) {
       const steps = order.queue
         .map((step) =>
-          step.kind === 'goto' ? cellName(width, height, step.dest) : `atk${refName(game, width, height, step.target)}`,
+          step.kind === 'goto' ? cellName(height, step.dest) : `atk${refName(game, height, step.target)}`,
         )
         .join('>')
       flags.push(`q=${steps}`)
     }
     if (target.entity !== null && game.world.isAlive(target.entity)) {
-      flags.push(`tgt=${refName(game, width, height, target.entity)}`)
+      flags.push(`tgt=${refName(game, height, target.entity)}`)
     }
     const attacker = underFireAttacker(game.world, game.board, occupancy, e, game.tick)
     if (attacker !== null) {
-      flags.push(`fire=${refName(game, width, height, attacker)}`)
+      flags.push(`fire=${refName(game, height, attacker)}`)
     }
 
-    if (motion.goal) flags.push(`goal=${cellName(width, height, motion.goal)}`)
+    if (motion.goal) flags.push(`goal=${cellName(height, motion.goal)}`)
     if (motion.intent !== 'none' && motion.intent !== 'order') flags.push(`intent=${motion.intent}`)
     if (motion.holdUntilHp > 0) flags.push(`hold=${Math.round(motion.holdUntilHp)}`)
     if (motion.blocked) flags.push('blk')
     if (motion.moving) flags.push('moving')
-    if (motion.reserved) flags.push(`res=${cellName(width, height, motion.reserved)}`)
+    if (motion.reserved) flags.push(`res=${cellName(height, motion.reserved)}`)
     if (motion.path.length > 0) {
       const cells = motion.path
         .slice(0, MAX_PATH)
-        .map((c) => cellName(width, height, c))
+        .map((c) => cellName(height, c))
         .join('>')
       flags.push(`path=${cells}${motion.path.length > MAX_PATH ? '…' : ''}`)
     }
@@ -200,42 +182,30 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
       flags.push(`note="${latest.text.replace(/"/g, "'")}"`)
     }
 
-    const letter = PIECE_LETTER[kind] ?? '?'
     units.push({
       team,
       cell: { x: cell.x, y: cell.y },
       kind,
-      text: `${team[0]}${letter} ${cellName(width, height, cell)}${flags.length ? ' ' + flags.join(' ') : ''}`,
+      text: `${pieceTag(team, kind)} ${cellName(height, cell)}${flags.length ? ' ' + flags.join(' ') : ''}`,
     })
   }
 
   const showGrid = options.grid ?? (width <= 16 && height <= 16)
   if (showGrid) {
     lines.push('# grid')
-    lines.push(gridHeader(width))
-    for (let y = 0; y < height; y++) {
-      const rank = String(height - y).padStart(String(height).length)
-      const cells: string[] = []
-      for (let x = 0; x < width; x++) {
-        const e = byCell.get(board.cellIndex(x, y))
-        if (e !== undefined) {
-          const team = game.world.require(e, Team)
-          const letter = PIECE_LETTER[game.world.require(e, PieceType).kind] ?? '?'
-          cells.push(team === 'red' ? letter : letter.toLowerCase())
-        } else {
-          cells.push(TERRAIN_CHAR[board.terrainAt(x, y)] ?? '?')
-        }
-      }
-      lines.push(`${rank} ${cells.join(' ')}`)
-    }
+    lines.push(
+      renderAsciiGrid(
+        units.map((u) => ({ team: u.team, kind: u.kind, cell: u.cell })),
+        width,
+        height,
+        (x, y) => TERRAIN_CHAR[board.terrainAt(x, y)] ?? '?',
+      ),
+    )
   }
 
   lines.push(FORMAT_LEGEND)
 
-  units.sort((a, b) => {
-    if (a.team !== b.team) return a.team === 'red' ? -1 : 1
-    return a.cell.y - b.cell.y || a.cell.x - b.cell.x
-  })
+  units.sort(byTeamThenCell((u) => ({ team: u.team, x: u.cell.x, y: u.cell.y })))
   for (const unit of units) lines.push(unit.text)
 
   if (game.selected.length > 0) {
@@ -249,8 +219,8 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
       const pos = game.world.require(e, Position)
       const cell = board.worldToCell(pos.x, pos.y)
       const targetCell = proj.target !== null ? game.world.get(proj.target, Cell) : undefined
-      const to = targetCell ? cellName(width, height, targetCell) : '?'
-      return `${proj.team[0]} ${cellName(width, height, cell)}->${to} ${proj.trajectory} ttl=${round1(proj.ttl)}`
+      const to = targetCell ? cellName(height, targetCell) : '?'
+      return `${proj.team[0]} ${cellName(height, cell)}->${to} ${proj.trajectory} ttl=${round1(proj.ttl)}`
     })
     lines.push(`# proj: ${parts.join('; ')}`)
   }
@@ -266,13 +236,7 @@ export function formatForLlm(game: Game, options: ShorthandOptions = {}): string
   return `${LLM_PREAMBLE}\n${formatShorthand(game, options)}`
 }
 
-function refName(game: Game, width: number, height: number, entity: Entity): string {
+function refName(game: Game, height: number, entity: Entity): string {
   const cell = game.world.get(entity, Cell)
-  return cell ? `#${entity}(${cellName(width, height, cell)})` : `#${entity}`
-}
-
-function gridHeader(width: number): string {
-  const labels: string[] = []
-  for (let x = 0; x < width; x++) labels.push(fileLabel(x))
-  return `  ${labels.join(' ')}`
+  return cell ? `#${entity}(${cellName(height, cell)})` : `#${entity}`
 }

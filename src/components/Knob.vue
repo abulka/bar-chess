@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { clamp } from '../game/math'
 
 const props = withDefaults(
   defineProps<{
@@ -25,10 +26,6 @@ const CY = 24
 const R = 18
 const A0 = -135
 const A1 = 135
-
-function clamp(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, v))
-}
 
 function logMin(): number {
   return Math.log(Math.max(1e-4, props.min))
