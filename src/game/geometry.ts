@@ -8,6 +8,61 @@ export type OccupiedFn = (x: number, y: number) => boolean
 export const NEVER: OccupiedFn = () => false
 
 /**
+ * Step from `from` along `dir` up to `range` times, stopping before a cell
+ * rejected by `stopBefore` (not visited) and after one accepted by `stopAfter`
+ * (visited, then stops). The one place ray-stepping semantics live.
+ */
+function walkRay(
+  board: Board,
+  from: Vec2,
+  [dx, dy]: Dir,
+  range: number,
+  visit: (x: number, y: number) => void,
+  stopBefore: (x: number, y: number) => boolean,
+  stopAfter: (x: number, y: number) => boolean = () => false,
+): void {
+  for (let k = 1; k <= range; k++) {
+    const x = from.x + dx * k
+    const y = from.y + dy * k
+    if (!board.inBounds(x, y) || stopBefore(x, y)) break
+    visit(x, y)
+    if (stopAfter(x, y)) break
+  }
+}
+
+/**
+ * Walk the Bresenham line from `a` to `b` inclusive, calling `visit` for each
+ * cell with whether it is the end. Returning `false` from `visit` stops early.
+ */
+function bresenham(
+  a: Vec2,
+  b: Vec2,
+  visit: (x: number, y: number, isEnd: boolean) => boolean,
+): void {
+  let x = a.x
+  let y = a.y
+  const dx = Math.abs(b.x - x)
+  const dy = Math.abs(b.y - y)
+  const sx = x < b.x ? 1 : -1
+  const sy = y < b.y ? 1 : -1
+  let err = dx - dy
+  for (;;) {
+    const isEnd = x === b.x && y === b.y
+    if (!visit(x, y, isEnd)) return
+    if (isEnd) break
+    const e2 = 2 * err
+    if (e2 > -dy) {
+      err -= dy
+      x += sx
+    }
+    if (e2 < dx) {
+      err += dx
+      y += sy
+    }
+  }
+}
+
+/**
  * Rank a pawn starts on: rank 2 for blue (bottom) and rank 7 for red (top),
  * matching `initialArmy`. A pawn may take its two-square first move only here.
  */
@@ -33,14 +88,15 @@ export function forEachMoveDestination(
   const free = (x: number, y: number) => board.passable(x, y) && (ignoreOccupancy || !occupied(x, y))
 
   if (g.kind === 'slide') {
-    for (const [dx, dy] of g.dirs) {
-      for (let k = 1; k <= g.range; k++) {
-        const x = from.x + dx * k
-        const y = from.y + dy * k
-        if (!board.passable(x, y)) break
-        if (!ignoreOccupancy && occupied(x, y)) break
-        visit(x, y)
-      }
+    for (const dir of g.dirs) {
+      walkRay(
+        board,
+        from,
+        dir,
+        g.range,
+        visit,
+        (x, y) => !board.passable(x, y) || (!ignoreOccupancy && occupied(x, y)),
+      )
     }
     return
   }
@@ -100,14 +156,16 @@ export function fireCells(
   const out: Vec2[] = []
 
   if (g.kind === 'slide') {
-    for (const [dx, dy] of g.dirs) {
-      for (let k = 1; k <= g.range; k++) {
-        const x = from.x + dx * k
-        const y = from.y + dy * k
-        if (!board.inBounds(x, y) || board.blocksVision(x, y)) break
-        out.push({ x, y })
-        if (occupied(x, y)) break
-      }
+    for (const dir of g.dirs) {
+      walkRay(
+        board,
+        from,
+        dir,
+        g.range,
+        (x, y) => out.push({ x, y }),
+        (x, y) => board.blocksVision(x, y),
+        (x, y) => occupied(x, y),
+      )
     }
     return out
   }
@@ -121,14 +179,16 @@ export function fireCells(
     return out
   }
 
-  for (const [dx, dy] of pawnFireDirs(g.dy)) {
-    for (let k = 1; k <= 2; k++) {
-      const x = from.x + dx * k
-      const y = from.y + dy * k
-      if (!board.inBounds(x, y) || board.blocksVision(x, y)) break
-      out.push({ x, y })
-      if (occupied(x, y)) break
-    }
+  for (const dir of pawnFireDirs(g.dy)) {
+    walkRay(
+      board,
+      from,
+      dir,
+      2,
+      (x, y) => out.push({ x, y }),
+      (x, y) => board.blocksVision(x, y),
+      (x, y) => occupied(x, y),
+    )
   }
   return out
 }
@@ -151,34 +211,18 @@ export function lineClear(
   occupied: OccupiedFn = NEVER,
   includeEnds = false,
 ): boolean {
-  let x0 = a.x
-  let y0 = a.y
-  const x1 = b.x
-  const y1 = b.y
-  const dx = Math.abs(x1 - x0)
-  const dy = Math.abs(y1 - y0)
-  const sx = x0 < x1 ? 1 : -1
-  const sy = y0 < y1 ? 1 : -1
-  let err = dx - dy
-  for (;;) {
-    const isStart = x0 === a.x && y0 === a.y
-    const isEnd = x0 === x1 && y0 === y1
+  let clear = true
+  bresenham(a, b, (x, y, isEnd) => {
+    const isStart = x === a.x && y === a.y
     if (!isStart && !(isEnd && !includeEnds)) {
-      if (board.blocksVision(x0, y0)) return false
-      if (occupied(x0, y0)) return false
+      if (board.blocksVision(x, y) || occupied(x, y)) {
+        clear = false
+        return false
+      }
     }
-    if (isEnd) break
-    const e2 = 2 * err
-    if (e2 > -dy) {
-      err -= dy
-      x0 += sx
-    }
-    if (e2 < dx) {
-      err += dx
-      y0 += sy
-    }
-  }
-  return true
+    return true
+  })
+  return clear
 }
 
 /**
@@ -187,30 +231,11 @@ export function lineClear(
  */
 export function cellsBetween(board: Board, a: Vec2, b: Vec2): Vec2[] {
   const out: Vec2[] = []
-  let x0 = a.x
-  let y0 = a.y
-  const x1 = b.x
-  const y1 = b.y
-  const dx = Math.abs(x1 - x0)
-  const dy = Math.abs(y1 - y0)
-  const sx = x0 < x1 ? 1 : -1
-  const sy = y0 < y1 ? 1 : -1
-  let err = dx - dy
-  for (;;) {
-    const isEnd = x0 === x1 && y0 === y1
-    if (isEnd) break
-    const e2 = 2 * err
-    if (e2 > -dy) {
-      err -= dy
-      x0 += sx
-    }
-    if (e2 < dx) {
-      err += dx
-      y0 += sy
-    }
-    if (x0 === x1 && y0 === y1) break
-    if (board.inBounds(x0, y0)) out.push({ x: x0, y: y0 })
-  }
+  bresenham(a, b, (x, y, isEnd) => {
+    const isStart = x === a.x && y === a.y
+    if (!isStart && !isEnd && board.inBounds(x, y)) out.push({ x, y })
+    return true
+  })
   return out
 }
 
@@ -237,13 +262,17 @@ export function attackApproachCells(
         : ([[0, g.dy], [1, g.dy], [-1, g.dy]] as Dir[])
   const range = g.kind === 'slide' ? g.range : 1
   for (const [dx, dy] of dirs) {
-    for (let k = 1; k <= range; k++) {
-      const x = targetCell.x - dx * k
-      const y = targetCell.y - dy * k
-      if (!board.inBounds(x, y) || board.blocksVision(x, y)) break
-      if (!occupied(x, y) && board.passable(x, y)) out.push({ x, y })
-      if (occupied(x, y)) break
-    }
+    walkRay(
+      board,
+      targetCell,
+      [-dx, -dy] as Dir,
+      range,
+      (x, y) => {
+        if (!occupied(x, y) && board.passable(x, y)) out.push({ x, y })
+      },
+      (x, y) => board.blocksVision(x, y),
+      (x, y) => occupied(x, y),
+    )
   }
   return out
 }
