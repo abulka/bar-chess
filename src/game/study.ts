@@ -7,7 +7,6 @@ import { GameLog } from './gameLog'
 import { Recorder } from './record'
 import type { GameRecord } from './record'
 import type { GameAnalysis } from './analysis'
-import { buildStudyPrompt } from './studyPrompt'
 import type { TurnTrace } from './trace'
 import type { TeamId } from './types'
 
@@ -35,7 +34,7 @@ function enemyOf(team: TeamId): TeamId {
 }
 
 /** Advance every piece toward the enemy back rank; never initiates a fight. */
-export const advancePolicy: StudyPolicy = (game) => {
+const advancePolicy: StudyPolicy = (game) => {
   const goalY = enemyOf(game.playerTeam) === 'red' ? 0 : game.board.height - 1
   for (const e of piecesOf(game, game.playerTeam)) {
     const cell = game.world.get(e, Cell)
@@ -47,7 +46,7 @@ export const advancePolicy: StudyPolicy = (game) => {
 }
 
 /** Attack the nearest enemy within 8 squares, else advance. */
-export const focusFirePolicy: StudyPolicy = (game) => {
+const focusFirePolicy: StudyPolicy = (game) => {
   const team = game.playerTeam
   const enemy = enemyOf(team)
   const goalY = enemy === 'red' ? 0 : game.board.height - 1
@@ -76,7 +75,7 @@ export const focusFirePolicy: StudyPolicy = (game) => {
 }
 
 /** Set the whole army to Attack stance once and let it fight autonomously. */
-export const turtlePolicy: StudyPolicy = (game, turn) => {
+const turtlePolicy: StudyPolicy = (game, turn) => {
   if (turn > 1) return
   game.selected = piecesOf(game, game.playerTeam)
   game.setPieceStance('attack')
@@ -206,10 +205,6 @@ export class StudyController {
       turn: this.game.turn,
       results: this.results,
     }
-  }
-
-  buildPrompt(): string {
-    return buildStudyPrompt(this.results, { mode: this.options?.mode, size: this.options?.size })
   }
 
   private startNext(): void {

@@ -18,7 +18,7 @@ export interface StudyPromptGame {
 }
 
 /** One-time context explaining Bar Chess and the transcript format. */
-export const STUDY_PREAMBLE = `You are analysing recorded Bar Chess games for gameplay quality and fun.
+const STUDY_PREAMBLE = `You are analysing recorded Bar Chess games for gameplay quality and fun.
 Bar Chess is a real-time, chess-derived battle simulation on a rectangular grid.
 Pieces are P N B R Q K; movement and firing both use chess geometry (rooks slide
 on ranks/files, bishops on diagonals, knights leap, pawns advance and fire on

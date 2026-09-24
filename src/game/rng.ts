@@ -27,10 +27,6 @@ export class Rng {
     return Math.floor(this.range(min, maxInclusive + 1))
   }
 
-  pick<T>(items: readonly T[]): T {
-    return items[this.int(0, items.length - 1)]
-  }
-
   reset(seed = DEFAULT_SEED): void {
     this.state = seed >>> 0
   }

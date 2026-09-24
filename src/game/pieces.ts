@@ -207,10 +207,6 @@ export const PIECE_LIST: PieceDef[] = [
   PIECES.king,
 ]
 
-export function weaponDef(key: string): WeaponDef {
-  return WEAPONS[key]
-}
-
 /** How far a piece can notice an enemy, in cells. */
 export function weaponVision(geometry: Geometry): number {
   if (geometry.kind === 'slide') return geometry.range

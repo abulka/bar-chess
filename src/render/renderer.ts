@@ -22,6 +22,7 @@ import { PIECES, WEAPONS } from '../game/pieces'
 import { queueMarkers } from '../game/queue'
 import { resolveGeometry } from '../game/types'
 import { coordName, fileLabel } from '../game/coords'
+import { TEAM_IDS } from '../game/constants'
 import type { Game } from '../game/game'
 import { Camera } from './camera'
 import { firingLine, routePolyline, type FiringLine } from './overlays'
@@ -150,7 +151,7 @@ export class Renderer {
 
   private drawSpawns(ctx: CanvasRenderingContext2D, game: Game): void {
     const t = game.board.tile
-    for (const team of ['red', 'blue'] as const) {
+    for (const team of TEAM_IDS) {
       const s = game.board.data.spawns[team]
       ctx.fillStyle = team === 'red' ? 'rgba(255,159,67,0.05)' : 'rgba(90,176,255,0.05)'
       ctx.fillRect(s.x * t, s.y * t, s.w * t, s.h * t)
@@ -903,7 +904,7 @@ export class Renderer {
   private drawHealing(ctx: CanvasRenderingContext2D, game: Game): void {
     const t = game.board.tile
     const pulse = 0.5 + 0.5 * Math.sin(this.time * 3)
-    for (const team of ['red', 'blue'] as const) {
+    for (const team of TEAM_IDS) {
       const field = healingTargets(game.world, team)
       if (!field) continue
       const kpos = game.world.get(field.king, Position)

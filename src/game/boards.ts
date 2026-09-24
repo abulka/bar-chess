@@ -1,4 +1,4 @@
-import type { Board, MapData } from './board'
+import type { MapData } from './board'
 import type { TeamId, Vec2 } from './types'
 
 export type BoardSize = 8 | 16 | 32 | 64
@@ -57,24 +57,4 @@ export function initialArmy(size: BoardSize): Placement[] {
     }
   }
   return out
-}
-
-export interface ArmyConfig {
-  size: BoardSize
-  id: string
-  name: string
-  army: Placement[]
-}
-
-export function boardConfigFromData(data: MapData, army: Placement[]): ArmyConfig {
-  return { size: data.width as BoardSize, id: data.id, name: data.name, army }
-}
-
-export function defaultBoard(size: BoardSize = 16): ArmyConfig {
-  const data = createBoardData(size)
-  return { size, id: data.id, name: data.name, army: initialArmy(size) }
-}
-
-export function boardSizeOf(board: Board): BoardSize {
-  return board.width as BoardSize
 }

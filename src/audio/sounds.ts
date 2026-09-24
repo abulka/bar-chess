@@ -17,7 +17,6 @@ import { explosionVoice, fireVoice, hitVoice, missVoice, type VoiceSpec } from '
 export type CueKind = 'shot' | 'hit' | 'death' | 'miss'
 
 export const MISS_CAUSES = ['ground', 'wall', 'expired', 'target-lost'] as const
-export type MissCause = (typeof MISS_CAUSES)[number]
 
 export interface SoundCue {
   id: string
@@ -45,7 +44,7 @@ export function missId(cause: string): string {
 }
 
 /** Rendered projectile shape for a weapon, used by both the panel and the synth. */
-export function projectileShape(weapon: string): string {
+function projectileShape(weapon: string): string {
   const def = WEAPONS[weapon]
   if (!def) return 'dot'
   return PROJECTILES[def.projectile]?.shape ?? 'dot'

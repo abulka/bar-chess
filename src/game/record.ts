@@ -6,7 +6,7 @@ import type { GameMode } from './game'
 import type { StanceMode, TeamId, Vec2 } from './types'
 
 /** Bump when the record shape changes incompatibly. */
-export const RECORD_VERSION = 1
+const RECORD_VERSION = 1
 
 /**
  * A player command, normalized to board cells so it survives replay. Piece

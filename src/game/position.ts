@@ -7,7 +7,7 @@ import type { TeamRuntime } from '../ecs/types'
 import type { TeamId } from './types'
 
 /** Bump when the saved shape changes incompatibly. */
-export const POSITION_VERSION = 2
+const POSITION_VERSION = 2
 
 export interface SerializedStore {
   name: string

@@ -25,7 +25,7 @@ export function noteOrder(order: OrderData, tick: number, text: string): void {
 }
 
 /** Endpoint of a step's planned path (falls back to its objective). */
-export function stepEnd(step: OrderStep): Vec2 | null {
+function stepEnd(step: OrderStep): Vec2 | null {
   const last = step.path[step.path.length - 1]
   if (last) return last
   if (step.kind === 'goto') return step.dest

@@ -126,18 +126,13 @@ export function clearAllOverrides(): void {
   notify()
 }
 
-export function hasOverrides(): boolean {
-  ensureLoaded()
-  return Object.keys(overrides).length > 0
-}
-
 export function overrideCount(): number {
   ensureLoaded()
   return Object.keys(overrides).length
 }
 
 /** A copy of every saved override, safe to mutate. */
-export function allOverrides(): Record<string, VoiceSpec> {
+function allOverrides(): Record<string, VoiceSpec> {
   ensureLoaded()
   return JSON.parse(JSON.stringify(overrides)) as Record<string, VoiceSpec>
 }

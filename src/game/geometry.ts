@@ -14,10 +14,6 @@ export function pawnHomeRank(board: Board, team: TeamId): number {
   return team === 'blue' ? board.height - 2 : 1
 }
 
-export function cellKey(x: number, y: number, width: number): number {
-  return y * width + x
-}
-
 /**
  * Cells a piece can legally step to with one application of its movement
  * geometry. Another piece on a cell blocks it (one piece per square) unless

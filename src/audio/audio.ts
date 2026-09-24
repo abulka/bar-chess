@@ -55,10 +55,6 @@ export class AudioEngine {
     this.volume = clamp01(options.volume ?? 0.6)
   }
 
-  get isEnabled(): boolean {
-    return this.enabled
-  }
-
   get isReady(): boolean {
     return this.ctx !== null
   }
@@ -81,11 +77,6 @@ export class AudioEngine {
   setEnabled(enabled: boolean): void {
     this.enabled = enabled
     if (enabled) void this.unlock()
-  }
-
-  setVolume(volume: number): void {
-    this.volume = clamp01(volume)
-    if (this.master) this.master.gain.value = this.volume
   }
 
   /** React to one simulation event. Unknown types are ignored. */

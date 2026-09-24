@@ -1,9 +1,7 @@
 import { Health } from '../components'
+import { TEAM_IDS } from '../../game/constants'
 import { HEAL_RATE, healingTargets } from '../../game/healing'
-import type { TeamId } from '../../game/types'
 import type { System } from '../pipeline'
-
-const TEAMS: TeamId[] = ['red', 'blue']
 
 /**
  * King aura regeneration: every same-team piece within two Chebyshev cells of
@@ -15,7 +13,7 @@ const TEAMS: TeamId[] = ['red', 'blue']
 const system: System = {
   name: 'healing',
   update(ctx) {
-    for (const team of TEAMS) {
+    for (const team of TEAM_IDS) {
       const field = healingTargets(ctx.world, team)
       if (!field) continue
       for (const e of field.targets) {

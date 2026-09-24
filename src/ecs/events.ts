@@ -97,10 +97,6 @@ export class EventBus {
     return () => this.listeners.delete(listener)
   }
 
-  unsubscribe(listener: EventListener): void {
-    this.listeners.delete(listener)
-  }
-
   /** Snapshot of the tail of the log. */
   tail(limit = 600): EventRecord[] {
     if (limit >= this.buffer.length) return this.buffer.slice()
@@ -109,11 +105,5 @@ export class EventBus {
 
   count(type: EventType): number {
     return this.counts.get(type) ?? 0
-  }
-
-  clear(): void {
-    this.buffer.length = 0
-    this.counts.clear()
-    this.seq = 0
   }
 }

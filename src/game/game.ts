@@ -32,6 +32,7 @@ import {
   PATH_BUDGET_PER_TICK,
   SPEEDS,
   TEAM_COLORS,
+  TEAM_IDS,
   TEAM_NAMES,
 } from './constants'
 import { coordName } from './coords'
@@ -391,7 +392,7 @@ export class Game {
   setGameMode(mode: GameMode): void {
     this.gameMode = mode
     const controllers = controllersFor(mode, this.playerTeam)
-    for (const id of ['red', 'blue'] as TeamId[]) {
+    for (const id of TEAM_IDS) {
       this.teams[id].controller = controllers[id]
     }
     this.onCommand?.({ t: 'mode', mode })
@@ -678,7 +679,7 @@ export class Game {
     this.turn = state.turn
     // Mutate the existing team objects in place: `ctx.teams` already points at
     // this record, so replacing it would leave systems writing to a stale copy.
-    for (const id of ['red', 'blue'] as TeamId[]) {
+    for (const id of TEAM_IDS) {
       this.teams[id] = structuredClone(state.teams[id])
     }
     this.winner = state.winner
@@ -1528,7 +1529,7 @@ export class Game {
     const pieceInfo = focused !== undefined ? this.pieceInfo(focused) : null
 
     const teams = {} as Record<TeamId, TeamSnapshot>
-    for (const id of ['red', 'blue'] as TeamId[]) {
+    for (const id of TEAM_IDS) {
       const runtime = this.teams[id]
       teams[id] = {
         id,

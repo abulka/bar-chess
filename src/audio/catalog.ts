@@ -48,7 +48,7 @@ export interface PieceAudioEntry {
 }
 
 /** Human-readable summary of a movement/firing geometry. */
-export function describeGeometry(geom: Geometry): string {
+function describeGeometry(geom: Geometry): string {
   switch (geom.kind) {
     case 'slide':
       return `${geom.dirs.length} dirs · range ${geom.range}`
