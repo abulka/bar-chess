@@ -36,10 +36,10 @@ import {
   TEAM_NAMES,
 } from './constants'
 import { coordName } from './coords'
-import { containsCell, fireCells, NEVER } from './geometry'
+import { NEVER } from './geometry'
 import type { OccupiedFn } from './geometry'
 import { dist2, healthRatio, vecEquals } from './math'
-import { closestEmptyCell, firingPositionExists, previewFiringCell } from './approach'
+import { attackPlan } from './approach'
 import { createPiece } from './factory'
 import { buildOccupancy, occupiedExcept } from './occupancy'
 import type { Occupancy } from './occupancy'
@@ -1031,15 +1031,12 @@ export class Game {
       // can and is parked at the closest legal point. A *reachable* target that
       // is merely in range is still being fulfilled, so a move suspends/regroups
       // (resumes after) instead of abandoning it.
-      if (order.reachable) return false
       const tcell = this.world.get(order.target, Cell)
       if (!tcell) return false
       const geometry = WEAPONS[def.weapon].geometry
-      const goal =
-        previewFiringCell(this.board, cell, tcell, def.move, geometry, team, never) ??
-        closestEmptyCell(this.board, cell, tcell, def.move, team, never) ??
-        { x: tcell.x, y: tcell.y }
-      return findPath(this.board, cell, goal, def.move, team, never).cells.length === 0
+      const plan = attackPlan(this.board, cell, tcell, def.move, geometry, team, never)
+      if (plan.reachable) return false
+      return findPath(this.board, cell, plan.cell, def.move, team, never).cells.length === 0
     }
     return false
   }
@@ -1438,8 +1435,8 @@ export class Game {
     const geometry = WEAPONS[def.weapon].geometry
     const occ = buildOccupancy(this.world, this.board)
     const blocked = occupiedExcept(this.board, occ, e)
-    const reachable = firingPositionExists(this.board, cell, tcell, def.move, geometry, team)
-    if (containsCell(fireCells(this.board, cell, geometry, team, blocked), tcell.x, tcell.y)) {
+    const plan = attackPlan(this.board, cell, tcell, def.move, geometry, team, blocked)
+    if (plan.inRange) {
       clearMotion(motion)
       motion.path = []
       return true
@@ -1452,14 +1449,10 @@ export class Game {
     // the live board: clear / blocked / out of reach.
     const targetIdx = this.board.cellIndex(tcell.x, tcell.y)
     const planOccupied: OccupiedFn = (x, y) => this.board.cellIndex(x, y) === targetIdx
-    const goal =
-      previewFiringCell(this.board, cell, tcell, def.move, geometry, team, blocked) ??
-      closestEmptyCell(this.board, cell, tcell, def.move, team, blocked) ??
-      { x: tcell.x, y: tcell.y }
-    motion.goal = goal
+    motion.goal = plan.cell
     motion.intent = 'order'
-    this.planNow(e, motion, goal, planOccupied)
-    return reachable
+    this.planNow(e, motion, plan.cell, planOccupied)
+    return plan.reachable
   }
 
   private planNow(e: Entity, motion: MotionData, dest: Vec2, occupied: OccupiedFn, fallback?: OccupiedFn): void {

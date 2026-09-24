@@ -1,6 +1,6 @@
 import type { Board } from './board'
 import { NEVER } from './geometry'
-import { closestEmptyCell, firingPositionExists, previewFiringCell } from './approach'
+import { attackPlan } from './approach'
 import { findPath } from './pathfind'
 import { WEAPONS } from './pieces'
 import type { PieceDef } from './pieces'
@@ -90,12 +90,10 @@ export function planStep(
     return
   }
   const geometry = WEAPONS[def.weapon].geometry
-  step.reachable = firingPositionExists(board, from, targetCell, def.move, geometry, team)
-  const goal =
-    previewFiringCell(board, from, targetCell, def.move, geometry, team, NEVER) ??
-    closestEmptyCell(board, from, targetCell, def.move, team, NEVER) ?? { x: targetCell.x, y: targetCell.y }
-  step.goal = goal
-  step.path = findPath(board, from, goal, def.move, team, NEVER).cells
+  const plan = attackPlan(board, from, targetCell, def.move, geometry, team, NEVER)
+  step.reachable = plan.reachable
+  step.goal = plan.cell
+  step.path = findPath(board, from, plan.cell, def.move, team, NEVER).cells
 }
 
 /** Re-plan every queued step from a new anchor, keeping the chain connected. */

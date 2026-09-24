@@ -1,5 +1,5 @@
 import type { Board } from './board'
-import { attackApproachCells } from './geometry'
+import { attackApproachCells, containsCell, fireCells } from './geometry'
 import type { OccupiedFn } from './geometry'
 import { dist2, vecEquals } from './math'
 import { moveDistances, reachableCells } from './pathfind'
@@ -89,4 +89,53 @@ export function closestEmptyCell(
   }
   candidates.sort((a, b) => a.d - b.d)
   return candidates.length > 0 ? candidates[0].c : null
+}
+
+/** True when `targetCell` is inside the weapon geometry fired from `from`. */
+export function inFiringGeometry(
+  board: Board,
+  from: Vec2,
+  targetCell: Vec2,
+  weaponGeom: Geometry,
+  team: TeamId,
+  occupied: OccupiedFn,
+): boolean {
+  return containsCell(fireCells(board, from, weaponGeom, team, occupied), targetCell.x, targetCell.y)
+}
+
+export interface AttackPlan {
+  /** Positionally reachable at all (ignores other pieces). */
+  reachable: boolean
+  /** Target is already hittable from `from` — caller should hold and fire. */
+  inRange: boolean
+  /** Goal cell to walk to; equals `targetCell` when nothing better exists. */
+  cell: Vec2
+}
+
+/**
+ * The single attack-navigation policy. Goal selection only: the caller keeps
+ * its own occupancy for pathfinding (live vs theoretical), which legitimately
+ * differs between preview and execution.
+ *
+ * `inRange` is the hold signal (already hittable — stop and fire). `cell` is
+ * always the walk-to goal chain (firing cell → closest empty → target), even
+ * when holding: callers that do not hold (`orderSettled`, `planStep`) need that
+ * chain, while holders (`planAttack`, `pursue`) check `inRange` first and ignore it.
+ */
+export function attackPlan(
+  board: Board,
+  from: Vec2,
+  targetCell: Vec2,
+  moveGeom: Geometry,
+  weaponGeom: Geometry,
+  team: TeamId,
+  occupied: OccupiedFn,
+): AttackPlan {
+  const reachable = firingPositionExists(board, from, targetCell, moveGeom, weaponGeom, team)
+  const inRange = inFiringGeometry(board, from, targetCell, weaponGeom, team, occupied)
+  const cell =
+    previewFiringCell(board, from, targetCell, moveGeom, weaponGeom, team, occupied) ??
+    closestEmptyCell(board, from, targetCell, moveGeom, team, occupied) ??
+    { x: targetCell.x, y: targetCell.y }
+  return { reachable, inRange, cell }
 }

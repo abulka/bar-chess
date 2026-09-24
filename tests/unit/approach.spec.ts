@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { closestEmptyCell, firingPositionExists, previewFiringCell } from '../../src/game/approach'
+import {
+  attackPlan,
+  closestEmptyCell,
+  firingPositionExists,
+  inFiringGeometry,
+  previewFiringCell,
+} from '../../src/game/approach'
 import { PIECES, WEAPONS } from '../../src/game/pieces'
 import { flatBoard, occupiedCells } from '../helpers'
 
@@ -48,5 +54,47 @@ describe('closestEmptyCell', () => {
     )
     expect(cell).not.toBeNull()
     expect(cell).not.toEqual({ x: 4, y: 0 })
+  })
+})
+
+describe('inFiringGeometry', () => {
+  it('is true when the target sits on a cell the weapon covers from here', () => {
+    expect(
+      inFiringGeometry(flatBoard(), { x: 0, y: 0 }, { x: 3, y: 0 }, rookWeapon, 'blue', occupiedCells([])),
+    ).toBe(true)
+  })
+
+  it('is false on a square the weapon does not cover', () => {
+    expect(
+      inFiringGeometry(flatBoard(), { x: 0, y: 0 }, { x: 3, y: 3 }, rookWeapon, 'blue', occupiedCells([])),
+    ).toBe(false)
+  })
+})
+
+describe('attackPlan', () => {
+  it('holds when the target is already in weapon geometry', () => {
+    const board = flatBoard()
+    const plan = attackPlan(board, { x: 0, y: 0 }, { x: 3, y: 0 }, rookMove, rookWeapon, 'blue', occupiedCells([]))
+    expect(plan.inRange).toBe(true)
+    expect(plan.reachable).toBe(true)
+  })
+
+  it('routes to a reachable firing cell when out of range', () => {
+    const board = flatBoard()
+    // Diagonal target: not on the rook's rank/file from (0,0), but reachable.
+    const plan = attackPlan(board, { x: 0, y: 0 }, { x: 4, y: 4 }, rookMove, rookWeapon, 'blue', occupiedCells([]))
+    expect(plan.inRange).toBe(false)
+    expect(plan.reachable).toBe(true)
+    expect(plan.cell).not.toEqual({ x: 4, y: 4 })
+  })
+
+  it('falls back to the closest empty cell when the target is positionally unreachable', () => {
+    const board = flatBoard()
+    // Bishop never reaches the opposite colour, so the goal is merely near it.
+    const plan = attackPlan(board, { x: 0, y: 0 }, { x: 1, y: 0 }, bishopMove, bishopWeapon, 'blue', occupiedCells([]))
+    expect(plan.reachable).toBe(false)
+    expect(plan.inRange).toBe(false)
+    expect(plan.cell).not.toEqual({ x: 1, y: 0 })
+    expect(plan.cell).not.toBeNull()
   })
 })

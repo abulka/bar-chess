@@ -1,9 +1,9 @@
 import { ATTACK_LEASH } from '../../game/constants'
-import { chebyshev, containsCell, fireCells } from '../../game/geometry'
+import { chebyshev } from '../../game/geometry'
 import { healthRatio, vecEquals } from '../../game/math'
 import { makeOccupied } from '../../game/occupancy'
 import { HEAL_RADIUS, kingOf } from '../../game/healing'
-import { closestEmptyCell, previewFiringCell } from '../../game/approach'
+import { attackPlan, inFiringGeometry } from '../../game/approach'
 import { coordName } from '../../game/coords'
 import { PIECES, WEAPONS } from '../../game/pieces'
 import { destReachable as canReach } from '../../game/pathfind'
@@ -71,38 +71,31 @@ function destReachable(ctx: SimContext, e: Entity, dest: { x: number; y: number 
   return canReach(ctx.board, cell, def.move, team, dest)
 }
 
-function inFiringGeometry(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'): boolean {
+function inFiringGeometryNow(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'): boolean {
   const kind = ctx.world.require(e, PieceType).kind
   const def = PIECES[kind]
   if (!def) return false
   const cell = ctx.world.require(e, Cell)
   const tcell = ctx.world.require(target, Cell)
   const occupied = makeOccupied(ctx.board, ctx.occupancy)
-  const cells = fireCells(ctx.board, cell, WEAPONS[def.weapon].geometry, team, occupied)
-  return containsCell(cells, tcell.x, tcell.y)
+  return inFiringGeometry(ctx.board, cell, tcell, WEAPONS[def.weapon].geometry, team, occupied)
 }
 
 /**
  * Stop and shoot when in geometry; otherwise move to a cell from which the
  * target can be hit (not onto the occupied target itself, which would deadlock).
- * The goal chain mirrors `Game.planAttack` exactly so the executed route never
- * diverges from the preview shown when the order was issued: a reachable firing
- * cell, else the closest reachable empty cell (for positionally unreachable
- * targets), else the target itself as a last resort.
+ * Goal selection is `attackPlan` — the same policy as `Game.planAttack` — so the
+ * executed route never diverges from the preview shown when the order was issued.
  */
 function pursue(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'): { x: number; y: number } | null {
-  if (inFiringGeometry(ctx, e, target, team)) return null
   const def = PIECES[ctx.world.require(e, PieceType).kind]
   if (!def) return null
   const cell = ctx.world.require(e, Cell)
   const tcell = ctx.world.require(target, Cell)
   const occupied = makeOccupied(ctx.board, ctx.occupancy)
   const weaponGeom = WEAPONS[def.weapon].geometry
-  return (
-    previewFiringCell(ctx.board, cell, tcell, def.move, weaponGeom, team, occupied) ??
-    closestEmptyCell(ctx.board, cell, tcell, def.move, team, occupied) ??
-    { x: tcell.x, y: tcell.y }
-  )
+  const plan = attackPlan(ctx.board, cell, tcell, def.move, weaponGeom, team, occupied)
+  return plan.inRange ? null : plan.cell
 }
 
 function rally(ctx: SimContext, team: 'red' | 'blue'): { x: number; y: number } | null {
@@ -398,7 +391,7 @@ const system: System = {
       const beyondLeash =
         tcell !== undefined &&
         chebyshev(cell.x, cell.y, tcell.x, tcell.y) > ATTACK_LEASH &&
-        !inFiringGeometry(ctx, e, target.entity as number, team)
+        !inFiringGeometryNow(ctx, e, target.entity as number, team)
       motion.goal = beyondLeash ? null : pursue(ctx, e, target.entity as number, team)
       motion.intent = motion.goal === null ? 'none' : 'engage'
     }
