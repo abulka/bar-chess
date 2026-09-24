@@ -30,7 +30,7 @@ function renderGrid(pieces: PieceTrace[], size: number, terrain?: number[]): str
 }
 
 /** One turn's activity line plus the end-of-turn piece layout. */
-export interface TurnActivity {
+interface TurnActivity {
   turn: number
   tick: number
   /** `T<n>: ...`, empty when nothing happened that turn. */
@@ -42,7 +42,7 @@ export interface TurnActivity {
  * Render each turn's activity (moves, shots, damage, kills, held-under-fire).
  * Shared by the full transcript and the snapshot.
  */
-export function turnActivities(trace: TurnTrace[], events: EventRecord[], height: number): TurnActivity[] {
+function turnActivities(trace: TurnTrace[], events: EventRecord[], height: number): TurnActivity[] {
   const stats = summarizePieces(trace, events)
   const statsByEntity = new Map(stats.map((s) => [s.entity, s]))
   const labelAt = (turnIndex: number, entity: number): string => {
@@ -103,7 +103,7 @@ export function turnActivities(trace: TurnTrace[], events: EventRecord[], height
 }
 
 /** Every non-empty turn activity line, e.g. `T5: bP d2->d4; ...`. */
-export function turnActivityLines(trace: TurnTrace[], events: EventRecord[], height: number): string[] {
+function turnActivityLines(trace: TurnTrace[], events: EventRecord[], height: number): string[] {
   return turnActivities(trace, events, height)
     .map((a) => a.text)
     .filter((text) => text.length > 0)

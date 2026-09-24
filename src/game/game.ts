@@ -524,23 +524,24 @@ export class Game {
   /** Step back one completed turn in the history. */
   undoTurn(): void {
     if (this.turnActive || this.replaying || this.cursor <= 0) return
-    this.queuedTurns = 0
-    this.restoreTurn(this.history[--this.cursor])
-    this.barProgress = 0
-    this.paused = true
-    this.canReplay = this.cursor === this.history.length - 1 && this.lastTurn !== null
-    this.bus.emit('info', `undo (turn ${this.cursor}/${this.history.length - 1})`)
+    this.stepHistory(-1, 'undo')
   }
 
   /** Step forward to a turn previously undone. */
   redoTurn(): void {
     if (this.turnActive || this.replaying || this.cursor >= this.history.length - 1) return
+    this.stepHistory(1, 'redo')
+  }
+
+  /** Move the history cursor by `delta`, restore that turn, and republish state. */
+  private stepHistory(delta: -1 | 1, label: 'undo' | 'redo'): void {
     this.queuedTurns = 0
-    this.restoreTurn(this.history[++this.cursor])
+    this.cursor += delta
+    this.restoreTurn(this.history[this.cursor])
     this.barProgress = 0
     this.paused = true
     this.canReplay = this.cursor === this.history.length - 1 && this.lastTurn !== null
-    this.bus.emit('info', `redo (turn ${this.cursor}/${this.history.length - 1})`)
+    this.bus.emit('info', `${label} (turn ${this.cursor}/${this.history.length - 1})`)
   }
 
   replayTurn(): void {
@@ -975,16 +976,13 @@ export class Game {
    */
   setPieceStance(mode: StanceMode): void {
     let n = 0
-    for (const e of this.selected) {
-      if (!this.world.isAlive(e)) continue
-      const team = this.world.get(e, Team)
-      if (!team || !this.commandable(team)) continue
+    this.forEachCommandable((e) => {
       const stance = this.world.get(e, Stance)
       if (stance) stance.mode = mode
       const cell = this.world.get(e, Cell)
       if (cell) this.onCommand?.({ t: 'stance', from: { x: cell.x, y: cell.y }, mode })
       n++
-    }
+    })
     this.bus.emit('info', `${n} piece(s) stance: ${mode}`)
   }
 
@@ -1001,6 +999,16 @@ export class Game {
   /** A piece can be commanded only when its team is under human control. */
   private commandable(team: TeamId): boolean {
     return this.teams[team].controller === 'human'
+  }
+
+  /** Visit each selected piece whose team is currently under human command. */
+  private forEachCommandable(visit: (e: Entity) => void): void {
+    for (const e of this.selected) {
+      if (!this.world.isAlive(e)) continue
+      const team = this.world.get(e, Team)
+      if (!team || !this.commandable(team)) continue
+      visit(e)
+    }
   }
 
   /**
@@ -1217,10 +1225,7 @@ export class Game {
 
   clearOrders(): void {
     let n = 0
-    for (const e of this.selected) {
-      if (!this.world.isAlive(e)) continue
-      const team = this.world.get(e, Team)
-      if (!team || !this.commandable(team)) continue
+    this.forEachCommandable((e) => {
       const order = this.world.get(e, Order)
       const motion = this.world.get(e, Motion)
       if (order) {
@@ -1243,7 +1248,7 @@ export class Game {
       const cell = this.world.get(e, Cell)
       if (cell) this.onCommand?.({ t: 'clear', from: { x: cell.x, y: cell.y } })
       n++
-    }
+    })
     this.bus.emit('info', `${n} piece(s) order${n === 1 ? '' : 's'} cleared`)
   }
 

@@ -35,14 +35,21 @@ export class Camera {
     return clamp(Math.min(zoomX, zoomY), 0.01, this.maxZoom)
   }
 
-  /** Fit the whole board and set that as the zoom-out floor. */
-  fit(worldW: number, worldH: number): void {
+  /** Store the board size and recompute the fit floor; null when not sized yet. */
+  private applyFit(worldW: number, worldH: number): number | null {
     this.worldW = worldW
     this.worldH = worldH
     const z = this.computeFit(worldW, worldH)
-    if (z === null) return
+    if (z === null) return null
     this.fitZoom = z
     this.minZoom = z
+    return z
+  }
+
+  /** Fit the whole board and set that as the zoom-out floor. */
+  fit(worldW: number, worldH: number): void {
+    const z = this.applyFit(worldW, worldH)
+    if (z === null) return
     this.zoom = z
     this.x = worldW / 2
     this.y = worldH / 2
@@ -55,12 +62,8 @@ export class Camera {
    * the board).
    */
   updateLimits(worldW: number, worldH: number): void {
-    this.worldW = worldW
-    this.worldH = worldH
-    const z = this.computeFit(worldW, worldH)
+    const z = this.applyFit(worldW, worldH)
     if (z === null) return
-    this.fitZoom = z
-    this.minZoom = z
     if (this.zoom < z) this.zoom = z
     this.recenter = null
   }

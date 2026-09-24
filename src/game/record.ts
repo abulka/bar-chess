@@ -85,15 +85,20 @@ export class Recorder {
     this.byTurn.clear()
   }
 
-  /** Freeze the current outcome into the record and return it. */
-  finish(result: Partial<GameRecordResult> = {}): GameRecord {
-    this.data.result = {
+  /** Fill a result, defaulting each field to the live game's current value. */
+  private buildResult(result: Partial<GameRecordResult>): GameRecordResult {
+    return {
       winner: result.winner ?? this.game.winner,
       turns: result.turns ?? this.game.turn,
       ticks: result.ticks ?? this.game.tick,
       timedOut: result.timedOut ?? false,
       partial: result.partial ?? this.game.winner === null,
     }
+  }
+
+  /** Freeze the current outcome into the record and return it. */
+  finish(result: Partial<GameRecordResult> = {}): GameRecord {
+    this.data.result = this.buildResult(result)
     return this.record
   }
 
@@ -103,13 +108,7 @@ export class Recorder {
    */
   snapshot(result: Partial<GameRecordResult> = {}): GameRecord {
     const data = structuredClone(this.record)
-    data.result = {
-      winner: result.winner ?? this.game.winner,
-      turns: result.turns ?? this.game.turn,
-      ticks: result.ticks ?? this.game.tick,
-      timedOut: result.timedOut ?? false,
-      partial: result.partial ?? this.game.winner === null,
-    }
+    data.result = this.buildResult(result)
     return data
   }
 

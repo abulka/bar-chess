@@ -1,4 +1,4 @@
-import { isTone, type NoiseOptions, type ToneOptions, type VoiceSpec } from './voices'
+import { isTone, type FilterOptions, type NoiseOptions, type ToneOptions, type VoiceSpec } from './voices'
 
 /**
  * Plays `VoiceSpec`s through Web Audio. Every voice is built from oscillators,
@@ -50,6 +50,18 @@ export class Synth {
     }
   }
 
+  /** Build a biquad filter from a voice's filter spec, ramping to `to` if set. */
+  private filter(spec: FilterOptions, defaultQ: number, t0: number, duration: number): BiquadFilterNode {
+    const filter = this.ctx.createBiquadFilter()
+    filter.type = spec.type ?? 'lowpass'
+    filter.Q.value = spec.q ?? defaultQ
+    filter.frequency.setValueAtTime(Math.max(1, spec.from), t0)
+    if (spec.to !== undefined) {
+      filter.frequency.exponentialRampToValueAtTime(Math.max(1, spec.to), t0 + duration)
+    }
+    return filter
+  }
+
   private tone(o: ToneOptions, out: AudioNode): void {
     const ctx = this.ctx
     const stopAt = (o.delay ?? 0) + o.duration
@@ -67,13 +79,7 @@ export class Synth {
     gain.gain.exponentialRampToValueAtTime(MIN_GAIN, t0 + o.duration)
 
     if (o.filter) {
-      const filter = ctx.createBiquadFilter()
-      filter.type = o.filter.type ?? 'lowpass'
-      filter.Q.value = o.filter.q ?? 1
-      filter.frequency.setValueAtTime(Math.max(1, o.filter.from), t0)
-      if (o.filter.to !== undefined) {
-        filter.frequency.exponentialRampToValueAtTime(Math.max(1, o.filter.to), t0 + o.duration)
-      }
+      const filter = this.filter(o.filter, 1, t0, o.duration)
       osc.connect(filter)
       filter.connect(gain)
     } else {
@@ -104,13 +110,7 @@ export class Synth {
     gain.gain.exponentialRampToValueAtTime(Math.max(MIN_GAIN, o.gain), t0 + (o.attack ?? 0.006))
     gain.gain.exponentialRampToValueAtTime(MIN_GAIN, t0 + o.duration)
 
-    const filter = ctx.createBiquadFilter()
-    filter.type = o.filter.type ?? 'lowpass'
-    filter.Q.value = o.filter.q ?? 0.7
-    filter.frequency.setValueAtTime(Math.max(1, o.filter.from), t0)
-    if (o.filter.to !== undefined) {
-      filter.frequency.exponentialRampToValueAtTime(Math.max(1, o.filter.to), t0 + o.duration)
-    }
+    const filter = this.filter(o.filter, 0.7, t0, o.duration)
 
     src.connect(filter)
     filter.connect(gain)

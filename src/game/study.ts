@@ -20,7 +20,7 @@ export const STUDY_POLICIES: Array<{ id: StudyPolicyName; label: string }> = [
   { id: 'turtle', label: 'Attack stance' },
 ]
 
-export type StudyPolicy = (game: Game, turn: number) => void
+type StudyPolicy = (game: Game, turn: number) => void
 
 function piecesOf(game: Game, team: TeamId): number[] {
   const out: number[] = []

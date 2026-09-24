@@ -6,11 +6,13 @@ import { HEAL_RADIUS, kingOf } from '../../game/healing'
 import { attackPlan, inFiringGeometry } from '../../game/approach'
 import { coordName } from '../../game/coords'
 import { PIECES, WEAPONS } from '../../game/pieces'
+import type { PieceDef } from '../../game/pieces'
 import { destReachable as canReach } from '../../game/pathfind'
 import { noteOrder, clearMotion, clearOrder, promoteNext, rechainQueue } from '../../game/queue'
 import { Cell, Health, Motion, Order, PieceType, Stance, Target, Team, hasLiveCell } from '../components'
 import type { MotionIntent, OrderData } from '../components'
 import type { Entity } from '../world'
+import type { TeamId, Vec2 } from '../../game/types'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
 import { aiKingGoal, isScreening, KING_GUARD_RADIUS, kingThreats, screenPlan } from './kingDefense'
@@ -45,14 +47,20 @@ function preserveThreshold(kind: string): number {
   }
 }
 
-/** Re-plan the remaining queue from the piece's current cell after a promotion. */
-function rechain(ctx: SimContext, e: Entity, order: OrderData): void {
+/** A piece's def, cell and team, or null when any of them is missing. */
+function pieceContext(ctx: SimContext, e: Entity): { def: PieceDef; cell: Vec2; team: TeamId } | null {
   const kind = ctx.world.get(e, PieceType)?.kind
   const def = kind ? PIECES[kind] : undefined
   const cell = ctx.world.get(e, Cell)
   const team = ctx.world.get(e, Team)
-  if (!def || !cell || !team) return
-  rechainQueue(ctx.board, cell, order.queue, def, team, (target) => ctx.world.get(target, Cell) ?? null)
+  return def && cell && team ? { def, cell, team } : null
+}
+
+/** Re-plan the remaining queue from the piece's current cell after a promotion. */
+function rechain(ctx: SimContext, e: Entity, order: OrderData): void {
+  const pc = pieceContext(ctx, e)
+  if (!pc) return
+  rechainQueue(ctx.board, pc.cell, order.queue, pc.def, pc.team, (target) => ctx.world.get(target, Cell) ?? null)
 }
 
 /**
@@ -63,12 +71,9 @@ function rechain(ctx: SimContext, e: Entity, order: OrderData): void {
  * single goto order.
  */
 function destReachable(ctx: SimContext, e: Entity, dest: { x: number; y: number }): boolean {
-  const kind = ctx.world.get(e, PieceType)?.kind
-  const def = kind ? PIECES[kind] : undefined
-  const cell = ctx.world.get(e, Cell)
-  const team = ctx.world.get(e, Team)
-  if (!def || !cell || !team) return true
-  return canReach(ctx.board, cell, def.move, team, dest)
+  const pc = pieceContext(ctx, e)
+  if (!pc) return true
+  return canReach(ctx.board, pc.cell, pc.def.move, pc.team, dest)
 }
 
 function inFiringGeometryNow(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'): boolean {

@@ -26,7 +26,7 @@ import { coordName, fileLabel } from '../game/coords'
 import { TEAM_IDS } from '../game/constants'
 import type { Game } from '../game/game'
 import { Camera } from './camera'
-import { firingLine, routePolyline, type FiringLine } from './overlays'
+import { firingLine, routePolyline, type FiringLine, type FiringSegment } from './overlays'
 import {
   BAR_BG,
   BAR_HIDE_THRESHOLD,
@@ -264,14 +264,7 @@ export class Renderer {
         const lineColor = line.kind === 'unreachable' ? UNREACHABLE_COLOR : TRACK_COLOR
         ctx.strokeStyle = lineColor
         ctx.lineWidth = (full ? (line.clear ? 2.2 : 1.6) : 1.4) / this.camera.zoom
-        for (const seg of line.segments) {
-          ctx.setLineDash(seg.dashed ? dash : [])
-          ctx.beginPath()
-          ctx.moveTo(seg.from.x, seg.from.y)
-          ctx.lineTo(seg.to.x, seg.to.y)
-          ctx.stroke()
-        }
-        ctx.setLineDash([])
+        this.strokeSegments(ctx, line.segments, (seg) => (seg.dashed ? dash : []))
 
         this.drawReticle(ctx, board, line, lineColor, TRACK_COLOR, full)
       }
@@ -339,16 +332,27 @@ export class Renderer {
         ? POTSHOT_COLOR
         : 'rgba(139,146,156,0.55)'
     ctx.lineWidth = (full ? 1.8 : 1.2) / this.camera.zoom
-    for (const seg of autoLine.segments) {
-      // A pot shot always reads dashed: an incidental, uncommitted line.
-      ctx.setLineDash(committed ? (seg.dashed ? dash : []) : dash)
+    // A pot shot always reads dashed: an incidental, uncommitted line.
+    this.strokeSegments(ctx, autoLine.segments, (seg) =>
+      committed ? (seg.dashed ? dash : []) : dash,
+    )
+    if (committed) this.drawReticle(ctx, board, autoLine, ENGAGE_COLOR, ENGAGE_COLOR, full)
+  }
+
+  /** Stroke each firing-line segment with a caller-chosen dash pattern. */
+  private strokeSegments(
+    ctx: CanvasRenderingContext2D,
+    segments: readonly FiringSegment[],
+    dashFor: (seg: FiringSegment) => number[],
+  ): void {
+    for (const seg of segments) {
+      ctx.setLineDash(dashFor(seg))
       ctx.beginPath()
       ctx.moveTo(seg.from.x, seg.from.y)
       ctx.lineTo(seg.to.x, seg.to.y)
       ctx.stroke()
     }
     ctx.setLineDash([])
-    if (committed) this.drawReticle(ctx, board, autoLine, ENGAGE_COLOR, ENGAGE_COLOR, full)
   }
 
   /**

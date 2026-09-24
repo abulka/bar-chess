@@ -9,10 +9,10 @@ import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import { coverageThreats, homeCell } from './preservation'
 import type { Threat, ThreatMemo } from './preservation'
-import { bestSafeStep, buildCoverage, dangerAt, minThreatDist } from './threatField'
+import { buildCoverage, evaluateSafeStep } from './threatField'
 
 /** How close an enemy must get before the AI king reacts even without a shot. */
-export const KING_THREAT_RADIUS = 3
+const KING_THREAT_RADIUS = 3
 /** How far from the king a friendly AI piece still counts as a bodyguard. */
 export const KING_GUARD_RADIUS = 4
 /** The king backs off while a threat is inside this ring, then holds its ground. */
@@ -131,27 +131,27 @@ export function aiKingGoal(ctx: SimContext, king: Entity, team: TeamId, threats:
     return 0
   }
 
-  const options = moveDestinations(ctx.board, cell, def.move, team, makeOccupied(ctx.board, ctx.occupancy))
-  const currentDanger = dangerAt(coverages, threats, cell.x, cell.y, proximityPenalty)
-  const currentDist = minThreatDist(threats, cell.x, cell.y)
+  const step = evaluateSafeStep(
+    ctx,
+    cell,
+    def.move,
+    team,
+    coverages,
+    threats,
+    proximityPenalty,
+    (field, c) => field.metrics(c.x, c.y, { secondary: home ? dist(c.x, c.y, home.x, home.y) : 0 }),
+  )
+  if (step === null) return null
 
-  const best = bestSafeStep(options, (c) => ({
-    danger: dangerAt(coverages, threats, c.x, c.y, proximityPenalty),
-    primary: minThreatDist(threats, c.x, c.y),
-    secondary: home ? dist(c.x, c.y, home.x, home.y) : 0,
-  }))
-  if (best === null) return null
-
-  const bestDanger = dangerAt(coverages, threats, best.x, best.y, proximityPenalty)
-  const bestDist = minThreatDist(threats, best.x, best.y)
-  if (currentDanger > 0) {
+  const { current, best, bestMetrics } = step
+  if (current.danger > 0) {
     // Exposed: take the safest step, or a step that opens the gap at equal risk.
-    if (bestDanger < currentDanger) return best
-    if (bestDanger === currentDanger && bestDist > currentDist + 1e-9) return best
+    if (bestMetrics.danger < current.danger) return best
+    if (bestMetrics.danger === current.danger && bestMetrics.primary > current.primary + 1e-9) return best
     return null
   }
   // Not exposed: keep a standoff from a threat that is still close, then hold
   // rather than drift into a corner.
-  if (currentDist < KING_STANDOFF && bestDist > currentDist + 1e-9) return best
+  if (current.primary < KING_STANDOFF && bestMetrics.primary > current.primary + 1e-9) return best
   return null
 }

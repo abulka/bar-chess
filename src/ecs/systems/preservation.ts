@@ -1,14 +1,14 @@
-import { chebyshev, containsCell, fireCells, moveDestinations } from '../../game/geometry'
+import { chebyshev, containsCell, fireCells } from '../../game/geometry'
 import { HEAL_RADIUS } from '../../game/healing'
 import { dist, dist2 } from '../../game/math'
-import { makeOccupied, occupiedExcept } from '../../game/occupancy'
+import { occupiedExcept } from '../../game/occupancy'
 import { reachableCells } from '../../game/pathfind'
 import { PIECES, WEAPONS, weaponVision } from '../../game/pieces'
 import type { TeamId, Vec2 } from '../../game/types'
 import { Cell, Health, PieceType, Target, Team } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
-import { bestSafeStep, buildCoverage, dangerAt, minThreatDist } from './threatField'
+import { buildCoverage, evaluateSafeStep } from './threatField'
 
 /** A ranked enemy that can hurt `piece` this moment. */
 export interface Threat {
@@ -216,25 +216,25 @@ export function escapeGoal(
     return containsCell(fireCells(ctx.board, { x, y }, WEAPONS[def.weapon].geometry, team, selfFree), keepCell.x, keepCell.y)
   }
 
-  const options = moveDestinations(ctx.board, cell, def.move, team, makeOccupied(ctx.board, ctx.occupancy))
-  const currentDanger = dangerAt(coverages, threats, cell.x, cell.y, proximityPenalty)
+  const step = evaluateSafeStep(
+    ctx,
+    cell,
+    def.move,
+    team,
+    coverages,
+    threats,
+    proximityPenalty,
+    (field, c) => field.metrics(c.x, c.y, { prefer: keepsShot(c.x, c.y) }),
+  )
+  if (step === null) return null
+
+  const { current, best, bestMetrics } = step
   const currentKeeps = keepsShot(cell.x, cell.y)
-  const currentDist = minThreatDist(threats, cell.x, cell.y)
-
-  const best = bestSafeStep(options, (c) => ({
-    danger: dangerAt(coverages, threats, c.x, c.y, proximityPenalty),
-    prefer: keepsShot(c.x, c.y),
-    primary: minThreatDist(threats, c.x, c.y),
-  }))
-  if (best === null) return null
-
-  const bestDanger = dangerAt(coverages, threats, best.x, best.y, proximityPenalty)
   const bestKeeps = keepsShot(best.x, best.y)
-  const bestDist = minThreatDist(threats, best.x, best.y)
-  if (bestDanger < currentDanger) return best
-  if (bestDanger === currentDanger) {
+  if (bestMetrics.danger < current.danger) return best
+  if (bestMetrics.danger === current.danger) {
     if (bestKeeps && !currentKeeps) return best
-    if (bestKeeps === currentKeeps && bestDist > currentDist + 1e-9) return best
+    if (bestKeeps === currentKeeps && bestMetrics.primary > current.primary + 1e-9) return best
   }
   return null
 }

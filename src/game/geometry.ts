@@ -66,7 +66,7 @@ function bresenham(
  * Rank a pawn starts on: rank 2 for blue (bottom) and rank 7 for red (top),
  * matching `initialArmy`. A pawn may take its two-square first move only here.
  */
-export function pawnHomeRank(board: Board, team: TeamId): number {
+function pawnHomeRank(board: Board, team: TeamId): number {
   return team === 'blue' ? board.height - 2 : 1
 }
 
