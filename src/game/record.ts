@@ -27,6 +27,10 @@ export interface TurnRecord {
   intents: GameCommandIntent[]
   /** Sim rules in force when this turn's orders were issued; falls back to the header. */
   settings?: SimSettings
+  /** How the beat ran: serialized turn (default) or a continuous "mega" play burst. */
+  mode?: 'turn' | 'mega'
+  /** Ticks the beat ran for, so a mega burst can be re-run exactly. */
+  ticks?: number
 }
 
 export interface GameRecordResult {
@@ -63,11 +67,41 @@ export class Recorder {
   private game: Game
   private data: GameRecord
   private byTurn = new Map<number, TurnRecord>()
+  private unsubscribe: () => void
 
   constructor(game: Game) {
     this.game = game
     this.data = headerFor(game)
     game.onCommand = (intent) => this.push(intent)
+    // Beat boundaries carry the mode and tick length; recording them here means
+    // a full record exists even for command-free (AI-only) turns and play bursts,
+    // and `replayRecord` can reproduce a mixed game.
+    this.unsubscribe = game.bus.subscribe((event) => this.observe(event))
+  }
+
+  dispose(): void {
+    this.unsubscribe()
+  }
+
+  /** Record each beat's mode/length as it ends (see `finishTurn`/`endMegaTurn`). */
+  private observe(event: EventRecord): void {
+    if (event.type !== 'phase' || event.msg !== 'turn end') return
+    if (this.game.replaying) return
+    const data = event.data as { turn?: number; ticks?: number; mode?: 'turn' | 'mega' } | undefined
+    const turn = typeof data?.turn === 'number' ? data.turn : this.game.turn
+    const existing = this.byTurn.get(turn)
+    if (existing) {
+      existing.mode = data?.mode
+      existing.ticks = data?.ticks
+      return
+    }
+    this.byTurn.set(turn, {
+      turn,
+      intents: [],
+      settings: this.game.simSettings(),
+      mode: data?.mode,
+      ticks: data?.ticks,
+    })
   }
 
   private push(intent: GameCommandIntent): void {
@@ -181,9 +215,17 @@ export function replayRecord(record: GameRecord, options: ReplayOptions = {}): R
     game.captureAdvance = rules.captureAdvance
     game.chessKills = rules.chessKills ?? false
     if (entry) applyIntents(game, entry.intents)
-    game.beginTurn()
-    let guard = 0
-    while (game.turnActive && guard++ < maxTicks) game.runTicks(1)
+    if (entry?.mode === 'mega') {
+      // A play burst replays continuously for exactly the ticks it ran.
+      const ticks = entry.ticks ?? 0
+      game.beginMegaTurn()
+      for (let i = 0; i < ticks && game.playing; i++) game.runTicks(1)
+      if (game.playing) game.togglePause()
+    } else {
+      game.beginTurn()
+      let guard = 0
+      while (game.turnActive && guard++ < maxTicks) game.runTicks(1)
+    }
   }
 
   return { game, events }

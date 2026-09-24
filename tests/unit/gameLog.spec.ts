@@ -53,6 +53,21 @@ describe('GameLog & LLM game prompt', () => {
     log.dispose()
   })
 
+  it('samples a mega turn once, when it closes', () => {
+    const game = new Game(8, 'ai-vs-ai', 7)
+    const log = new GameLog(game)
+    log.begin()
+    log.tick()
+
+    game.beginMegaTurn()
+    game.runTicks(60)
+    log.tick() // polling during play must not churn the trace
+    expect(log.turnTrace.map((t) => t.turn)).toEqual([0])
+    game.togglePause()
+    expect(log.turnTrace.map((t) => t.turn)).toEqual([0, 1])
+    log.dispose()
+  })
+
   it('rewinds the trace to the restored turn on undo', () => {
     const game = new Game(8, 'ai-vs-ai', 7)
     const log = new GameLog(game)

@@ -41,6 +41,8 @@ export interface SavedHistoryEntry {
   ticks: number
   /** Commands pending at turn start. */
   pending?: Commands | null
+  /** True when produced by a continuous "mega" turn (real-time play burst). */
+  continuous?: boolean
 }
 
 /**

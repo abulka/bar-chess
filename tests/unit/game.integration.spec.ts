@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Health, Motion, Order, Stance, Target, Weapon } from '../../src/ecs/components'
+import { Cell, Health, Motion, Order, Stance, Target, Team, Weapon } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { coordName } from '../../src/game/coords'
 import { createPiece } from '../../src/game/factory'
@@ -1067,5 +1067,127 @@ describe('hover readout', () => {
     const hover = game.snapshot().hover
     expect(hover?.kind).toBe('empty')
     expect(hover?.piece).toBeNull()
+  })
+})
+
+describe('Game mega turns', () => {
+  beforeEach(() => clearComponents())
+
+  function replayToEnd(game: Game, max = 5000): void {
+    game.replayTurn()
+    expect(game.snapshot().replaying).toBe(true)
+    let guard = 0
+    while (game.snapshot().replaying && guard++ < max) game.runTicks(1)
+    expect(guard).toBeLessThan(max)
+  }
+
+  it('records a continuous beat on pause and replays it exactly', () => {
+    const game = new Game(8, 'ai-vs-ai', 9)
+    const start = JSON.stringify(game.toDebugJson())
+
+    game.beginMegaTurn()
+    expect(game.snapshot().playing).toBe(true)
+    expect(game.snapshot().megaTurn).toBe(true)
+    game.runTicks(90)
+    game.togglePause()
+
+    expect(game.snapshot().playing).toBe(false)
+    expect(game.snapshot().canReplay).toBe(true)
+    // Parked on the mega boundary, the beat still reads as a mega turn.
+    expect(game.snapshot().megaTurn).toBe(true)
+    const end = JSON.stringify(game.toDebugJson())
+
+    game.replayTurn()
+    expect(game.snapshot().replaying).toBe(true)
+    expect(game.snapshot().megaTurn).toBe(true)
+    let guard = 0
+    while (game.snapshot().replaying && guard++ < 5000) game.runTicks(1)
+    expect(guard).toBeLessThan(5000)
+    expect(JSON.stringify(game.toDebugJson())).toBe(end)
+
+    game.undoTurn()
+    expect(JSON.stringify(game.toDebugJson())).toBe(start)
+    expect(game.snapshot().megaTurn).toBe(false)
+    game.redoTurn()
+    expect(JSON.stringify(game.toDebugJson())).toBe(end)
+  })
+
+  it('splits the mega turn at a command so both halves replay', () => {
+    const game = new Game(8, 'human-vs-ai', 7)
+    game.beginMegaTurn()
+    game.runTicks(40)
+    const beforeOrder = JSON.stringify(game.toDebugJson())
+
+    const blue = game.world
+      .query(Cell, Team)
+      .find((e) => game.world.require(e, Team) === 'blue')!
+    const cell = game.world.require(blue, Cell)
+    game.selected = [blue]
+    game.orderAt({ x: cell.x, y: 0 }, 'move')
+    game.selected = []
+
+    game.runTicks(40)
+    game.togglePause()
+    const end = JSON.stringify(game.toDebugJson())
+
+    // Undo lands on the pre-command boundary and replaying it reproduces it.
+    game.undoTurn()
+    expect(JSON.stringify(game.toDebugJson())).toBe(beforeOrder)
+    replayToEnd(game)
+    expect(JSON.stringify(game.toDebugJson())).toBe(beforeOrder)
+    expect(game.snapshot().canRedo).toBe(true)
+
+    game.redoTurn()
+    expect(JSON.stringify(game.toDebugJson())).toBe(end)
+  })
+
+  it('closes a mega turn the moment the king falls and replays the fatal burst', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    const redKing = placePiece(game, 'king', 'red', { x: 4, y: 4 })
+    // A pending damage command is part of the burst's start, so replay re-applies it.
+    game.cmds.damage.push({ target: redKing, source: null, amount: 100000, kind: 'test' })
+
+    game.beginMegaTurn()
+    game.runTicks(3)
+    expect(game.winner).toBe('blue')
+    expect(game.snapshot().playing).toBe(false)
+    expect(game.snapshot().canReplay).toBe(true)
+
+    const ended = JSON.stringify(game.toDebugJson())
+    replayToEnd(game)
+    expect(game.winner).toBe('blue')
+    expect(JSON.stringify(game.toDebugJson())).toBe(ended)
+
+    game.undoTurn()
+    expect(game.winner).toBeNull()
+    expect(game.snapshot().canRedo).toBe(true)
+  })
+
+  it('numbers a mega turn as a beat', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    expect(game.turn).toBe(0)
+    game.requestPlay()
+    expect(game.playing).toBe(true)
+    expect(game.turn).toBe(1)
+    expect(game.snapshot().megaTurn).toBe(true)
+    game.togglePause()
+    expect(game.turn).toBe(1)
+    // Taking a normal turn next must not read as a mega turn.
+    game.beginTurn()
+    expect(game.turn).toBe(2)
+    expect(game.snapshot().megaTurn).toBe(false)
+  })
+
+  it('buffers shift+space play until the current turn finishes', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    game.beginTurn()
+    game.requestPlay()
+    expect(game.snapshot().queuedPlay).toBe(true)
+
+    let guard = 0
+    while ((game.turnActive || !game.playing) && guard++ < 2000) game.runTicks(1)
+    expect(guard).toBeLessThan(2000)
+    expect(game.playing).toBe(true)
+    expect(game.snapshot().queuedPlay).toBe(false)
   })
 })

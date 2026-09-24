@@ -44,7 +44,11 @@ const snapshot = shallowRef<GameSnapshot>(game.snapshot())
 const studyState = shallowRef<StudyState>(study.state)
 const barProgress = ref(0)
 const barHeld = computed(
-  () => !snapshot.value.turnActive && !snapshot.value.replaying && barProgress.value >= 1,
+  () =>
+    !snapshot.value.turnActive &&
+    !snapshot.value.replaying &&
+    !snapshot.value.playing &&
+    barProgress.value >= 1,
 )
 const copied = ref('')
 const boardView = ref<InstanceType<typeof BoardView> | null>(null)
@@ -199,11 +203,15 @@ const turnLabel = computed(() => {
   if (snapshot.value.winner) {
     return `GAME OVER — ${snapshot.value.teams[snapshot.value.winner].name} wins (u to undo)`
   }
-  const turn = `TURN ${snapshot.value.turn}`
+  const turn = `${snapshot.value.megaTurn ? 'MEGA TURN' : 'TURN'} ${snapshot.value.turn}`
   const queued = snapshot.value.queuedTurns > 0 ? ` · +${snapshot.value.queuedTurns} queued` : ''
-  if (snapshot.value.turnActive) return `${turn}${queued}`
-  if (snapshot.value.replaying) return `${turn} · REPLAY${queued}`
-  return snapshot.value.canReplay ? `${turn} · READY — space for next turn` : `${turn} · press space for a turn`
+  const playQueued = snapshot.value.queuedPlay ? ' · play queued' : ''
+  if (snapshot.value.playing) return `${turn} · PLAYING — space to pause`
+  if (snapshot.value.turnActive) return `${turn}${queued}${playQueued}`
+  if (snapshot.value.replaying) return `${turn} · REPLAY${queued}${playQueued}`
+  return snapshot.value.canReplay
+    ? `${turn} · READY — space for next turn`
+    : `${turn} · press space for a turn`
 })
 
 const hover = computed(() => snapshot.value.hover)
@@ -522,7 +530,17 @@ function onKey(event: KeyboardEvent): void {
     refresh()
   } else if (event.key === ' ') {
     event.preventDefault()
-    onTurn()
+    if (event.shiftKey) {
+      // Shift+space: play continuously until the next pause (a mega turn).
+      game.requestPlay()
+      refresh()
+    } else if (snapshot.value.playing) {
+      // Space during play pauses and closes the mega turn.
+      game.togglePause()
+      refresh()
+    } else {
+      onTurn()
+    }
   } else if (event.key === 's') {
     game.stepOnce()
     refresh()
@@ -609,8 +627,14 @@ onBeforeUnmount(() => {
 
     <div
       class="turnbar"
-      :class="{ active: snapshot.turnActive, replay: snapshot.replaying }"
-      :title="snapshot.turnActive ? 'turn in progress (space)' : 'press space for a turn, u/r to undo/redo, y to replay'"
+      :class="{ active: snapshot.turnActive, replay: snapshot.replaying, playing: snapshot.playing }"
+      :title="
+        snapshot.playing
+          ? 'playing — space to pause (makes a mega turn)'
+          : snapshot.turnActive
+            ? 'turn in progress (space)'
+            : 'press space for a turn, shift+space to play, u/r to undo/redo, y to replay'
+      "
     >
       <div
         class="turnbar-fill"
@@ -647,7 +671,7 @@ onBeforeUnmount(() => {
               <li><b>right-click</b> again (or shift) → queue next step</li>
               <li><b>m</b>/<b>a</b> then left-click → move / attack · shift to queue</li>
               <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
-              <li><b>space</b> turn · <b>p</b> pause · <b>s</b> step</li>
+              <li><b>space</b> turn / pause play · <b>shift+space</b> play · <b>s</b> step</li>
               <li><b>u</b> undo · <b>r</b> redo · <b>y</b> replay · <b>c</b>/<b>Backspace</b> clear orders</li>
               <li><b>o</b> my orders · <b>e</b> enemy · <b>h</b> HUD · <b>tab</b> panels · <b>esc</b> cancel</li>
             </ul>

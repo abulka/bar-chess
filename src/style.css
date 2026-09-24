@@ -99,6 +99,32 @@ input {
   color: var(--accent);
 }
 
+.turnbar.playing .turnbar-label {
+  color: var(--accent);
+}
+
+.turnbar.playing .turnbar-fill {
+  opacity: 0.5;
+  animation: turnbar-play-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes turnbar-play-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turnbar.playing .turnbar-fill {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
 .pending-command {
   position: absolute;
   right: 8px;
@@ -210,6 +236,14 @@ input {
 
 .turn-badge.active b {
   color: var(--accent);
+}
+
+.turn-badge.mega {
+  border-color: #ffd166;
+}
+
+.turn-badge.mega b {
+  color: #ffd166;
 }
 
 .toggle {

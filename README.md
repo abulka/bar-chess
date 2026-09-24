@@ -12,8 +12,8 @@ You command your pieces by giving them **intentions** (a destination or a target
 
 - **Chess movement, RTS combat.** Rooks slide along ranks/files, bishops along diagonals, knights leap, pawns advance and fire their forward diagonals. Every piece fires visible, travelling projectiles that can miss, be blocked or arrive late.
 - **Command, don't micromanage.** Right-click to set goals; pieces work toward them and fight opportunistically. Set a persistent **stance** (Move / Attack / None) and let them engage.
-- **Real-time with pause as a strategy tool.** The battle starts paused. Issue orders, take a turn, or let it run at 0.5×/1×/2×/4× speed.
-- **Turns, undo, redo and deterministic replay.** `space` advances one turn (one move per piece, then auto-pause); `u`/`r` step through turn history; `y` replays the turn that produced the state you are viewing — at any point in the history, keeping your selection and place.
+- **Real-time with pause as a strategy tool.** The battle starts paused. Issue orders, then take a turn, play continuously, or replay — all playback follows the 0.5×/1×/2×/4× speed setting.
+- **Turns, play bursts, undo, redo and deterministic replay.** `space` advances one turn (one move per piece, then auto-pause); `shift+space` (or **Play**) runs freely until paused, recording the burst as a **mega turn**; `u`/`r` step through the mixed turn/mega history; `y` replays the beat that produced the state you are viewing — at any point in the history, keeping your selection and place.
 - **Readable overlays.** Move cells, attack cells, range arcs, paths, firing lines, health and firing-recharge bars, target rings and per-army order summaries. Automatic self-preservation retreats are drawn in bright yellow, and the piece panel labels every goal's source (manual, unreachable, self-preservation, rally, …). A committed engagement (AI, or Attack stance) draws the amber reticle; a stationary None/Move piece taking an in-range "pot shot" draws a muted grey dashed line instead, and the panel says so.
 - **Game modes.** Human vs AI, AI vs AI and Human vs Human.
 - **Procedural audio.** WebAudio SFX driven by the event bus, with a synth editor to tweak every cue.
@@ -65,12 +65,12 @@ The battle starts **paused**. Your team is blue (vs orange AI by default).
 - A piece best-efforts orders even to squares it cannot reach; once it is as close as it can get, your next order replaces the spent one instead of hiding behind it. Explicit orders also take priority over the automatic low-health retreat — except a move order whose destination is inside your king's healing aura, which a badly wounded piece will still walk to so it can recover.
 - **`m` / `a` then left-click** forces a move / attack command; hold **Shift** to queue several.
 - Set a piece's persistent **stance** from the left panel: `M` Move (travel and return fire), `A` Attack (seek and engage nearby targets), or none (stand and fire in range only).
-- Press **`space`** to take a turn, **`p`** to pause/resume, **`s`** to step one tick.
+- Press **`space`** to take a turn (or pause a play burst), **`shift+space`** to play, **`p`** to play/pause, **`s`** to step one tick.
 - **Shift-drag** or **middle-drag** to pan, **wheel** to zoom. Toggle overlays in the toolbar.
 
 The toolbar also has speed controls (0.5×–4×), sound, and `my orders` / `enemy plans` overlay scopes. The left rail shows control hints and the selected piece panel; the right rail shows the stance/legend and position export buttons.
 
-Keyboard summary: `m`/`a` arm move/attack · `space` turn · `p` pause · `s` step · `u`/`r` undo/redo · `y` replay · `c`/`Backspace` clear orders · `o` my orders · `e` enemy plans · `h` HUD · `Esc` cancel.
+Keyboard summary: `m`/`a` arm move/attack · `space` turn / pause play · `shift+space` play · `p` play/pause · `s` step · `u`/`r` undo/redo · `y` replay · `c`/`Backspace` clear orders · `o` my orders · `e` enemy plans · `h` HUD · `Esc` cancel.
 
 ## Development
 

@@ -56,14 +56,52 @@ describe('game record', () => {
     expect(JSON.stringify(replay.game.toDebugJson())).toBe(before)
   })
 
-  it('an AI-vs-AI record needs only the seed', () => {
+  it('an AI-vs-AI record carries no intents', () => {
     const game = new Game(8, 'ai-vs-ai', 5)
     const recorder = new Recorder(game)
     playTurns(game, 5)
 
     const before = JSON.stringify(game.toDebugJson())
     const record = recorder.finish({ turns: game.turn, ticks: game.tick })
-    expect(record.turns).toEqual([])
+    // No player intents, but every beat's mode/length is recorded so mixed
+    // turn/mega games replay exactly.
+    expect(record.turns.reduce((n, t) => n + t.intents.length, 0)).toBe(0)
+    expect(record.turns.every((t) => t.mode === 'turn')).toBe(true)
+
+    const replay = replayRecord(record)
+    expect(JSON.stringify(replay.game.toDebugJson())).toBe(before)
+  })
+
+  it('replays a game that mixes turns and play bursts', () => {
+    const game = new Game(8, 'human-vs-ai', 11)
+    const recorder = new Recorder(game)
+
+    // Beat 1: a serialized turn.
+    for (const e of bluePieces(game)) {
+      const cell = game.world.get(e, Cell)
+      if (!cell) continue
+      game.selected = [e]
+      game.orderAt({ x: cell.x, y: 0 }, 'move')
+    }
+    game.selected = []
+    game.beginTurn()
+    let guard = 0
+    while (game.turnActive && guard++ < 2000) game.runTicks(1)
+
+    // Beat 2: a continuous play burst.
+    game.beginMegaTurn()
+    game.runTicks(75)
+    game.togglePause()
+
+    // Beat 3: another serialized turn.
+    game.beginTurn()
+    guard = 0
+    while (game.turnActive && guard++ < 2000) game.runTicks(1)
+
+    const before = JSON.stringify(game.toDebugJson())
+    const record = recorder.finish({ turns: game.turn, ticks: game.tick })
+    expect(record.turns.some((t) => t.mode === 'mega')).toBe(true)
+    expect(record.turns.some((t) => t.mode === 'turn')).toBe(true)
 
     const replay = replayRecord(record)
     expect(JSON.stringify(replay.game.toDebugJson())).toBe(before)

@@ -140,25 +140,31 @@ The battle **starts paused**. Give orders, then take a turn:
   move, then the turn auto-pauses. Move cooldowns are cleared at the start, and
   every turn runs a minimum beat (~1s of sim time) so reloads and in-range fire
   still progress even when nobody moves. A turn also ends early if no move has
-  started for a while (blocked pieces don't stall it). `space` is ignored while a
-  turn is already running, so it always starts the next turn rather than
-  cancelling the current one.
-- `p` — pause / resume. Pausing mid-turn cancels the turn.
+  started for a while (blocked pieces don't stall it). While a turn is already
+  running, `space` queues the next turn; while **playing** it pauses (see below).
+- `shift+space` (or the **Play** button) — **Play**: run continuously, in real
+  time, until paused. The played interval is recorded as one **mega turn** — a
+  history beat with its exact start and tick count — so a game can mix regular
+  turns and mega turns freely and still undo/redo/replay/save as a whole. Issuing
+  an order or toggling a rule while playing splits the mega turn so the change is
+  part of a replayable start.
+- `p` — pause / resume (`togglePause`); also starts play when idle. Pausing
+  mid-turn cancels the turn; pausing while playing closes the mega turn.
 - `s` — single simulation step (one tick), for tracing.
-- `u` / `r` — **Undo / Redo** completed turns, stepping through a bounded history
-  of turn-boundary states. Taking a new turn after undoing replaces the redo
-  branch.
-- `y` — **Replay**: re-plays the turn that produced the state you are viewing —
-  at any point in the history, not just the latest. It restores that turn's exact
+- `u` / `r` — **Undo / Redo** completed beats (turns or mega turns), stepping
+  through a bounded history of boundary states. Taking a new beat after undoing
+  replaces the redo branch.
+- `y` — **Replay**: re-plays the beat that produced the state you are viewing —
+  at any point in the history, not just the latest. It restores that beat's exact
   start snapshot (so orders and stances issued while paused are included),
   re-applies any commands that were pending, re-runs the recorded ticks and
   returns to exactly the same end state, leaving the cursor and redo branch
-  untouched. The selection is kept. Because turns are serialized, replay shows
-  the moves one piece at a time at ~0.5× speed.
+  untouched. The selection is kept. Every kind of playback — live turns, free
+  play and all replays — runs at the selected speed.
 - **Save / load**: slots and **Export JSON** store the whole game including the
   undo/redo history, so loading a slot lets you keep undoing, redoing and
-  replaying. If the browser storage is full, the slot falls back to a
-  position-only save (undo history is not kept).
+  replaying. Saving closes an in-flight mega turn first. If the browser storage
+  is full, the slot falls back to a position-only save (undo history is not kept).
 
 ## Seeds, self-play & game records
 
@@ -295,12 +301,13 @@ and the **piece panel** (properties + stance buttons) live in the left rail, and
 the target legend in the right rail (both always visible, even with the HUD
 hidden). A **Copy position JSON** button captures the full situation.
 
-Keyboard summary: `m`/`a` arm move/attack, `space` turn, `p` pause, `s` step,
-`u`/`r` undo/redo, `y` replay, `c`/`Backspace` clear orders, `o` my orders, `e`
-enemy plans, `h` HUD, `Esc` cancel/clear selection. Turns and replays both play at 0.5×
-speed
-(one move at a time), and the wide **turn bar** under the toolbar sweeps the full
-width to 100% and holds it (same colour for both).
+Keyboard summary: `m`/`a` arm move/attack, `space` turn / pause play,
+`shift+space` play, `p` play/pause, `s` step, `u`/`r` undo/redo, `y` replay,
+`c`/`Backspace` clear orders, `o` my orders, `e` enemy plans, `h` HUD, `Esc`
+cancel/clear selection. Every kind of playback — live turns, free play and
+replays — follows the 0.5×/1×/2×/4× speed setting. The wide
+**turn bar** under the toolbar sweeps the full width to 100% and holds it (same
+colour for both), pulsing while playing.
 
 ## Roadmap
 

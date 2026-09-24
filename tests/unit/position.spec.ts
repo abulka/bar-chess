@@ -110,6 +110,33 @@ describe('position serialization', () => {
     expect(loaded.importPosition(saved).ok).toBe(false)
   })
 
+  it('round-trips a history with a continuous mega turn', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    game.beginTurn()
+    let guard = 0
+    while (game.turnActive && guard++ < 4000) game.runTicks(1)
+
+    game.beginMegaTurn()
+    game.runTicks(60)
+    game.togglePause()
+
+    const json = JSON.stringify(game.exportPosition({ history: true }))
+    const parsed = JSON.parse(json)
+    expect(parsed.history).toHaveLength(3)
+    expect(parsed.history[2].continuous).toBe(true)
+
+    const loaded = new Game(8)
+    expect(loaded.importPosition(parsed).ok).toBe(true)
+    expect(JSON.stringify(loaded.exportPosition({ history: true }))).toBe(json)
+
+    // The restored mega turn replays exactly.
+    const end = JSON.stringify(loaded.toDebugJson())
+    loaded.replayTurn()
+    guard = 0
+    while (loaded.snapshot().replaying && guard++ < 4000) loaded.runTicks(1)
+    expect(JSON.stringify(loaded.toDebugJson())).toBe(end)
+  })
+
   it('rejects a malformed history', () => {
     const game = new Game(8)
     const good = game.exportPosition({ history: true })

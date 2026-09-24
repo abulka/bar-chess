@@ -158,41 +158,58 @@ requestAnimationFrame(frame):
   through that history, restoring whole turn-boundary states; beginning a new
   turn replaces any undone branch. Each history entry is a `HistoryEntry`: the
   end-of-turn boundary `state` (used by undo/redo), the exact turn-start
-  snapshot `start` (used by replay), the producing turn's `ticks`, and commands
-  pending at its start (`pending`).
+  snapshot `start` (used by replay), the producing turn's `ticks`, commands
+  pending at its start (`pending`), and `continuous` (true for a mega turn).
 - `state` and `start` are deliberately both kept. They are different points in
   time: orders/stances issued while paused mutate the live world but create no
   boundary, so `start` has them and `state` does not; and `beginTurn` clears
   every cooldown and sets `movedThisTurn`, overwriting values that only `state`
   retains. Neither can be derived from the other.
+- **Mega turns** unify continuous Play with the turn history. `beginMegaTurn()`
+  (shift+space, or the Play button via `togglePause()`) increments `turn`,
+  captures a start snapshot, then unpauses real-time play (`ctx.turnActive`
+  stays false, so movement is cooldown-driven and parallel). `endMegaTurn()`
+  (space/Play again, a king death, or an undo/replay request) pushes a
+  `continuous` entry with its exact start and tick count and emits the same
+  `phase`/`turn end` boundary a normal turn does. While playing, a player
+  command or rule toggle goes through `liveEdit()`, which closes the pre-command
+  mega turn, applies the change, and opens a new mega turn from the mutated
+  state — so the command lives in a replayable start snapshot. Because `turn`
+  advances once per beat, `Recorder`, `GameLog`/transcripts and save slots treat
+  mega turns exactly like turns.
 - `replayTurn()` (key `y`) works at **any** cursor: it replays the turn that
   produced `history[cursor]` and returns to exactly that boundary, leaving the
   cursor and redo branch untouched, so a turn can be re-watched after undoing.
   It restores the recorded `start` snapshot (which already includes the paused
   orders/stances and the turn's rules) and re-applies the recorded `pending`
-  commands so deferred work (e.g. a reinforcement deploy) is not lost. Live
-  turns and replays run at 0.5× speed (moves read one by one).
+  commands so deferred work (e.g. a reinforcement deploy) is not lost. All
+  playback — live turns, free play and replays — runs at the selected speed
+  (`speed` scales the accumulator only, so the sim stays deterministic).
   `World.capture()/restore()` does a deep `structuredClone` of every component
   store; `Rng.getState()/setState()` restores the PRNG. `TurnState` also carries
   the sim-affecting rules in force (`autoPreserve`/`captureAdvance`/`chessKills`),
   restored on undo/redo/replay so a turn always re-runs under its original rules.
-  During replay `ctx.turnActive` is forced true so the one-move-per-turn gate
-  matches the original turn — otherwise the replay would diverge. `Game.step()`
+  During a normal replay `ctx.turnActive` is forced true so the one-move-per-turn
+  gate matches the original turn; a `continuous` mega replay leaves it false so
+  its parallel movement is reproduced.
+  `Game.step()`
   sets `bus.replaying`, so replayed events are tagged and excluded from the HUD
   event stream and shot/kill counters (they are duplicates) while still reaching
   observers such as audio; the transcript log ignores them too. The selection is
   preserved across replay (pieces absent from the restored start are pruned).
-- `togglePause()` cancels an active turn; `stepOnce()` cancels turn/replay.
+- `togglePause()` starts a mega turn when idle (Play) and closes the running one
+  on pause; it cancels an active turn, and aborts a replay back to its boundary.
+  `stepOnce()` closes any turn/replay/mega turn first, then advances one tick.
 - **Victory** is chess-style: a team is defeated the moment it has no living
-  king (`updateWinner`). When a king falls during a live turn the turn is closed
-  (so the history boundary is the pre-fatal state), a `win` event is emitted and
-  the sim freezes: `beginTurn`/`stepOnce`/`togglePause` become no-ops and the
-  toolbar disables turn/pause/step. `undo` stays enabled and restores the
-  `winner` (part of `TurnState`) back to `null`, reopening play; `redo` jumps
-  forward to it again. `replay` also stays enabled: it rewinds to the fatal
-  turn's recorded start (pre-death) and re-runs it, so the winning turn can be
-  watched without undoing first. If both kings fall on the same tick it is a
-  draw and play continues.
+  king (`updateWinner`). When a king falls during a live turn or mega turn the
+  beat is closed (so the history boundary is the pre-fatal state and the fatal
+  burst replays), a `win` event is emitted and the sim freezes:
+  `beginTurn`/`stepOnce`/`togglePause` become no-ops and the toolbar disables
+  turn/pause/step. `undo` stays enabled and restores the `winner` (part of
+  `TurnState`) back to `null`, reopening play; `redo` jumps forward to it again.
+  `replay` also stays enabled: it rewinds to the fatal beat's recorded start
+  (pre-death) and re-runs it, so the winning beat can be watched without undoing
+  first. If both kings fall on the same tick it is a draw and play continues.
 
 ### Team control & game modes
 
@@ -894,8 +911,8 @@ fails on a regression of this magnitude, not on a slow CI machine.
 ### Reading the stats bar: fps vs tps vs refresh rate
 
 - `tps` is **simulation ticks per second**, not frames. `FIXED_DT = 1/30`, so at
-  speed ×1 a healthy game shows `tps ≈ 30`; during a turn/replay (0.5×) it is
-  ~15. `tps = 0` simply means paused.
+  speed ×1 a healthy game shows `tps ≈ 30`; at ×0.5 (turn, replay or free play)
+  it is ~15. `tps = 0` simply means paused.
 - `fps` is the **rAF frame rate**, i.e. `1 / frame delta`. It can never exceed the
   display/browser refresh rate. Before blaming the game, confirm the machine is
   not capped at 30 Hz — run this in a **blank** tab:

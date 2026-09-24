@@ -96,14 +96,30 @@ function onSoundChange(event: Event): void {
       {{ props.snapshot.teams[props.snapshot.playerTeam === 'blue' ? 'red' : 'blue'].controller }}
     </span>
 
-    <span class="turn-badge" :class="{ active: props.snapshot.turnActive }" title="current turn (u/r to undo/redo)">
-      Turn <b>{{ props.snapshot.turn }}</b>
+    <span
+      class="turn-badge"
+      :class="{ active: props.snapshot.turnActive, mega: props.snapshot.megaTurn }"
+      :title="
+        props.snapshot.megaTurn
+          ? 'current mega turn (continuous play burst) · u/r to undo/redo'
+          : 'current turn (u/r to undo/redo)'
+      "
+    >
+      {{ props.snapshot.megaTurn ? 'Mega' : 'Turn' }} <b>{{ props.snapshot.turn }}</b>
     </span>
 
-    <button class="ctl" :class="{ active: props.snapshot.turnActive }" :disabled="!!props.snapshot.winner" @click="emit('turn')">
+    <button class="ctl" :class="{ active: props.snapshot.turnActive }" :disabled="!!props.snapshot.winner" @click="emit('turn')" title="one serialized turn (space)">
       {{ props.snapshot.turnActive ? '⏵ Turn…' : '⏵ Turn' }}
     </button>
-    <button class="ctl" :disabled="!!props.snapshot.winner" @click="emit('toggle-pause')">{{ props.snapshot.paused ? '▶ Play' : '⏸ Pause' }}</button>
+    <button
+      class="ctl"
+      :class="{ active: props.snapshot.playing }"
+      :disabled="!!props.snapshot.winner"
+      @click="emit('toggle-pause')"
+      title="play continuously until paused — a mega turn (shift+space)"
+    >
+      {{ props.snapshot.paused ? '▶ Play' : '⏸ Pause' }}
+    </button>
     <button class="ctl" :disabled="!!props.snapshot.winner" @click="emit('step')">⏭ Step</button>
     <button class="ctl" :disabled="!props.snapshot.canUndo" @click="emit('undo')">↶ Undo</button>
     <button class="ctl" :disabled="!props.snapshot.canRedo" @click="emit('redo')">↷ Redo</button>

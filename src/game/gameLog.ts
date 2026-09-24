@@ -50,7 +50,9 @@ export class GameLog {
       if (event.type === 'info' && event.msg === 'replay finished') return
       if (this.events.length < GameLog.MAX_EVENTS) this.events.push(event)
       if (event.type === 'phase' && event.msg === 'turn end') this.capture()
-      else if (event.type === 'info' && event.msg === 'turn started') this.truncateToCursor()
+      else if (event.type === 'info' && (event.msg === 'turn started' || event.msg === 'play started')) {
+        this.truncateToCursor()
+      }
     })
   }
 
@@ -70,6 +72,9 @@ export class GameLog {
   /** Polling fallback (e.g. single-stepping outside a turn). */
   tick(): void {
     if (this.game.turnActive) return
+    // A mega turn is sampled when it closes (its `turn end` phase), not every
+    // poll: `turn` already advanced at play start, so polling would churn.
+    if (this.game.playing) return
     if (this.game.turn <= this.cursorTurn) return
     this.capture()
   }
