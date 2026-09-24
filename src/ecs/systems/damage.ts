@@ -1,4 +1,4 @@
-import { Cell, Dead, Health, Target, Team } from '../components'
+import { Cell, ChessKill, Dead, Health, Target, Team } from '../components'
 import type { System } from '../pipeline'
 
 const UNDER_FIRE_TICKS = 90
@@ -12,7 +12,9 @@ const system: System = {
       const health = ctx.world.get(target, Health)
       if (!health || health.cur <= 0) continue
 
-      const amount = Math.max(1, Math.round(cmd.amount * ctx.rng.range(0.9, 1.1)))
+      const amount = cmd.lethal
+        ? health.cur
+        : Math.max(1, Math.round(cmd.amount * ctx.rng.range(0.9, 1.1)))
       health.cur = Math.max(0, health.cur - amount)
 
       const targetComp = ctx.world.get(target, Target)
@@ -30,6 +32,8 @@ const system: System = {
 
       if (health.cur <= 0 && !ctx.world.has(target, Dead)) {
         ctx.world.add(target, Dead, true)
+        // Tag a chess-rule kill so the death FX can use its own effect.
+        if (cmd.kind === 'chess') ctx.world.add(target, ChessKill, true)
         if (cmd.source !== null) {
           const sourceTeam = ctx.world.get(cmd.source, Team)
           if (sourceTeam) ctx.teams[sourceTeam].kills++

@@ -1,5 +1,6 @@
 import { firingPositionExists } from '../../game/approach'
 import { ATTACK_LEASH } from '../../game/constants'
+import { coordName } from '../../game/coords'
 import { containsCell, fireCells } from '../../game/geometry'
 import { dist2, healthRatio } from '../../game/math'
 import { buildOccupancy, makeOccupied } from '../../game/occupancy'
@@ -114,10 +115,16 @@ const system: System = {
           const tcell = ctx.world.get(t, Cell)
           if (tcell) {
             order.reachable = firingPositionExists(ctx.board, cell, tcell, def.move, WEAPONS[def.weapon].geometry, team)
+            order.targetCell = { x: tcell.x, y: tcell.y }
           }
           continue
         }
-        if (t !== null) noteOrder(order, ctx.tick, `target #${t} lost — attack abandoned`)
+        if (t !== null) {
+          const at = order.targetCell
+            ? ` at ${coordName(order.targetCell.x, order.targetCell.y, ctx.board.height)}`
+            : ''
+          noteOrder(order, ctx.tick, `target${at} lost — attack abandoned`)
+        }
         clearOrder(order)
         target.entity = null
         // The order is done, but the stance is kept (the player can change it).

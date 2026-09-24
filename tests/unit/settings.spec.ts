@@ -20,6 +20,7 @@ describe('settings persistence', () => {
       gameMode: 'ai-vs-ai',
       autoPreserve: false,
       captureAdvance: true,
+      chessKills: true,
       soundEnabled: true,
       bottomFraction: 0.4,
       leftRailFraction: 0.2,
@@ -47,6 +48,7 @@ describe('settings persistence', () => {
     expect(restored.gameMode).toBe('ai-vs-ai')
     expect(restored.autoPreserve).toBe(false)
     expect(restored.captureAdvance).toBe(true)
+    expect(restored.chessKills).toBe(true)
     expect(restored.soundEnabled).toBe(true)
     expect(restored.bottomFraction).toBe(0.4)
     expect(restored.leftRailFraction).toBe(0.2)
@@ -78,6 +80,7 @@ describe('settings persistence', () => {
         gameMode: 'nonsense',
         autoPreserve: 'yes',
         captureAdvance: 'yes',
+        chessKills: 'yes',
         soundEnabled: 'yes',
         bottomFraction: 2,
         leftRailFraction: 'wide',
@@ -98,6 +101,7 @@ describe('settings persistence', () => {
     expect(loaded?.gameMode).toBeUndefined()
     expect(loaded?.autoPreserve).toBeUndefined()
     expect(loaded?.captureAdvance).toBeUndefined()
+    expect(loaded?.chessKills).toBeUndefined()
     expect(loaded?.soundEnabled).toBeUndefined()
     expect(loaded?.bottomFraction).toBeUndefined()
     expect(loaded?.leftRailFraction).toBeUndefined()
@@ -121,6 +125,13 @@ describe('settings persistence', () => {
     const game = new Game(8)
     game.applySettings({ captureAdvance: true })
     expect(game.captureAdvance).toBe(true)
+  })
+
+  it('defaults chess kills off and honors an explicit on', () => {
+    expect(new Game(8).chessKills).toBe(false)
+    const game = new Game(8)
+    game.applySettings({ chessKills: true })
+    expect(game.chessKills).toBe(true)
   })
 
   it('ignores invalid values in applySettings', () => {

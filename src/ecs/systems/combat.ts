@@ -2,7 +2,7 @@ import { containsCell, fireCells } from '../../game/geometry'
 import { makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS, projectileDef, weaponDamage } from '../../game/pieces'
 import type { Vec2 } from '../../game/types'
-import { Cell, Health, PieceType, Position, Projectile, Target, Team, Weapon, hasLiveCell } from '../components'
+import { Cell, Dead, Health, PieceType, Position, Projectile, Target, Team, Weapon, hasLiveCell } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
@@ -74,6 +74,10 @@ const system: System = {
 
       const target = ctx.world.require(e, Target).entity
       if (!hasLiveCell(ctx.world, target)) continue
+      // A chess kill already queued for this target this tick: it dies before the
+      // shot would land, so don't waste a projectile on it.
+      if (ctx.world.has(target, Dead)) continue
+      if (ctx.cmds.damage.some((d) => d.target === target && d.lethal)) continue
 
       const kind = ctx.world.require(e, PieceType).kind
       const def = PIECES[kind]

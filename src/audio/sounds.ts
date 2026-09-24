@@ -2,7 +2,7 @@ import type { EventRecord } from '../ecs/events'
 import { PIECE_LIST, PROJECTILES, WEAPONS } from '../game/pieces'
 import { resolveSpec } from './overrides'
 import type { Synth } from './synth'
-import { explosionVoice, fireVoice, hitVoice, missVoice, type VoiceSpec } from './voices'
+import { captureVoice, explosionVoice, fireVoice, hitVoice, missVoice, type VoiceSpec } from './voices'
 
 /**
  * Canonical sound-cue ids. Both the live `AudioEngine` and the sound config
@@ -39,6 +39,11 @@ export function deathId(kind: string): string {
   return `death.${kind}`
 }
 
+/** Capture-advance kill: a small, quiet crunch rather than a full blast. */
+export function captureDeathId(kind: string): string {
+  return `death.capture.${kind}`
+}
+
 export function missId(cause: string): string {
   return `miss.${cause}`
 }
@@ -59,6 +64,12 @@ function add(id: string, kind: CueKind, label: string, builtin: VoiceSpec): void
 for (const target of PIECE_LIST) {
   add(shotId(target.weapon), 'shot', `fire ${target.weapon}`, fireVoice(target.weapon))
   add(deathId(target.key), 'death', `${target.name} dies`, explosionVoice(target.key, 1.6))
+  add(
+    captureDeathId(target.key),
+    'death',
+    `${target.name} dies (capture advance)`,
+    captureVoice(target.key),
+  )
   for (const attacker of PIECE_LIST) {
     const weapon = WEAPONS[attacker.weapon]
     const damage = weapon?.damage ?? 10
@@ -103,7 +114,7 @@ export function cueIdForEvent(event: EventRecord): string | null {
     case 'hit':
       return typeof data.weapon === 'string' ? hitId(str(data.kind, 'pawn'), data.weapon) : null
     case 'explosion':
-      return deathId(str(data.kind, 'pawn'))
+      return data.capture === true ? captureDeathId(str(data.kind, 'pawn')) : deathId(str(data.kind, 'pawn'))
     case 'miss':
       return missId(str(data.cause, 'ground'))
     default:

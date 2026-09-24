@@ -31,6 +31,8 @@ export function clearOrder(order: OrderData, opts?: { queue?: boolean }): void {
   order.kind = 'none'
   order.dest = null
   order.target = null
+  order.targetCell = null
+  order.chessKill = null
   order.resumeTarget = null
   order.resumeTurn = -1
   if (opts?.queue) order.queue.length = 0
@@ -129,12 +131,16 @@ export function promoteNext(order: OrderData, motion: MotionData): boolean {
     order.kind = 'goto'
     order.dest = next.dest
     order.target = null
+    order.targetCell = null
+    order.chessKill = null
     order.resumeTurn = -1
     motion.goal = next.dest
     motion.intent = 'order'
   } else {
     order.kind = 'attack'
     order.target = next.target
+    order.targetCell = null
+    order.chessKill = null
     order.dest = null
     order.reachable = next.reachable
     order.resumeTarget = null

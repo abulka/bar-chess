@@ -148,6 +148,17 @@ export function explosionVoice(kind: string, radiusTiles: number): VoiceSpec {
   ]
 }
 
+/** Capture-advance crunch: two quick, quiet low thumps under the sliding piece. */
+export function captureVoice(kind: string): VoiceSpec {
+  const base = KIND_FREQ[kind] ?? 500
+  return [
+    { type: 'sine', from: base * 0.9, to: base * 0.3, duration: 0.1, gain: 0.12 },
+    { duration: 0.07, gain: 0.07, filter: { from: 800, to: 160 } },
+    { type: 'sine', from: base * 0.7, to: base * 0.25, duration: 0.12, gain: 0.09, delay: 0.11 },
+    { duration: 0.06, gain: 0.05, filter: { from: 600, to: 140 }, delay: 0.11 },
+  ]
+}
+
 /** A shot that hit nothing: fizzle on the ground, clack on a wall, airy fade. */
 export function missVoice(cause: string): VoiceSpec {
   switch (cause) {

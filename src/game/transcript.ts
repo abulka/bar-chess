@@ -133,7 +133,8 @@ export function formatTranscript(input: TranscriptInput): string {
   )
   lines.push(
     `# rules autoPreserve=${record.settings.autoPreserve ? 'on' : 'off'} ` +
-      `captureAdvance=${record.settings.captureAdvance ? 'on' : 'off'} playerTeam=${record.playerTeam}`,
+      `captureAdvance=${record.settings.captureAdvance ? 'on' : 'off'} ` +
+      `chessKills=${record.settings.chessKills ? 'on' : 'off'} playerTeam=${record.playerTeam}`,
   )
 
   lines.push('# opening')

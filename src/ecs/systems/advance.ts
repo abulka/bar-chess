@@ -1,3 +1,4 @@
+import { CAPTURE_ADVANCE_TRAVEL } from '../../game/constants'
 import { containsCell, fireCells } from '../../game/geometry'
 import { vecEquals } from '../../game/math'
 import { buildOccupancy, makeOccupied } from '../../game/occupancy'
@@ -12,6 +13,12 @@ import type { System } from '../pipeline'
  * so the victim is already gone and its cell is free. The move is free (a
  * capture, not the piece's turn move), so it is only taken by an idle piece:
  * one with no active order, queue, planned path or hop in progress.
+ *
+ * The step is animated as a slow, eased glide rather than an instant teleport:
+ * the killer's cell stays put until it arrives (exactly like a normal move), the
+ * destination is reserved so nothing else can claim it, and the `movement`
+ * system interpolates `Position` over `CAPTURE_ADVANCE_TRAVEL` seconds after a
+ * short beat spent standing in the blast.
  */
 const system: System = {
   name: 'advance',
@@ -69,26 +76,26 @@ const system: System = {
         continue
       }
 
-      occupancy.delete(board.cellIndex(cell.x, cell.y))
       occupancy.set(destIdx, killer)
       const center = board.cellCenter(dest.x, dest.y)
-      cell.x = dest.x
-      cell.y = dest.y
       const pos = ctx.world.get(killer, Position)
-      if (pos) {
-        pos.x = center.x
-        pos.y = center.y
-      }
+      const fromX = pos ? pos.x : center.x
+      const fromY = pos ? pos.y : center.y
       clearMotion(motion)
       motion.path = []
-      motion.reserved = null
+      motion.reserved = { x: dest.x, y: dest.y }
       motion.blocked = false
-      motion.moving = false
-      motion.arrived = true
-      motion.fromX = center.x
-      motion.fromY = center.y
+      motion.arrived = false
+      motion.moving = true
+      motion.ease = true
+      motion.freeAdvance = true
+      motion.fromX = fromX
+      motion.fromY = fromY
       motion.toX = center.x
       motion.toY = center.y
+      motion.travel = CAPTURE_ADVANCE_TRAVEL
+      // Start moving immediately, in step with the blast: no settling beat.
+      motion.elapsed = 0
       used.add(killer)
 
       ctx.bus.emit('advance', `#${killer} advanced to ${dest.x},${dest.y}`, {

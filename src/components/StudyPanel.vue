@@ -28,6 +28,7 @@ const maxTurns = ref(120)
 const policy = ref<StudyPolicyName>('focus')
 const autoPreserve = ref(true)
 const captureAdvance = ref(false)
+const chessKills = ref(false)
 const copied = ref(false)
 
 const prompt = computed(() =>
@@ -61,6 +62,7 @@ function onRun(): void {
     policy: policy.value,
     autoPreserve: autoPreserve.value,
     captureAdvance: captureAdvance.value,
+    chessKills: chessKills.value,
   })
 }
 
@@ -110,6 +112,7 @@ async function copyPrompt(): Promise<void> {
       </label>
       <label class="toggle"><input v-model="autoPreserve" type="checkbox" :disabled="state.running" /> auto-preserve</label>
       <label class="toggle"><input v-model="captureAdvance" type="checkbox" :disabled="state.running" /> capture advance</label>
+      <label class="toggle"><input v-model="chessKills" type="checkbox" :disabled="state.running" /> chess kills</label>
     </div>
 
     <div class="study-actions">

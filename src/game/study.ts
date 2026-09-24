@@ -99,6 +99,7 @@ export interface StudyOptions {
   policy: StudyPolicyName
   autoPreserve: boolean
   captureAdvance: boolean
+  chessKills: boolean
 }
 
 export interface StudyGameResult {
@@ -219,6 +220,7 @@ export class StudyController {
     this.game.setGameMode(this.options.mode)
     this.game.autoPreserve = this.options.autoPreserve
     this.game.captureAdvance = this.options.captureAdvance
+    this.game.chessKills = this.options.chessKills
     this.game.loadSize(this.options.size as BoardSize, seed)
     this.recorder.reset()
     this.log.begin()

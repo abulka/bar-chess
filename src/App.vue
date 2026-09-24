@@ -374,6 +374,12 @@ function onToggleCaptureAdvance(): void {
   refresh()
 }
 
+function onToggleChessKills(): void {
+  game.setChessKills(!game.chessKills)
+  persistSettings()
+  refresh()
+}
+
 function onReset(): void {
   game.reset()
   recorder.reset()
@@ -600,6 +606,7 @@ onBeforeUnmount(() => {
       @toggle-hud="onToggleHud"
       @toggle-auto-preserve="onToggleAutoPreserve"
       @toggle-capture-advance="onToggleCaptureAdvance"
+      @toggle-chess-kills="onToggleChessKills"
     />
 
     <div

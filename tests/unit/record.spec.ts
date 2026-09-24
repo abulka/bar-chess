@@ -69,6 +69,31 @@ describe('game record', () => {
     expect(JSON.stringify(replay.game.toDebugJson())).toBe(before)
   })
 
+  it('captures rule toggles per turn and replays them', () => {
+    const game = new Game(8, 'human-vs-ai', 42)
+    const recorder = new Recorder(game)
+
+    game.setChessKills(true)
+    const [e] = bluePieces(game)
+    const cell = game.world.require(e, Cell)
+    game.selected = [e]
+    game.orderAt({ x: cell.x, y: 0 }, 'move')
+    game.selected = []
+    playTurns(game, 1)
+
+    // Toggled off for the second turn.
+    game.setChessKills(false)
+    playTurns(game, 1)
+
+    const before = JSON.stringify(game.toDebugJson())
+    const record = recorder.finish({ turns: game.turn, ticks: game.tick })
+    expect(record.turns[0].settings?.chessKills).toBe(true)
+    expect(record.settings.chessKills).toBe(false)
+
+    const replay = replayRecord(record)
+    expect(JSON.stringify(replay.game.toDebugJson())).toBe(before)
+  })
+
   it('validates and round-trips records', () => {
     const game = new Game(8, 'ai-vs-ai', 3)
     const recorder = new Recorder(game)

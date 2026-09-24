@@ -11,6 +11,8 @@ export interface DamageCommand {
   kind: string
   /** For projectile damage: whether the blow landed on the target's own cell. */
   direct?: boolean
+  /** Chess kill: ignore `amount`/variance and drop the target straight to 0 HP. */
+  lethal?: boolean
 }
 
 export interface DeployCommand {

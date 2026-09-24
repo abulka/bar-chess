@@ -3,6 +3,7 @@ import type { EventRecord } from '../ecs/events'
 import type { BoardSize } from './boards'
 import { Game } from './game'
 import type { GameMode } from './game'
+import type { SimSettings } from './settings'
 import type { StanceMode, TeamId, Vec2 } from './types'
 
 /** Bump when the record shape changes incompatibly. */
@@ -24,6 +25,8 @@ export interface TurnRecord {
   /** The turn these intents precede (turn 1 = the opening turn). */
   turn: number
   intents: GameCommandIntent[]
+  /** Sim rules in force when this turn's orders were issued; falls back to the header. */
+  settings?: SimSettings
 }
 
 export interface GameRecordResult {
@@ -47,7 +50,7 @@ export interface GameRecord {
   mode: GameMode
   playerTeam: TeamId
   seed: number
-  settings: { autoPreserve: boolean; captureAdvance: boolean }
+  settings: SimSettings
   turns: TurnRecord[]
   result: GameRecordResult | null
 }
@@ -73,7 +76,7 @@ export class Recorder {
     const turn = this.game.turn + 1
     let entry = this.byTurn.get(turn)
     if (!entry) {
-      entry = { turn, intents: [] }
+      entry = { turn, intents: [], settings: this.game.simSettings() }
       this.byTurn.set(turn, entry)
     }
     entry.intents.push(intent)
@@ -114,6 +117,9 @@ export class Recorder {
 
   get record(): GameRecord {
     this.data.turns = [...this.byTurn.values()].sort((a, b) => a.turn - b.turn)
+    // Refresh the header from the live game so an export reflects settings
+    // toggled after the recorder was constructed.
+    this.data.settings = this.game.simSettings()
     return this.data
   }
 }
@@ -126,7 +132,7 @@ function headerFor(game: Game): GameRecord {
     mode: game.gameMode,
     playerTeam: game.playerTeam,
     seed: game.seed,
-    settings: { autoPreserve: game.autoPreserve, captureAdvance: game.captureAdvance },
+    settings: game.simSettings(),
     turns: [],
     result: null,
   }
@@ -155,6 +161,7 @@ export function replayRecord(record: GameRecord, options: ReplayOptions = {}): R
   game.playerTeam = record.playerTeam
   game.autoPreserve = record.settings.autoPreserve
   game.captureAdvance = record.settings.captureAdvance
+  game.chessKills = record.settings.chessKills ?? false
 
   const events: EventRecord[] = []
   if (options.collectEvents) game.bus.subscribe((event) => events.push(event))
@@ -162,12 +169,18 @@ export function replayRecord(record: GameRecord, options: ReplayOptions = {}): R
   const maxTicks = options.maxTicksPerTurn ?? 4000
   const totalTurns =
     record.result?.turns ?? record.turns.reduce((max, turn) => Math.max(max, turn.turn), 0)
-  const byTurn = new Map(record.turns.map((turn) => [turn.turn, turn.intents]))
+  const byTurn = new Map(record.turns.map((turn) => [turn.turn, turn]))
 
   for (let turn = 1; turn <= totalTurns; turn++) {
     if (game.winner !== null) break
-    const intents = byTurn.get(turn)
-    if (intents) applyIntents(game, intents)
+    const entry = byTurn.get(turn)
+    // Rules in force for this turn (recorded per turn when available); the
+    // header is the fallback for older records and order-free turns.
+    const rules = entry?.settings ?? record.settings
+    game.autoPreserve = rules.autoPreserve
+    game.captureAdvance = rules.captureAdvance
+    game.chessKills = rules.chessKills ?? false
+    if (entry) applyIntents(game, entry.intents)
     game.beginTurn()
     let guard = 0
     while (game.turnActive && guard++ < maxTicks) game.runTicks(1)

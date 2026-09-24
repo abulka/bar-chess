@@ -42,6 +42,12 @@ export class GameLog {
   constructor(game: Game) {
     this.game = game
     this.unsubscribe = game.bus.subscribe((event) => {
+      // A replay re-simulates a turn already in the log; its events (and any
+      // turn-end sample) are duplicates, so the readable history ignores them.
+      if (this.game.replaying) return
+      // The replay-finished marker arrives after `replaying` clears and is not
+      // part of the battle history.
+      if (event.type === 'info' && event.msg === 'replay finished') return
       if (this.events.length < GameLog.MAX_EVENTS) this.events.push(event)
       if (event.type === 'phase' && event.msg === 'turn end') this.capture()
       else if (event.type === 'info' && event.msg === 'turn started') this.truncateToCursor()
@@ -152,6 +158,11 @@ export class GameLog {
         orderLog: order.log.slice(),
       })
     }
-    this.trace.push({ turn: this.game.turn, tick: this.game.tick, pieces })
+    // One sample per turn: a turn watched from a mid-turn pause is re-sampled
+    // when it finishes, replacing the partial entry rather than duplicating it.
+    const entry: TurnTrace = { turn: this.game.turn, tick: this.game.tick, pieces }
+    const index = this.trace.findIndex((t) => t.turn === entry.turn)
+    if (index >= 0) this.trace[index] = entry
+    else this.trace.push(entry)
   }
 }

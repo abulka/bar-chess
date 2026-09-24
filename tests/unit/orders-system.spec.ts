@@ -382,7 +382,7 @@ describe('orders system — automatic self-preservation', () => {
     expect(goal!.x).not.toBe(goal!.y)
   })
 
-  it('overrides an explicit attack order when badly hurt', () => {
+  it('does not let self-preservation override an explicit attack order', () => {
     const ctx = hurtContext(true)
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
     const knight = createPiece(ctx, 'red', PIECES.knight, { x: 5, y: 6 })
@@ -394,14 +394,14 @@ describe('orders system — automatic self-preservation', () => {
 
     run(ctx)
 
-    const goal = ctx.world.require(queen, Motion).goal
-    expect(goal).not.toBeNull()
-    // It retreats from the attacker rather than charging it.
-    const before = Math.hypot(4 - 5, 4 - 6)
-    expect(Math.hypot(goal!.x - 5, goal!.y - 6)).toBeGreaterThan(before)
+    // It pursues the ordered kill instead of retreating from the attacker.
+    const motion = ctx.world.require(queen, Motion)
+    expect(motion.intent).toBe('order')
+    expect(motion.goal).not.toBeNull()
+    expect(motion.holdUntilHp).toBe(0)
   })
 
-  it('disengages an attack order when focused by several shooters (c6 knight)', () => {
+  it('keeps attacking when focused by several shooters (c6 knight)', () => {
     const ctx = makeContext()
     const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 2, y: 2 }) // c6
     const queen = createPiece(ctx, 'red', PIECES.queen, { x: 3, y: 0 }) // d8
@@ -415,10 +415,9 @@ describe('orders system — automatic self-preservation', () => {
 
     run(ctx)
 
-    // Three shooters cover c6, so it breaks off instead of charging the queen.
+    // Three shooters cover c6, but the kill order wins: no retreat.
     const motion = ctx.world.require(knight, Motion)
-    expect(motion.intent).toBe('preserve')
-    expect(motion.goal).not.toBeNull()
+    expect(motion.intent).not.toBe('preserve')
   })
 
   it('retreats a moving piece while in danger, then resumes the move when safe', () => {
@@ -469,7 +468,7 @@ describe('orders system — automatic self-preservation', () => {
     expect(ctx.world.require(queen, Motion).goal).toEqual({ x: 7, y: 4 })
   })
 
-  it('holds a badly wounded attacker until fully healed, then resumes the attack', () => {
+  it('keeps a badly wounded attacker pressing the attack instead of holding', () => {
     const ctx = hurtContext(true)
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
     // Target out of the queen's lines so it cannot itself keep her in danger.
@@ -483,17 +482,14 @@ describe('orders system — automatic self-preservation', () => {
     fireOn(ctx, queen, rook)
 
     run(ctx)
-    expect(ctx.world.require(queen, Motion).intent).toBe('preserve')
+    const motion = ctx.world.require(queen, Motion)
+    expect(motion.intent).toBe('order')
+    expect(motion.holdUntilHp).toBe(0)
 
-    // Still wounded after the danger clears: the attack does not auto-resume.
+    // Danger clears: still no safe-hold while the kill order stands.
     ctx.world.destroy(rook)
     run(ctx)
-    expect(ctx.world.require(queen, Motion).goal).toBeNull()
-
-    // Fully healed: it resumes pursuing the ordered target.
-    hp.cur = hp.max
-    run(ctx)
-    expect(ctx.world.require(queen, Motion).goal).not.toBeNull()
+    expect(ctx.world.require(queen, Motion).intent).toBe('order')
   })
 
   /** A context with a blue king on e1 so a healing goal can be computed. */

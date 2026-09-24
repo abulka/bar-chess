@@ -889,6 +889,26 @@ export class Renderer {
       const pos = game.world.require(e, Position)
       const fx = game.world.require(e, Fx)
       const t = 1 - fx.ttl / fx.maxTtl
+      if (fx.capture) {
+        // Capture advance: three quick red pulses racing the killer's glide.
+        const pulses = 3
+        ctx.strokeStyle = fx.color
+        ctx.lineWidth = 2 / this.camera.zoom
+        for (let i = 0; i < pulses; i++) {
+          const phase = (t * pulses + i / pulses) % 1
+          ctx.globalAlpha = Math.max(0, 1 - t) * (1 - phase) * 0.9
+          ctx.beginPath()
+          ctx.arc(pos.x, pos.y, fx.radius * (0.35 + phase * 1.1), 0, Math.PI * 2)
+          ctx.stroke()
+        }
+        ctx.globalAlpha = Math.max(0, 1 - t) * 0.9
+        ctx.fillStyle = fx.color
+        ctx.beginPath()
+        ctx.arc(pos.x, pos.y, fx.radius * 0.3 * (1 - t * 0.5), 0, Math.PI * 2)
+        ctx.fill()
+        ctx.globalAlpha = 1
+        continue
+      }
       const radius = fx.radius * (0.35 + t * 0.9)
       const alpha = Math.max(0, 1 - t)
       ctx.globalAlpha = alpha * 0.8

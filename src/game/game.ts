@@ -39,12 +39,12 @@ import {
   TEAM_NAMES,
 } from './constants'
 import { coordName } from './coords'
-import { NEVER } from './geometry'
+import { containsCell, fireCells, NEVER } from './geometry'
 import type { OccupiedFn } from './geometry'
 import { dist2, healthRatio, vecEquals } from './math'
 import { attackPlan } from './approach'
 import { createPiece } from './factory'
-import { buildOccupancy, occupiedExcept } from './occupancy'
+import { buildOccupancy, makeOccupied, occupiedExcept } from './occupancy'
 import type { Occupancy } from './occupancy'
 import { underFireAttacker } from './underFire'
 import type { OrderKind, StanceMode, TeamId, Vec2 } from './types'
@@ -54,7 +54,7 @@ import { anchorFor, clearMotion, clearOrder, noteOrder, planStep } from './queue
 import { buildBoard, buildWorldSnapshot, serializePosition, validatePosition } from './position'
 import type { SavedPosition } from './position'
 import { formatForLlm, formatShorthand } from './shorthand'
-import type { GameSettings, SettingsPatch } from './settings'
+import type { GameSettings, SettingsPatch, SimSettings } from './settings'
 import { Rng, DEFAULT_SEED } from './rng'
 import type { GameCommandIntent } from './record'
 
@@ -205,6 +205,8 @@ interface TurnState {
   turn: number
   teams: Record<TeamId, TeamRuntime>
   winner: TeamId | null
+  /** Sim-affecting rules in force at capture, restored on undo/redo/replay. */
+  settings: SimSettings
 }
 
 export interface GameSnapshot {
@@ -236,6 +238,8 @@ export interface GameSnapshot {
   hudVisible: boolean
   autoPreserve: boolean
   captureAdvance: boolean
+  /** Ordered moves/attacks kill instantly when the target is already in chess capture range. */
+  chessKills: boolean
   /** Whether combat sound effects are enabled. */
   soundEnabled: boolean
   /** Whether the left/right side rails (controls, stance, position) are shown. */
@@ -334,6 +338,8 @@ export class Game {
   autoPreserve = true
   /** An idle killer steps onto the square of a piece it just killed. */
   captureAdvance = false
+  /** Ordered moves/attacks kill instantly when the target is already in chess capture range. */
+  chessKills = false
   /** Transient BAR-style command awaiting the next left-click. */
   pendingCommand: StanceMode = 'none'
 
@@ -369,7 +375,8 @@ export class Game {
   private turnMovesSeen = 0
   private turnNoProgressTicks = 0
   private lastTurn: { snapshot: TurnState; ticks: number } | null = null
-  private replaying = false
+  /** True while the last turn is being replayed; observers can ignore its events. */
+  replaying = false
   private replayTicks = 0
   // Turn-boundary states for undo/redo. `history[cursor]` is the state the game
   // is currently showing; `history.length - 1 === cursor` means "at the latest".
@@ -677,6 +684,8 @@ export class Game {
       pos.y = motion.toY
       motion.moving = false
       motion.reserved = null
+      motion.ease = false
+      motion.freeAdvance = false
     }
   }
 
@@ -713,6 +722,16 @@ export class Game {
       turn: this.turn,
       teams: structuredClone(this.teams),
       winner: this.winner,
+      settings: this.simSettings(),
+    }
+  }
+
+  /** The sim-affecting settings currently in force. */
+  simSettings(): SimSettings {
+    return {
+      autoPreserve: this.autoPreserve,
+      captureAdvance: this.captureAdvance,
+      chessKills: this.chessKills,
     }
   }
 
@@ -727,8 +746,21 @@ export class Game {
       this.teams[id] = structuredClone(state.teams[id])
     }
     this.winner = state.winner
+    // Re-run undo/redo/replay under the rules the turn was captured with, not
+    // whatever is toggled now.
+    if (state.settings) {
+      this.autoPreserve = state.settings.autoPreserve
+      this.captureAdvance = state.settings.captureAdvance
+      this.chessKills = state.settings.chessKills
+    }
     this.occupancy.clear()
     this.selected = this.selected.filter((e) => this.world.isAlive(e))
+    // Drop commands queued outside the pipeline (e.g. a chess kill issued while
+    // paused) so an undo/redo cannot apply them to the restored world.
+    this.cmds.damage.length = 0
+    this.cmds.deploy.length = 0
+    this.cmds.destroy.length = 0
+    this.cmds.advance.length = 0
   }
 
   setSpeed(speed: number): void {
@@ -746,6 +778,7 @@ export class Game {
       gameMode: this.gameMode,
       autoPreserve: this.autoPreserve,
       captureAdvance: this.captureAdvance,
+      chessKills: this.chessKills,
       soundEnabled: this.soundEnabled,
       bottomFraction: this.bottomFraction,
       leftRailFraction: this.leftRailFraction,
@@ -781,6 +814,7 @@ export class Game {
     if (typeof settings.speed === 'number' && SPEEDS.includes(settings.speed)) this.speed = settings.speed
     if (typeof settings.autoPreserve === 'boolean') this.autoPreserve = settings.autoPreserve
     if (typeof settings.captureAdvance === 'boolean') this.captureAdvance = settings.captureAdvance
+    if (typeof settings.chessKills === 'boolean') this.chessKills = settings.chessKills
     if (typeof settings.soundEnabled === 'boolean') this.soundEnabled = settings.soundEnabled
     if (
       typeof settings.bottomFraction === 'number' &&
@@ -819,6 +853,11 @@ export class Game {
   setCaptureAdvance(value: boolean): void {
     this.captureAdvance = value
     this.bus.emit('info', `capture advance ${value ? 'on' : 'off'}`)
+  }
+
+  setChessKills(value: boolean): void {
+    this.chessKills = value
+    this.bus.emit('info', `chess kills ${value ? 'on' : 'off'}`)
   }
 
   private frame = (now: number): void => {
@@ -1183,6 +1222,8 @@ export class Game {
       } else {
         this.appendStep(e, order, motion, cell, attacking ? (occupant as Entity) : null, team)
       }
+      // Chess kill: an order against a piece already in capture range kills it now.
+      if (enemyOccupied && occupant !== undefined) this.maybeChessKill(e, occupant, order, occ)
       const from = this.world.get(e, Cell)
       if (from) {
         this.onCommand?.({ t: 'order', from: { x: from.x, y: from.y }, to: { x: cell.x, y: cell.y }, command })
@@ -1194,10 +1235,36 @@ export class Game {
       return
     }
     if (occupant !== undefined && this.world.get(occupant, Team) !== undefined) {
-      this.bus.emit('info', `orders: ${n} at #${occupant} (${coordName(cell.x, cell.y, this.board.height)})`)
+      this.bus.emit('info', `orders: ${n} at ${coordName(cell.x, cell.y, this.board.height)}`)
     } else {
       this.bus.emit('info', `orders: ${n} move toward ${coordName(cell.x, cell.y, this.board.height)}`)
     }
+  }
+
+  /**
+   * Chess kills: when an order is issued to attack a piece (or move onto its
+   * square) and that piece already sits inside the ordered piece's chess capture
+   * pattern, it dies immediately instead of being worn down by projectiles. The
+   * capture pattern is the weapon's firing geometry, which already mirrors chess
+   * captures (pawn diagonals only, knight leaps, sliders blocked by the first
+   * piece). Checked only when the order is issued; a target that walks into range
+   * afterwards is fought normally. No-op unless `chessKills` is enabled.
+   */
+  private maybeChessKill(e: Entity, victim: Entity, order: OrderData, occ: Occupancy): void {
+    if (!this.chessKills) return
+    const cell = this.world.get(e, Cell)
+    const vcell = this.world.get(victim, Cell)
+    const kind = this.world.get(e, PieceType)?.kind
+    const team = this.world.get(e, Team)
+    const def = kind ? PIECES[kind] : undefined
+    if (!cell || !vcell || !team || !def) return
+    const occupied = makeOccupied(this.board, occ)
+    const cells = fireCells(this.board, cell, WEAPONS[def.weapon].geometry, team, occupied)
+    if (!containsCell(cells, vcell.x, vcell.y)) return
+    // Parked on the order so the kill is part of the world state and replays
+    // deterministically (a raw command queue would not survive a turn snapshot).
+    order.chessKill = victim
+    noteOrder(order, this.tick, `chess kill → ${coordName(vcell.x, vcell.y, this.board.height)}`)
   }
 
   private startAttack(e: Entity, order: OrderData, motion: MotionData, target: Entity): void {
@@ -1211,8 +1278,9 @@ export class Game {
     // Plan the route to a firing position now so it is visible while paused.
     order.reachable = this.planAttack(e, motion, target)
     const tc = this.world.get(target, Cell)
-    const at = tc ? ` (${coordName(tc.x, tc.y, this.board.height)})` : ''
-    noteOrder(order, this.tick, `attack ordered → #${target}${at}${order.reachable ? '' : ' (unreachable)'}`)
+    order.targetCell = tc ? { x: tc.x, y: tc.y } : null
+    const at = tc ? coordName(tc.x, tc.y, this.board.height) : '?'
+    noteOrder(order, this.tick, `attack ordered → ${at}${order.reachable ? '' : ' (unreachable)'}`)
   }
 
   private startGoto(
@@ -1278,8 +1346,8 @@ export class Game {
       const step: OrderStep = { kind: 'attack', target: attackTarget, path: [], goal: null, reachable: true }
       planStep(this.board, anchor, step, def, team, tcell)
       order.queue.push(step)
-      const at = tcell ? ` (${coordName(tcell.x, tcell.y, this.board.height)})` : ''
-      noteOrder(order, this.tick, `queued attack #${attackTarget}${at}`)
+      const at = tcell ? coordName(tcell.x, tcell.y, this.board.height) : '?'
+      noteOrder(order, this.tick, `queued attack → ${at}${step.reachable ? '' : ' (unreachable)'}`)
       return
     }
 
@@ -1474,6 +1542,7 @@ export class Game {
     this.cmds.damage.length = 0
     this.cmds.deploy.length = 0
     this.cmds.destroy.length = 0
+    this.cmds.advance.length = 0
 
     this.turnActive = false
     this.replaying = false
@@ -1675,6 +1744,7 @@ export class Game {
       hudVisible: this.hudVisible,
       autoPreserve: this.autoPreserve,
       captureAdvance: this.captureAdvance,
+      chessKills: this.chessKills,
       soundEnabled: this.soundEnabled,
       railsVisible: this.railsVisible,
       controlsCollapsed: this.controlsCollapsed,

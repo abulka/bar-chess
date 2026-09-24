@@ -99,13 +99,14 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Render` | `{ glyph, tint, size }` | unicode glyph + team tint |
 | `Health` | `{ cur, max }` | |
 | `Stance` | `{ mode }` | persistent policy: `none` / `move` / `attack` (`none` stands ground and fires in range, with no badge) |
-| `Order` | `{ kind, dest, target, reachable, resumeTarget, resumeTurn, queue, log }` | active step is one-shot `none` / `goto` / `attack`; `reachable` marks an attack target that is positionally attainable; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence (`resumeTarget`/`resumeTurn` are retained for save compatibility but unused — a move now replaces an attack); `log` is a bounded list of recent order transitions (`noteOrder`) so the panel can explain why an order was issued, replaced, completed or abandoned |
+| `Order` | `{ kind, dest, target, targetCell, chessKill, reachable, resumeTarget, resumeTurn, queue, log }` | active step is one-shot `none` / `goto` / `attack`; `targetCell` is the target's last known cell (order-log notes); `chessKill` is a victim selected by the order-time chess-kill rule, consumed on the next tick (kept on the order so it is part of the turn snapshot); `reachable` marks an attack target that is positionally attainable; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence (`resumeTarget`/`resumeTurn` are retained for save compatibility but unused — a move now replaces an attack); `log` is a bounded list of recent order transitions (`noteOrder`) so the panel can explain why an order was issued, replaced, completed or abandoned |
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping. `underFireUntil` is a raw ~3 s latch (the AI keeps treating the recent attacker as a threat); **reporting** goes through `underFireAttacker` (`src/game/underFire.ts`), which also requires the attacker to still cover the square |
 | `Weapon` | `{ left }` | seconds until next shot |
-| `Motion` | `{ goal, intent, holdUntilHp, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn }` | grid movement + render interpolation; `intent` is the goal's source (`order`/`preserve`/`defense`/`engage`/`rally`); `holdUntilHp` is a latched safe-hold until that HP; `reserved` is the cell being entered |
+| `Motion` | `{ goal, intent, holdUntilHp, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn, ease?, freeAdvance? }` | grid movement + render interpolation; `intent` is the goal's source (`order`/`preserve`/`defense`/`engage`/`rally`); `holdUntilHp` is a latched safe-hold until that HP; `reserved` is the cell being entered; `ease`/`freeAdvance` mark a capture-advance glide (eased, no post-arrival cooldown) |
 | `Projectile` | `{ team, damage, ttl, trajectory, splash, radius, size, shape, spin, color, target, owner, waypoints, waypointIndex }` | |
-| `Fx` | `{ ttl, maxTtl, radius, color }` | render-only impact/explosion |
+| `Fx` | `{ ttl, maxTtl, radius, color, capture? }` | render-only impact/explosion; `capture` selects the small red triple pulse used for chess kills |
 | `Dead` | `true` | marker processed by the death system |
+| `ChessKill` | `true` | kill delivered by the chess-kill rule; selects the red-pulse FX |
 
 Pieces carry `Cell`; projectiles and FX do not, so occupancy only ever contains
 pieces.
@@ -160,9 +161,14 @@ requestAnimationFrame(frame):
   (moves read one by one), returning to the exact same end state. Live turns run
   at 0.5× too.
   `World.capture()/restore()` does a deep `structuredClone` of every component
-  store; `Rng.getState()/setState()` restores the PRNG. During replay
+  store; `Rng.getState()/setState()` restores the PRNG. `TurnState` also carries
+  the sim-affecting rules in force (`autoPreserve`/`captureAdvance`/`chessKills`),
+  restored on undo/redo/replay so a turn always re-runs under its original rules.
+  During replay
   `ctx.turnActive` is forced true so the one-move-per-turn gate matches the
-  original turn — otherwise the replay would diverge.
+  original turn — otherwise the replay would diverge. The transcript log ignores
+  events emitted while `game.replaying`, since they are duplicates of the turn
+  already recorded.
 - `togglePause()` cancels an active turn; `stepOnce()` cancels turn/replay.
 - **Victory** is chess-style: a team is defeated the moment it has no living
   king (`updateWinner`). When a king falls during a live turn the turn is closed
@@ -336,8 +342,9 @@ cell/reservation during movement validation and path planning.
   **every piece** — idle, moving, or pursuing an attack order. It repositions only
   for **real, current danger** — an enemy covering the piece's square now
   (`shooters > 0`) or a recent attacker still under fire — so a piece with only
-  distant, non-shooting enemies nearby holds instead of drifting. An **attack
-  order is not sacred**: a hurt attacker disengages rather than charging in. A
+  distant, non-shooting enemies nearby holds instead of drifting. An explicit
+  **attack (kill) order takes priority**: the piece presses the kill and never
+  self-preserves, while a move order still yields to safety. A
   **medium wound** retreats only while the danger is present and then resumes the
   interrupted order (move continues, attack resumes). A **badly wounded** piece
   (below `CRITICAL_WOUND = 0.2`) latches a safe-hold (`Motion.holdUntilHp = max`)
@@ -432,19 +439,27 @@ cell/reservation during movement validation and path planning.
 - **projectile** — advances waypoints at `speed`; applies splash/direct damage on
   impact via `cmds.damage`; `line` shots are stopped by walls; jump/arc ignore
   blockers.
-- **damage** — applies damage with ±10% seeded variance, marks `Dead`, credits
-  kills. A kill by a direct blow from a still-living enemy of the victim queues
-  an `advance` intent (killer → victim cell) when `ctx.captureAdvance` is on.
-- **death** — spawns an `Fx`, updates losses, queues destruction.
+- **damage** — applies damage with ±10% seeded variance (a `lethal` chess-kill
+  command drops the target straight to 0 HP), marks `Dead`, credits kills. A kill
+  by a direct blow from a still-living enemy of the victim queues an `advance`
+  intent (killer → victim cell) when `ctx.captureAdvance` is on.
+- **death** — spawns an `Fx`, updates losses, queues destruction. A **chess-rule
+  kill** (tagged with the `ChessKill` marker by `damage`) gets its own small,
+  quick **red triple pulse** and a quiet two-thump crunch
+  (`death.capture.<kind>`); ordinary HP kills keep the standard team-coloured
+  blast and boom, even when a capture advance follows.
 - **cleanup** — destroys queued entities and ages FX.
 - **advance** — drains `cmds.advance`. After cleanup has freed the victim's
   square, an **idle** killer (no active order, queue, path or hop; the attack
   order that just killed this victim does not count) steps along the firing ray
-  it killed with onto that square. The move is free (a capture,
-  not the piece's turn move), so it ignores the move cooldown, the turn move
-  allowance and the AI move budget. The hop is re-validated against live
-  occupancy and geometry (blocked line, occupied destination or a dead killer
-  cancels it), capped at one step per killer per tick, and exposed by the
+  it killed with onto that square. The step is a slow (~0.75 s), eased **glide**
+  driven by the normal `movement` tween: the killer's cell stays at its origin
+  until it arrives, the destination is reserved, and the slide starts on the same
+  tick as the blast. The move is free (a capture,
+  not the piece's turn move), so it ignores the move cooldown after arrival, the
+  turn move allowance and the AI move budget. The hop is re-validated against
+  live occupancy and geometry (blocked line, occupied destination or a dead
+  killer cancels it), capped at one step per killer per tick, and exposed by the
   persisted **capture advance** toolbar toggle (default off). It is an
   **Attack-mode** behaviour only: a passive (`none`/`move`) piece never
   capture-advances, so a kill can never pull it off a safe or healing square.
@@ -561,7 +576,7 @@ terrainVersion`.
 | --------- | -------------- |
 | `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, reset |
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle |
-| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed, `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. The **order / auto changes** list shows the piece's last few transitions with their tick, so it is clear *why* an order was issued/replaced/completed/abandoned (e.g. `target #16 lost — attack abandoned`) and includes autonomous self-preservation retreats |
+| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed, `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. The **order / auto changes** list shows the piece's last few transitions with their tick, so it is clear *why* an order was issued/replaced/completed/abandoned (e.g. `target at e7 lost — attack abandoned`) and includes autonomous self-preservation retreats |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
 | `StatsBar.vue` | turn/tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Sound config panel, Inspector for the selection |
@@ -643,6 +658,18 @@ Ordering is BAR-style and **context-sensitive** — there is no global order mod
   The prefix is consumed by the click unless **Shift** is held (kept armed to
   queue several); a plain left-click selects and clears it. `a` on an empty or
   friendly square is a no-op (a warning is emitted).
+- **Chess kills** (persisted toolbar toggle, default off): when an order is issued
+  against an enemy that already sits inside the ordered piece's chess capture
+  pattern — its weapon's `fireCells`, which mirror chess (pawn diagonals only,
+  knight leaps, sliders blocked by the first piece) — `orderAt` parks the victim
+  on `Order.chessKill`. The `orders` system consumes it on the next tick and
+  queues a `lethal` damage command, killing the target at once instead of wearing
+  it down with projectiles. Keeping the pending victim on the order (rather than
+  in the command queue) makes it part of the turn snapshot, so undo/redo and
+  **replay** reproduce the kill and its red pulse exactly. Applies to an explicit
+  attack or a move onto the enemy's square; checked only at **order-issue** time
+  (a target that walks into range later is fought normally), and only for
+  explicitly ordered pieces (AI autonomous stance is unaffected).
 - The queued remainder is drawn by the renderer as a dim dashed chain with
   numbered waypoint markers (`queueMarkers`), and a queued attack shows a dim
   threat line to its target.
@@ -741,7 +768,10 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   clear, deploy, mode) normalized to board cells. `Recorder`
   (`src/game/record.ts`) groups them by the turn they precede; a `GameRecord` is
   a header (`boardId`, `size`, `mode`, `playerTeam`, `seed`, rule settings) plus
-  turns and result. AI-vs-AI records carry no intents — the seed alone reproduces
+  turns and result. Each turn entry also snapshots the rule settings when its
+  first order was issued, so a mid-game toggle replays correctly; the header is
+  refreshed from the live game at export and is the fallback for order-free
+  turns. AI-vs-AI records carry no intents — the seed alone reproduces
   them. `replayRecord` clears the component stores, rebuilds
   `new Game(size, mode, seed)`, re-applies each turn's intents and re-simulates;
   it is exact (`tests/unit/record.spec.ts`). This is the compact, replayable

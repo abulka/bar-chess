@@ -48,6 +48,14 @@ export interface OrderData {
   kind: OrderKind
   dest: Vec2 | null
   target: Entity | null
+  /** Last known cell of the active attack target, for order-log notes. */
+  targetCell: Vec2 | null
+  /**
+   * Victim of an order-time chess kill, consumed by the `orders` system on the
+   * next tick. Kept on the order (not in `cmds`) so it is part of the turn
+   * snapshot and replays deterministically.
+   */
+  chessKill: Entity | null
   /** For an attack order: whether the target is positionally reachable at all. */
   reachable: boolean
   /** Attack target parked while a goto suspends the attack; resumed on arrival. */
@@ -108,6 +116,10 @@ export interface MotionData {
   steps: number
   /** true once this piece has made its single move in the current turn */
   movedThisTurn: boolean
+  /** ease the interpolation in/out (capture-advance glide) instead of linear */
+  ease?: boolean
+  /** a free capture-advance step: do not apply the post-arrival move cooldown */
+  freeAdvance?: boolean
 }
 
 export interface ProjectileData {
@@ -135,6 +147,8 @@ export interface FxData {
   maxTtl: number
   radius: number
   color: string
+  /** Capture-advance blast: small red triple pulse instead of a kill explosion. */
+  capture?: boolean
 }
 
 export const Position = defineComponent<PositionData>('Position')
@@ -151,6 +165,8 @@ export const Motion = defineComponent<MotionData>('Motion')
 export const Projectile = defineComponent<ProjectileData>('Projectile')
 export const Fx = defineComponent<FxData>('Fx')
 export const Dead = defineComponent<true>('Dead')
+/** Marks a kill delivered by the chess-kill rule (drives the red pulse FX). */
+export const ChessKill = defineComponent<true>('ChessKill')
 
 /** True when `entity` is non-null, still alive, and has a board cell. */
 export function hasLiveCell(world: World, entity: Entity | null): entity is Entity {
@@ -173,6 +189,7 @@ export const ALL_STORES = [
   Projectile,
   Fx,
   Dead,
+  ChessKill,
 ]
 
 /**

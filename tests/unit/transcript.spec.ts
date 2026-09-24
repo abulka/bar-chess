@@ -13,7 +13,7 @@ function record(): GameRecord {
     mode: 'ai-vs-ai',
     playerTeam: 'blue',
     seed: 1,
-    settings: { autoPreserve: true, captureAdvance: false },
+    settings: { autoPreserve: true, captureAdvance: false, chessKills: false },
     turns: [],
     result: { winner: 'blue', turns: 2, ticks: 120, timedOut: false },
   }

@@ -7,6 +7,7 @@ import advance from '../../src/ecs/systems/advance'
 import cleanup from '../../src/ecs/systems/cleanup'
 import damage from '../../src/ecs/systems/damage'
 import death from '../../src/ecs/systems/death'
+import movement from '../../src/ecs/systems/movement'
 import { clearComponents, makeContext } from '../helpers'
 
 describe('advance system — chess-style capture step', () => {
@@ -26,7 +27,16 @@ describe('advance system — chess-style capture step', () => {
     return { ...ctx.world.require(e, Cell) }
   }
 
-  it('steps an idle killer onto the victim square it shot along', () => {
+  /** Run the movement system until the acceptance glide has landed. */
+  function settle(ctx: SimContext, maxTicks = 200): void {
+    for (let i = 0; i < maxTicks; i++) {
+      const moving = [...ctx.world.query(Motion)].some((e) => ctx.world.get(e, Motion)?.moving)
+      if (!moving) return
+      movement.update(ctx)
+    }
+  }
+
+  it('glides an idle killer onto the victim square it shot along', () => {
     const ctx = context()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
     const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
@@ -34,9 +44,22 @@ describe('advance system — chess-style capture step', () => {
 
     advance.update(ctx)
 
+    // The cell stays put until arrival; the destination is reserved and a slow,
+    // eased tween is in flight.
+    expect(cellOf(ctx, queen)).toEqual({ x: 0, y: 0 })
+    const motion = ctx.world.require(queen, Motion)
+    expect(motion.moving).toBe(true)
+    expect(motion.ease).toBe(true)
+    expect(motion.freeAdvance).toBe(true)
+    expect(motion.reserved).toEqual({ x: 0, y: 4 })
+    expect(motion.travel).toBeGreaterThan(0.5)
+    // No settling beat: the glide starts the same tick as the blast.
+    expect(motion.elapsed).toBe(0)
+
+    settle(ctx)
+
     expect(cellOf(ctx, queen)).toEqual({ x: 0, y: 4 })
-    const center = ctx.board.cellCenter(0, 4)
-    expect(ctx.world.require(queen, Position)).toEqual(center)
+    expect(ctx.world.require(queen, Position)).toEqual(ctx.board.cellCenter(0, 4))
   })
 
   it('does not advance when the firing line is blocked', () => {
@@ -49,6 +72,7 @@ describe('advance system — chess-style capture step', () => {
     advance.update(ctx)
 
     expect(cellOf(ctx, queen)).toEqual({ x: 0, y: 0 })
+    expect(ctx.world.require(queen, Motion).moving).toBe(false)
   })
 
   it('leaves an occupied destination alone', () => {
@@ -77,6 +101,7 @@ describe('advance system — chess-style capture step', () => {
     kill(ctx, queen, victim)
 
     advance.update(ctx)
+    settle(ctx)
 
     expect(cellOf(ctx, queen)).toEqual({ x: 0, y: 4 })
   })
@@ -104,6 +129,7 @@ describe('advance system — chess-style capture step', () => {
     kill(ctx, knight, victim)
 
     advance.update(ctx)
+    settle(ctx)
 
     expect(cellOf(ctx, knight)).toEqual({ x: 1, y: 2 })
   })
@@ -121,6 +147,9 @@ describe('advance system — chess-style capture step', () => {
     cleanup.update(ctx)
     advance.update(ctx)
 
+    expect(cellOf(ctx, knight)).toEqual({ x: 6, y: 3 })
+    expect(ctx.world.require(knight, Motion).moving).toBe(true)
+    settle(ctx)
     expect(cellOf(ctx, knight)).toEqual({ x: 5, y: 1 })
   })
 

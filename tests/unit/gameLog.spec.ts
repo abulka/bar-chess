@@ -88,6 +88,29 @@ describe('GameLog & LLM game prompt', () => {
     log.dispose()
   })
 
+  it('ignores replay events instead of duplicating the replayed turn', () => {
+    const game = new Game(8, 'ai-vs-ai', 7)
+    const recorder = new Recorder(game)
+    const log = new GameLog(game)
+    log.begin()
+    playTurn(game, log)
+    playTurn(game, log)
+
+    const before = log.finish(recorder.snapshot()).transcript
+    const eventsBefore = log.eventStream.length
+    const turnsBefore = log.turnTrace.map((t) => t.turn)
+
+    game.replayTurn()
+    let guard = 0
+    while (game.replaying && guard++ < 4000) game.runTicks(1)
+    log.tick()
+
+    expect(log.eventStream.length).toBe(eventsBefore)
+    expect(log.turnTrace.map((t) => t.turn)).toEqual(turnsBefore)
+    expect(log.finish(recorder.snapshot()).transcript).toBe(before)
+    log.dispose()
+  })
+
   it('drops an abandoned branch when a new turn is played after undo', () => {
     const game = new Game(8, 'ai-vs-ai', 7)
     const recorder = new Recorder(game)

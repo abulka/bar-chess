@@ -8,6 +8,17 @@ import {
 import { GAME_MODES } from './game'
 import type { GameMode, OverlayFlags } from './game'
 
+/**
+ * The settings that change how the simulation runs. They ride along in turn
+ * snapshots and game records so undo/redo/replay reproduce the rules that were
+ * in force, not whatever is toggled now.
+ */
+export interface SimSettings {
+  autoPreserve: boolean
+  captureAdvance: boolean
+  chessKills: boolean
+}
+
 /** UI/session preferences that should survive a reload or a server restart. */
 export interface GameSettings {
   overlays: OverlayFlags
@@ -17,6 +28,7 @@ export interface GameSettings {
   gameMode: GameMode
   autoPreserve: boolean
   captureAdvance: boolean
+  chessKills: boolean
   soundEnabled: boolean
   /** HUD bottom-panel height as a fraction of the viewport. */
   bottomFraction: number
@@ -41,6 +53,7 @@ export interface SettingsPatch {
   gameMode?: GameMode
   autoPreserve?: boolean
   captureAdvance?: boolean
+  chessKills?: boolean
   soundEnabled?: boolean
   bottomFraction?: number
   leftRailFraction?: number
@@ -85,6 +98,7 @@ export function loadSettings(): SettingsPatch | null {
   if (typeof parsed.railsVisible === 'boolean') out.railsVisible = parsed.railsVisible
   if (typeof parsed.autoPreserve === 'boolean') out.autoPreserve = parsed.autoPreserve
   if (typeof parsed.captureAdvance === 'boolean') out.captureAdvance = parsed.captureAdvance
+  if (typeof parsed.chessKills === 'boolean') out.chessKills = parsed.chessKills
   if (typeof parsed.speed === 'number' && SPEEDS.includes(parsed.speed)) out.speed = parsed.speed
   if (typeof parsed.gameMode === 'string' && GAME_MODES.some((m) => m.id === parsed.gameMode)) {
     out.gameMode = parsed.gameMode as GameMode

@@ -37,10 +37,12 @@ const system: System = {
 
       if (motion.moving) {
         motion.elapsed += ctx.dt
-        const t = motion.travel > 0 ? Math.min(1, motion.elapsed / motion.travel) : 1
+        const raw = motion.travel > 0 ? Math.min(1, Math.max(0, motion.elapsed / motion.travel)) : 1
+        // A capture-advance glide eases in and out; ordinary steps are linear.
+        const t = motion.ease ? raw * raw * (3 - 2 * raw) : raw
         pos.x = lerp(motion.fromX, motion.toX, t)
         pos.y = lerp(motion.fromY, motion.toY, t)
-        if (t >= 1) {
+        if (raw >= 1) {
           motion.moving = false
           pos.x = motion.toX
           pos.y = motion.toY
@@ -51,7 +53,9 @@ const system: System = {
           cell.y = dest.y
           motion.reserved = null
           occupancy.set(board.cellIndex(dest.x, dest.y), e)
-          motion.cooldown = def.moveCooldown
+          motion.cooldown = motion.freeAdvance ? 0 : def.moveCooldown
+          motion.ease = false
+          motion.freeAdvance = false
           motion.arrived = motion.path.length === 0
         }
         continue
@@ -105,6 +109,8 @@ const system: System = {
       motion.travel = Math.min(def.moveCooldown, 0.08 + 0.05 * span)
       motion.elapsed = 0
       motion.moving = true
+      motion.ease = false
+      motion.freeAdvance = false
       if (ctx.turnActive) anyMoving = true
       motion.arrived = false
       motion.blocked = false

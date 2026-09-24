@@ -128,11 +128,31 @@ const system: System = {
       const team = ctx.world.require(e, Team)
       const target = ctx.world.require(e, Target)
 
+      // 0a. Consume an order-time chess kill: it was decided when the order was
+      // issued and lands here on the next tick. The command queue is not part of
+      // the turn snapshot, but the pending victim (on the order) is.
+      if (order.chessKill !== null) {
+        const victim = order.chessKill
+        order.chessKill = null
+        if (ctx.world.isAlive(victim)) {
+          const hp = ctx.world.get(victim, Health)
+          ctx.cmds.damage.push({
+            target: victim,
+            source: e,
+            amount: hp?.cur ?? 1,
+            kind: 'chess',
+            direct: true,
+            lethal: true,
+          })
+        }
+      }
+
       // 0. Self-preservation: a hurt or outgunned piece retreats on its own, even
-      // while it is moving or pursuing an attack order. A badly wounded piece
-      // (below CRITICAL_WOUND) latches a safe-hold and stays put until fully
-      // healed; a medium wound only retreats while the danger is present, then
-      // resumes its order. A new order clears the hold.
+      // while it is moving. A badly wounded piece (below CRITICAL_WOUND) latches a
+      // safe-hold and stays put until fully healed; a medium wound only retreats
+      // while the danger is present, then resumes its order. A new order clears
+      // the hold. An explicit attack (kill) order takes priority: the piece presses
+      // the attack instead of retreating, however exposed it is.
       const hp = ctx.world.get(e, Health)
       const hpRatio = healthRatio(hp, 1)
       const attacker = target.lastAttacker
@@ -152,8 +172,10 @@ const system: System = {
       // Whether this piece was preserving last tick, so the retreat is logged as
       // one episode (start / end) rather than on every goal re-evaluation.
       const wasPreserve = motion.intent === 'preserve'
+      const killOrder = order.kind === 'attack'
       if (
         ctx.autoPreserve &&
+        !killOrder &&
         kind &&
         !(ctx.teams[team].controller === 'ai' && kind === 'king') &&
         (valuable || underFire || hpRatio < preserve || holding)

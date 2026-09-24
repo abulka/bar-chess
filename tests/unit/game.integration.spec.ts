@@ -47,11 +47,37 @@ describe('Game integration', () => {
     game.setCaptureAdvance(true)
 
     game.runTicks(1)
+    // The capture advance is a slow glide: the cell is not claimed until the
+    // killer actually arrives.
+    runUntil(game, () => {
+      const c = game.world.require(knight, Cell)
+      return c.x === 5 && c.y === 1
+    })
 
     expect(game.world.require(knight, Cell)).toEqual({ x: 5, y: 1 })
   })
 
-  it('disengages a badly hurt piece that holds an attack order', () => {
+  it('replays a finished turn under the rules it was played with', () => {
+    const game = new Game(8, 'human-vs-human')
+    game.setChessKills(true)
+    game.beginTurn()
+    let guard = 0
+    while (game.turnActive && guard++ < 4000) game.runTicks(1)
+    expect(game.canReplay).toBe(true)
+
+    game.setChessKills(false)
+    game.replayTurn()
+    // The turn snapshot restores the rules in force at capture, so the replay
+    // re-runs with chess kills on even though the live toggle is now off.
+    expect(game.chessKills).toBe(true)
+
+    guard = 0
+    while (game.replaying && guard++ < 4000) game.runTicks(1)
+    expect(game.chessKills).toBe(true)
+    expect(game.replaying).toBe(false)
+  })
+
+  it('keeps a badly hurt piece on its attack order instead of disengaging', () => {
     const game = new Game(8)
     for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
     const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
@@ -68,8 +94,8 @@ describe('Game integration', () => {
 
     game.runTicks(1)
 
-    // A hurt piece with an attack order breaks off instead of charging to its death.
-    expect(game.world.require(knight, Motion).intent).toBe('preserve')
+    // An explicit kill order takes priority over self-preservation.
+    expect(game.world.require(knight, Motion).intent).not.toBe('preserve')
     expect(game.world.isAlive(knight)).toBe(true)
   })
 
