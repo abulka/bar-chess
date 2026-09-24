@@ -2,7 +2,7 @@ import { ATTACK_LEASH } from '../../game/constants'
 import { chebyshev, containsCell, fireCells } from '../../game/geometry'
 import { healthRatio, vecEquals } from '../../game/math'
 import { makeOccupied } from '../../game/occupancy'
-import { HEAL_RADIUS } from '../../game/healing'
+import { HEAL_RADIUS, kingOf } from '../../game/healing'
 import { closestEmptyCell, previewFiringCell } from '../../game/approach'
 import { coordName } from '../../game/coords'
 import { PIECES, WEAPONS } from '../../game/pieces'
@@ -13,7 +13,7 @@ import type { MotionIntent, OrderData } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
-import { aiKingGoal, isScreening, KING_GUARD_RADIUS, kingOf, kingThreats, screenPlan } from './kingDefense'
+import { aiKingGoal, isScreening, KING_GUARD_RADIUS, kingThreats, screenPlan } from './kingDefense'
 import {
   COVER_RADIUS,
   coverageThreats,
@@ -107,8 +107,7 @@ function pursue(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'
 
 function rally(ctx: SimContext, team: 'red' | 'blue'): { x: number; y: number } | null {
   const enemy = team === 'red' ? 'blue' : 'red'
-  const lanes = ctx.board.data.lanes[enemy]
-  return lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
+  return ctx.board.laneMidpoint(enemy)
 }
 
 const system: System = {
@@ -119,7 +118,7 @@ const system: System = {
     // and replay never see a stale entry.
     const kingThreatMemo: ThreatMemo = new Map()
     const pieceThreatMemo: ThreatMemo = new Map()
-    const kings = { red: kingOf(ctx, 'red'), blue: kingOf(ctx, 'blue') }
+    const kings = { red: kingOf(ctx.world, 'red'), blue: kingOf(ctx.world, 'blue') }
     // Squares already earmarked for screening this turn, so guards spread out.
     const claimed = new Set<number>()
 

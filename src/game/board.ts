@@ -132,4 +132,10 @@ export class Board {
   laneCells(team: 'red' | 'blue'): Vec2[] {
     return this.data.lanes[team]
   }
+
+  /** Middle of a team's back rank — rally / king-home post. Null if no lanes. */
+  laneMidpoint(team: 'red' | 'blue'): Vec2 | null {
+    const lanes = this.data.lanes[team]
+    return lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
+  }
 }

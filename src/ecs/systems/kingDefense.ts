@@ -19,15 +19,6 @@ const KING_STANDOFF = 5
 /** Radius within which a guard blocking an enemy's shot counts as screening. */
 const KING_SCREEN_RADIUS = 6
 
-/** The team's living king, or null for a king-less (already lost) side. */
-export function kingOf(ctx: SimContext, team: TeamId): Entity | null {
-  for (const e of ctx.world.query(PieceType, Cell, Team)) {
-    if (ctx.world.require(e, Team) !== team) continue
-    if (ctx.world.require(e, PieceType).kind === 'king') return e
-  }
-  return null
-}
-
 /**
  * The king's threats: the shared coverage scan, widened by `KING_THREAT_RADIUS`
  * so it also reacts to pieces that have closed in without a shot yet.

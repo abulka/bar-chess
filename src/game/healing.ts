@@ -20,9 +20,8 @@ export interface HealingField {
 }
 
 /**
- * The team's living king, or null for a king-less (already lost) side. Mirrors
- * the lookup in the king-defense system, kept here so the renderer need not
- * depend on an ECS system module.
+ * The team's living king, or null for a king-less (already lost) side. Shared
+ * by the healing field and the king-defense system so the lookup cannot drift.
  */
 export function kingOf(world: World, team: TeamId): Entity | null {
   for (const e of world.query(PieceType, Cell, Team)) {

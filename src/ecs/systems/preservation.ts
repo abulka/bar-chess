@@ -125,8 +125,7 @@ export function isValuable(kind: string): boolean {
 
 /** Middle of a team's own back rank — the AI king's post. */
 export function homeCell(ctx: SimContext, team: TeamId): Vec2 | null {
-  const lanes = ctx.board.data.lanes[team]
-  return lanes.length > 0 ? lanes[Math.floor(lanes.length / 2)] : null
+  return ctx.board.laneMidpoint(team)
 }
 
 /** True when `cell` sits inside the healing aura centred on `kingCell`. */

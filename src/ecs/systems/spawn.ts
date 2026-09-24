@@ -4,7 +4,7 @@ import type { Vec2 } from '../../game/types'
 import type { System } from '../pipeline'
 
 function findLane(ctx: Parameters<System['update']>[0], team: 'red' | 'blue'): Vec2 | null {
-  for (const lane of ctx.board.data.lanes[team]) {
+  for (const lane of ctx.board.laneCells(team)) {
     if (!ctx.board.passable(lane.x, lane.y)) continue
     if (ctx.occupancy.has(ctx.board.cellIndex(lane.x, lane.y))) continue
     return lane
