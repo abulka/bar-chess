@@ -160,6 +160,31 @@ export interface StanceSummary {
   mixed: boolean
 }
 
+/** What the hover readout shows for the piece under the cursor. */
+export interface HoverPiece {
+  entity: Entity
+  kind: string
+  name: string
+  glyph: string
+  color: string
+  team: TeamId
+  stance: StanceMode
+  /** Current motion-goal provenance (`none` when idle). */
+  intent: MotionIntent
+  orderKind: OrderKind
+  targetCoord: string | null
+  goalCoord: string | null
+  /** True for an enemy whose plan is hidden behind the `enemy plans` overlay. */
+  redacted: boolean
+}
+
+/** Hovered-cell readout: the cell's coord/kind plus piece detail when occupied. */
+export interface HoverInfo {
+  coord: string
+  kind: 'empty' | 'friendly' | 'enemy' | 'blocked'
+  piece: HoverPiece | null
+}
+
 export interface OverlayFlags {
   grid: boolean
   health: boolean
@@ -218,11 +243,14 @@ export interface GameSnapshot {
   /** Whether the left "controls" hints and right "stance" legend are collapsed. */
   controlsCollapsed: boolean
   stanceCollapsed: boolean
+  /** Whether the right-rail legend / firing-lines / copy sections are collapsed. */
+  legendCollapsed: boolean
+  firingLinesCollapsed: boolean
+  copyCollapsed: boolean
   playerTeam: TeamId
   gameMode: GameMode
   gameModes: Array<{ id: GameMode; label: string }>
-  hoverName: string | null
-  hoverKind: 'empty' | 'friendly' | 'enemy' | 'blocked' | null
+  hover: HoverInfo | null
   turnActive: boolean
   /** Turns buffered by extra space presses, run back-to-back after the current one. */
   queuedTurns: number
@@ -289,6 +317,9 @@ export class Game {
   railsVisible = true
   controlsCollapsed = false
   stanceCollapsed = false
+  legendCollapsed = false
+  firingLinesCollapsed = false
+  copyCollapsed = false
   soundEnabled = false
   /** HUD bottom-panel height as a fraction of the viewport. */
   bottomFraction = BOTTOM_FRACTION_DEFAULT
@@ -721,6 +752,9 @@ export class Game {
       rightRailFraction: this.rightRailFraction,
       controlsCollapsed: this.controlsCollapsed,
       stanceCollapsed: this.stanceCollapsed,
+      legendCollapsed: this.legendCollapsed,
+      firingLinesCollapsed: this.firingLinesCollapsed,
+      copyCollapsed: this.copyCollapsed,
     }
   }
 
@@ -739,6 +773,11 @@ export class Game {
     if (typeof settings.railsVisible === 'boolean') this.railsVisible = settings.railsVisible
     if (typeof settings.controlsCollapsed === 'boolean') this.controlsCollapsed = settings.controlsCollapsed
     if (typeof settings.stanceCollapsed === 'boolean') this.stanceCollapsed = settings.stanceCollapsed
+    if (typeof settings.legendCollapsed === 'boolean') this.legendCollapsed = settings.legendCollapsed
+    if (typeof settings.firingLinesCollapsed === 'boolean') {
+      this.firingLinesCollapsed = settings.firingLinesCollapsed
+    }
+    if (typeof settings.copyCollapsed === 'boolean') this.copyCollapsed = settings.copyCollapsed
     if (typeof settings.speed === 'number' && SPEEDS.includes(settings.speed)) this.speed = settings.speed
     if (typeof settings.autoPreserve === 'boolean') this.autoPreserve = settings.autoPreserve
     if (typeof settings.captureAdvance === 'boolean') this.captureAdvance = settings.captureAdvance
@@ -1525,14 +1564,45 @@ export class Game {
     this.terrainVersion++
   }
 
-  private hoverKind(): 'empty' | 'friendly' | 'enemy' | 'blocked' | null {
+  private hoverInfo(): HoverInfo | null {
     const cell = this.hoverCell
     if (!cell || !this.board.inBounds(cell.x, cell.y)) return null
+    const coord = coordName(cell.x, cell.y, this.board.height)
     const occupant = buildOccupancy(this.world, this.board).get(this.board.cellIndex(cell.x, cell.y))
-    if (occupant !== undefined) {
-      return this.world.get(occupant, Team) === this.playerTeam ? 'friendly' : 'enemy'
+    if (occupant === undefined) {
+      return { coord, kind: this.board.passable(cell.x, cell.y) ? 'empty' : 'blocked', piece: null }
     }
-    return this.board.passable(cell.x, cell.y) ? 'empty' : 'blocked'
+    const team = this.world.get(occupant, Team)
+    const friendly = team === this.playerTeam
+    const ref = this.pieceRef(occupant)
+    // An enemy's plan is only revealed when the `enemy plans` overlay is on;
+    // identity (name/glyph) is always visible from the board itself.
+    const reveal = friendly || this.overlays.enemyPlans
+    const motion = this.world.get(occupant, Motion)
+    const order = this.world.get(occupant, Order)
+    const target = this.world.get(occupant, Target)
+    const targetCell = target?.entity != null ? this.world.get(target.entity, Cell) : undefined
+    const goal = reveal ? (motion?.goal ?? null) : null
+    return {
+      coord,
+      kind: friendly ? 'friendly' : 'enemy',
+      piece: ref
+        ? {
+            entity: occupant,
+            kind: ref.kind,
+            name: ref.name,
+            glyph: ref.glyph,
+            color: ref.color,
+            team: ref.team,
+            stance: this.world.get(occupant, Stance)?.mode ?? 'none',
+            intent: reveal ? (motion?.intent ?? 'none') : 'none',
+            orderKind: reveal ? (order?.kind ?? 'none') : 'none',
+            targetCoord: reveal && targetCell ? coordName(targetCell.x, targetCell.y, this.board.height) : null,
+            goalCoord: goal ? coordName(goal.x, goal.y, this.board.height) : null,
+            redacted: !reveal,
+          }
+        : null,
+    }
   }
 
   /** Read-only view of whether a recorded turn is replaying right now. */
@@ -1609,11 +1679,13 @@ export class Game {
       railsVisible: this.railsVisible,
       controlsCollapsed: this.controlsCollapsed,
       stanceCollapsed: this.stanceCollapsed,
+      legendCollapsed: this.legendCollapsed,
+      firingLinesCollapsed: this.firingLinesCollapsed,
+      copyCollapsed: this.copyCollapsed,
       playerTeam: this.playerTeam,
       gameMode: this.gameMode,
       gameModes: GAME_MODES,
-      hoverName: this.hoverCell ? coordName(this.hoverCell.x, this.hoverCell.y, this.board.height) : null,
-      hoverKind: this.hoverKind(),
+      hover: this.hoverInfo(),
       turnActive: this.turnActive,
       queuedTurns: this.queuedTurns,
       canReplay: this.canReplay,

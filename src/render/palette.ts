@@ -18,6 +18,20 @@ export const PRESERVE_COLOR = '#f2ff49'
 /** Muted grey for an incidental "pot shot": a stationary piece firing at whatever
  * is in range without committing to pursue it (None/Move stance). */
 export const POTSHOT_COLOR = '#8b929c'
+/** Ordered-attack firing line and target ring. */
+export const TRACK_COLOR = '#ff2d20'
+/** Auto-acquired / retaliation target, distinct from an explicitly ordered one. */
+export const ENGAGE_COLOR = '#e3b341'
+/** Dashed grey firing line to an ordered target that cannot be reached. */
+export const UNREACHABLE_COLOR = '#a0a6ac'
+/** Normal / best-effort-partial movement route. */
+export const ROUTE_COLOR = '#ffd166'
+export const ROUTE_PARTIAL_COLOR = '#ffb347'
+/** Selected-piece ring. */
+export const SELECT_COLOR = '#ffd166'
+/** Stance badge colours. */
+export const STANCE_MOVE_COLOR = '#4ad991'
+export const STANCE_ATTACK_COLOR = '#ff3b30'
 
 const HEALTH_FULL: [number, number, number] = [76, 217, 100]
 const HEALTH_EMPTY: [number, number, number] = [255, 59, 48]

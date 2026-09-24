@@ -26,6 +26,9 @@ describe('settings persistence', () => {
       rightRailFraction: 0.25,
       controlsCollapsed: true,
       stanceCollapsed: true,
+      legendCollapsed: true,
+      firingLinesCollapsed: true,
+      copyCollapsed: true,
     })
     saveSettings(game.settings())
 
@@ -50,6 +53,9 @@ describe('settings persistence', () => {
     expect(restored.rightRailFraction).toBe(0.25)
     expect(restored.controlsCollapsed).toBe(true)
     expect(restored.stanceCollapsed).toBe(true)
+    expect(restored.legendCollapsed).toBe(true)
+    expect(restored.firingLinesCollapsed).toBe(true)
+    expect(restored.copyCollapsed).toBe(true)
     expect(restored.teams.red.controller).toBe('ai')
   })
 
@@ -78,6 +84,9 @@ describe('settings persistence', () => {
         rightRailFraction: 0.01,
         controlsCollapsed: 'yes',
         stanceCollapsed: 1,
+        legendCollapsed: 'yes',
+        firingLinesCollapsed: 0,
+        copyCollapsed: 'no',
       }),
     )
     const loaded = loadSettings()
@@ -95,6 +104,9 @@ describe('settings persistence', () => {
     expect(loaded?.rightRailFraction).toBeUndefined()
     expect(loaded?.controlsCollapsed).toBeUndefined()
     expect(loaded?.stanceCollapsed).toBeUndefined()
+    expect(loaded?.legendCollapsed).toBeUndefined()
+    expect(loaded?.firingLinesCollapsed).toBeUndefined()
+    expect(loaded?.copyCollapsed).toBeUndefined()
   })
 
   it('defaults auto-preserve on and honors an explicit off', () => {

@@ -531,15 +531,28 @@ flex row with a `.splitter.vertical` on its inner edge, and `.stage`'s inline
 `gridTemplateColumns` (from local `leftWidth`/`rightWidth` refs) sizes the
 columns. Dragging sets the width from the pointer, double-click resets, and the
 widths persist as `leftRailFraction`/`rightRailFraction` of the viewport, clamped
-to leave a minimum board width. Within the left rail the **controls** hints list
-and within the right rail the **stance** legend are wrapped in
-`CollapsibleSection.vue` — a clickable rail-title header that hides its body and
-persists its state as `controlsCollapsed`/`stanceCollapsed`.
+to leave a minimum board width. Within the left rail the **controls** hints list,
+and within the right rail the **stance**, **legend**, **firing lines** and
+**copy** sections, are wrapped in `CollapsibleSection.vue` — a clickable
+rail-title header with a caret that hides its body and persists its state as
+`controlsCollapsed`/`stanceCollapsed`/`legendCollapsed`/`firingLinesCollapsed`/
+`copyCollapsed`. The **hover** readout sits between the firing-lines and copy
+sections and is not collapsible. The right-rail legend draws its swatches with
+`LegendIcon.vue` (inline SVG coloured from `src/render/palette.ts`), so the
+legend can never drift from what the canvas actually paints.
+
+The hover readout shows the hovered cell's coord and kind, and for an occupied
+cell the piece's glyph, name and side plus its **current intent** — its motion
+goal provenance (`self-preservation`, `engaging`, `rally`, …), falling back to
+its order or stance when idle. An enemy's intent/order/goal is redacted unless
+the `enemy plans` overlay is on (the readout shows "intent hidden"), so it cannot
+leak a hidden plan.
 
 `GameSnapshot` fields (`src/game/game.ts`): `running paused tick fps tps speed
 boardId boardSize boardSizes teams timings events eventCount shots kills
 warnings selected selectedLines counts winner overlays hudVisible autoPreserve
 captureAdvance soundEnabled railsVisible controlsCollapsed stanceCollapsed
+legendCollapsed firingLinesCollapsed copyCollapsed hover
 playerTeam turnActive queuedTurns canReplay canUndo canRedo replaying
 barProgress pendingCommand selectionCount stanceSummary pieceInfo
 terrainVersion`.
@@ -553,6 +566,7 @@ terrainVersion`.
 | `StatsBar.vue` | turn/tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Sound config panel, Inspector for the selection |
 | `CollapsibleSection.vue` | clickable rail-title header with a caret that hides its slot body; state owned/persisted by `App.vue` |
+| `LegendIcon.vue` | inline-SVG legend swatches (cells, route/objective, preserve, waypoints, bars, firing lines, stance badges, target rings) coloured from `src/render/palette.ts` |
 
 ### Overlay scope and legend
 
@@ -569,10 +583,12 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
 - **Path** — dashed gold route; **destination** a hollow diamond (orange and
   dashed when blocked). The diamond shape keeps the destination distinct from the
   target reticle (circle + cross). A **self-preservation** retreat
-  (`Motion.intent === 'preserve'`) draws the same route and diamond in bright
-  yellow (`PRESERVE_COLOR`) so an automatic dodge is never mistaken for an order —
-  including when it overrides an ordered attack, where the retreat route is
-  yellow, not the attack-route gold.
+  (`Motion.intent === 'preserve'`) draws the route in bright yellow
+  (`PRESERVE_COLOR`) so an automatic dodge is never mistaken for an order. When it
+  overrides an ordered attack the ordered-attack branch returns early, so only the
+  yellow dashed retreat route is drawn (no destination diamond); a standalone
+  preserve goal still draws the yellow diamond. The right-rail legend shows the
+  yellow dashed line only, matching the common override case.
 - **Target** — an ordered attack (`order.kind === 'attack'`) draws a red firing
   line + reticle and rings the victim red. An auto-acquired target is drawn two
   ways: a **committed** piece (AI controller, or Attack stance) will pursue it, so
@@ -670,9 +686,10 @@ UI/session preferences survive a reload (and a dev-server restart) via
 applies a validated patch. Stored under `bar-chess.settings`:
 `overlays` (all flags), `hudVisible`, `railsVisible`, `speed`, `gameMode`,
 `soundEnabled`, `bottomFraction` (the HUD splitter height),
-`leftRailFraction`/`rightRailFraction` (side-rail widths) and
-`controlsCollapsed`/`stanceCollapsed` (the left controls hints and right stance
-legend sections; per-piece stance lives in the world, not here). `loadSettings`
+`leftRailFraction`/`rightRailFraction` (side-rail widths) and the section
+collapse flags `controlsCollapsed`/`stanceCollapsed`/`legendCollapsed`/
+`firingLinesCollapsed`/`copyCollapsed` (per-piece stance lives in the world, not
+here). `loadSettings`
 drops malformed or out-of-range fields (unknown
 overlay keys, non-boolean flags, speeds outside `SPEEDS`, unknown modes,
 `bottomFraction` outside 0.1–0.9, rail fractions outside 0.08–0.45), and

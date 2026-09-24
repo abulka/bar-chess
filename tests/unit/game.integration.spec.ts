@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Cell, Health, Motion, Order, Stance, Target, Weapon } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
+import { coordName } from '../../src/game/coords'
 import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
 import { PIECE_LIST, PIECES, WEAPONS, weaponDamage } from '../../src/game/pieces'
@@ -732,5 +733,52 @@ describe('Game integration — king guard lethality', () => {
     const health = game.world.require(queen, Health)
     expect(game.world.isAlive(queen)).toBe(true)
     expect(health.cur).toBeLessThan(health.max)
+  })
+})
+
+describe('hover readout', () => {
+  beforeEach(() => clearComponents())
+
+  it('reports a friendly piece name, kind and motion intent', () => {
+    const game = new Game(8)
+    const rook = placePiece(game, 'rook', 'blue', { x: 3, y: 3 })
+    game.world.require(rook, Motion).intent = 'defense'
+    game.hoverCell = { x: 3, y: 3 }
+
+    const hover = game.snapshot().hover
+    expect(hover?.kind).toBe('friendly')
+    expect(hover?.coord).toBe(coordName(3, 3, 8))
+    expect(hover?.piece?.name).toBe(PIECES.rook.name)
+    expect(hover?.piece?.intent).toBe('defense')
+    expect(hover?.piece?.redacted).toBe(false)
+  })
+
+  it('redacts an enemy intent until the enemy-plans overlay is on', () => {
+    const game = new Game(8)
+    const rook = placePiece(game, 'rook', 'red', { x: 3, y: 3 })
+    const motion = game.world.require(rook, Motion)
+    motion.intent = 'preserve'
+    motion.goal = { x: 4, y: 3 }
+    game.hoverCell = { x: 3, y: 3 }
+
+    const hidden = game.snapshot().hover
+    expect(hidden?.kind).toBe('enemy')
+    expect(hidden?.piece?.intent).toBe('none')
+    expect(hidden?.piece?.goalCoord).toBeNull()
+    expect(hidden?.piece?.redacted).toBe(true)
+
+    game.overlays.enemyPlans = true
+    const shown = game.snapshot().hover
+    expect(shown?.piece?.intent).toBe('preserve')
+    expect(shown?.piece?.goalCoord).toBe(coordName(4, 3, 8))
+    expect(shown?.piece?.redacted).toBe(false)
+  })
+
+  it('reports an empty square with no piece', () => {
+    const game = new Game(8)
+    game.hoverCell = { x: 4, y: 4 }
+    const hover = game.snapshot().hover
+    expect(hover?.kind).toBe('empty')
+    expect(hover?.piece).toBeNull()
   })
 })

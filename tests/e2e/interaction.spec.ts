@@ -187,21 +187,52 @@ test('the rail splitter resizes a side rail and persists', async ({ page }) => {
   expect(restored).toBeGreaterThan(before + 60)
 })
 
-test('the controls and stance sections collapse and persist', async ({ page }) => {
+test('the rail info sections collapse and persist', async ({ page }) => {
   const hints = page.locator('.rail.left .hints')
   const stanceLegend = page.locator('.rail.right .legend').first()
   await expect(hints).toBeVisible()
   await expect(stanceLegend).toBeVisible()
 
-  await page.getByRole('button', { name: 'controls' }).click()
+  await page.getByRole('button', { name: 'controls', exact: true }).click()
+  await page.getByRole('button', { name: 'stance', exact: true }).click()
+  await page.getByRole('button', { name: 'legend', exact: true }).click()
+  await page.getByRole('button', { name: 'firing lines', exact: true }).click()
+  await page.getByRole('button', { name: 'copy', exact: true }).click()
+
   await expect(hints).toBeHidden()
-  await page.getByRole('button', { name: 'stance' }).click()
   await expect(stanceLegend).toBeHidden()
+  await expect(page.locator('.rail.right .legend').nth(1)).toBeHidden()
+  await expect(page.locator('.rail.right .legend').nth(2)).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Copy history for LLM' })).toBeHidden()
 
   await page.reload()
   await page.waitForFunction(() => Boolean((window as any).game && (window as any).__renderer))
   await expect(page.locator('.rail.left .hints')).toBeHidden()
   await expect(page.locator('.rail.right .legend').first()).toBeHidden()
-  await expect(page.getByRole('button', { name: 'controls' })).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.locator('.rail.right .legend').nth(1)).toBeHidden()
+  await expect(page.locator('.rail.right .legend').nth(2)).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Copy history for LLM' })).toBeHidden()
+  await expect(page.getByRole('button', { name: 'copy', exact: true })).toHaveAttribute('aria-expanded', 'false')
+})
+
+test('the hover readout names the hovered piece and its side', async ({ page }) => {
+  const target = await page.evaluate(() => {
+    const g = (window as any).game
+    const piece = g.toDebugJson().pieces.find((p: any) => p.team === 'blue' && p.kind === 'rook')
+    return piece.cell as { x: number; y: number }
+  })
+  const canvas = page.locator('canvas.board-canvas')
+  const box = (await canvas.boundingBox())!
+  const point = await cellScreenPoint(page, target)
+  await page.mouse.move(box.x + point.x, box.y + point.y)
+  await settle(page)
+
+  const readout = page.locator('.hover-readout')
+  await expect(readout).toContainText('Rook')
+  await expect(readout).toContainText('friendly')
+
+  const hover = await page.evaluate(() => (window as any).game.snapshot().hover)
+  expect(hover.piece.name).toBe('Rook')
+  expect(hover.kind).toBe('friendly')
 })
 

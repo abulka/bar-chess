@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 
 import BoardView from './components/BoardView.vue'
 import CollapsibleSection from './components/CollapsibleSection.vue'
 import EventLog from './components/EventLog.vue'
+import LegendIcon from './components/LegendIcon.vue'
 import PiecePanel from './components/PiecePanel.vue'
 import ReinforcementBar from './components/ReinforcementBar.vue'
 import StatsBar from './components/StatsBar.vue'
@@ -20,7 +21,8 @@ import {
   SNAPSHOT_INTERVAL_MS,
 } from './game/constants'
 import { Game } from './game/game'
-import type { GameMode, GameSnapshot, OverlayFlags } from './game/game'
+import type { GameMode, GameSnapshot, HoverInfo, OverlayFlags } from './game/game'
+import { INTENT_LABELS } from './game/intent'
 import { GameLog } from './game/gameLog'
 import { Recorder } from './game/record'
 import { StudyController } from './game/study'
@@ -204,6 +206,17 @@ const turnLabel = computed(() => {
   return snapshot.value.canReplay ? `${turn} · READY — space for next turn` : `${turn} · press space for a turn`
 })
 
+const hover = computed(() => snapshot.value.hover)
+
+/** Describe a hovered piece's current activity: motion intent, else its order/stance. */
+function hoverIntent(info: HoverInfo | null): string {
+  const piece = info?.piece
+  if (!piece) return ''
+  if (piece.intent !== 'none') return INTENT_LABELS[piece.intent]
+  if (piece.orderKind !== 'none') return piece.orderKind === 'attack' ? 'ordered attack' : 'ordered move'
+  return piece.stance === 'none' ? 'idle' : `${piece.stance} stance`
+}
+
 function refresh(): void {
   study.tick()
   if (!study.state.running) liveLog.tick()
@@ -327,6 +340,24 @@ function onToggleControls(): void {
 
 function onToggleStance(): void {
   game.stanceCollapsed = !game.stanceCollapsed
+  persistSettings()
+  refresh()
+}
+
+function onToggleLegend(): void {
+  game.legendCollapsed = !game.legendCollapsed
+  persistSettings()
+  refresh()
+}
+
+function onToggleFiringLines(): void {
+  game.firingLinesCollapsed = !game.firingLinesCollapsed
+  persistSettings()
+  refresh()
+}
+
+function onToggleCopy(): void {
+  game.copyCollapsed = !game.copyCollapsed
   persistSettings()
   refresh()
 }
@@ -674,71 +705,107 @@ onBeforeUnmount(() => {
             @toggle="onToggleStance"
           >
             <ul class="legend">
-              <li><span class="dot" style="background: #4ad991"></span><b>M</b> Move — travel, return fire only</li>
-              <li><span class="dot" style="background: #ff3b30"></span><b>A</b> Attack — engage nearby, flee when low</li>
-              <li><b>no badge</b> — no order (stand &amp; fire in range)</li>
-              <li><span class="dot" style="background: #ff2d20"></span><b>red ring</b> ordered attack target</li>
-              <li><span class="dot" style="background: #e3b341"></span><b>amber ring</b> auto-acquired / retaliation target</li>
+              <li><LegendIcon kind="badge-m" /><b>M</b> Move — travel, return fire only</li>
+              <li><LegendIcon kind="badge-a" /><b>A</b> Attack — engage nearby, flee when low</li>
+              <li><LegendIcon kind="badge-none" /><b>no order</b> — stand &amp; fire in range</li>
+              <li><LegendIcon kind="ring-red" /><b>ordered</b> attack target</li>
+              <li><LegendIcon kind="ring-amber" /><b>auto-acquired</b> / retaliation target</li>
             </ul>
           </CollapsibleSection>
+
+          <CollapsibleSection
+            title="legend"
+            :open="!snapshot.legendCollapsed"
+            @toggle="onToggleLegend"
+          >
+            <ul class="legend">
+              <li><LegendIcon kind="move-cell" /> move cells</li>
+              <li><LegendIcon kind="attack-cell" /> attack cells</li>
+              <li><LegendIcon kind="range-arc" /> range arc (selected)</li>
+              <li><LegendIcon kind="route" /> route <span class="muted">(orange = partial / blocked)</span></li>
+              <li><LegendIcon kind="objective" /> objective destination</li>
+              <li><LegendIcon kind="preserve" /> self-preservation retreat</li>
+              <li><LegendIcon kind="waypoint" /> queued waypoints</li>
+              <li><LegendIcon kind="select-ring" /> selected piece</li>
+              <li><LegendIcon kind="bar-health" /> health (green→red)</li>
+              <li><LegendIcon kind="bar-reload" /> recharge (teal)</li>
+            </ul>
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="firing lines"
+            :open="!snapshot.firingLinesCollapsed"
+            @toggle="onToggleFiringLines"
+          >
+            <ul class="legend">
+              <li><LegendIcon kind="line-clear" /> clear shot</li>
+              <li><LegendIcon kind="line-blocked" /> firing shot blocked</li>
+              <li><LegendIcon kind="line-unreachable" /> out of reach</li>
+              <li><LegendIcon kind="line-engage" /> engaging (auto-acquired)</li>
+              <li><LegendIcon kind="line-potshot" /> pot shot (in range only)</li>
+            </ul>
+          </CollapsibleSection>
+
           <div class="rail-title">hover</div>
-        <div class="hover-readout">
-          <span>{{ snapshot.hoverName ?? '—' }}</span>
-          <span v-if="snapshot.hoverKind" class="muted">· {{ snapshot.hoverKind }}</span>
-        </div>
-        <div class="rail-title">legend</div>
-        <ul class="legend">
-          <li><span class="sw sw-move"></span> move cells</li>
-          <li><span class="sw sw-attack"></span> attack cells</li>
-          <li><span class="ln ln-route"></span> route / objective</li>
-          <li><span class="dot" style="background: #ffd166"></span><b>1·2·3</b> queued waypoints</li>
-          <li><span class="sw sw-bar"></span> health (green→red) · <span class="sw sw-reload"></span> recharge (teal)</li>
-        </ul>
-        <div class="rail-title">firing lines</div>
-        <ul class="legend">
-          <li><span class="ln ln-shoot"></span> clear shot</li>
-          <li><span class="ln ln-blocked"></span> blocked</li>
-          <li><span class="ln ln-unreachable"></span> out of reach</li>
-        </ul>
-        <div class="rail-title">copy</div>
-        <button class="ctl copy-btn" @click="copyLlm">
-          {{ copied === 'llm' ? 'Copied!' : 'Copy history for LLM' }}
-        </button>
-        <button class="ctl copy-btn" @click="copySnapshot">
-          {{ copied === 'snapshot' ? 'Copied!' : 'Copy snapshot for LLM' }}
-        </button>
-        <button class="ctl copy-btn" @click="copyJson">
-          {{ copied === 'json' ? 'Copied!' : 'Copy state (JSON)' }}
-        </button>
-        <div class="save-row">
-          <input
-            v-model="slotName"
-            class="slot-input"
-            type="text"
-            placeholder="slot name"
-            @keydown.enter="onSaveSlot"
-          />
-          <button class="ctl" @click="onSaveSlot">Save</button>
-        </div>
-        <ul v-if="slots.length" class="slots">
-          <li v-for="slot in slots" :key="slot.id">
-            <span class="slot-name" :title="new Date(slot.savedAt).toLocaleString()">{{ slot.name }}</span>
-            <button class="ctl small" @click="onLoadSlot(slot.id)">Load</button>
-            <button class="ctl small" @click="onDeleteSlot(slot.id)">Del</button>
-          </li>
-        </ul>
-        <div class="io-row">
-          <button class="ctl" @click="onExport">Export JSON</button>
-          <button class="ctl" @click="onImportClick">Import JSON</button>
-        </div>
-        <input
-          ref="fileInput"
-          class="hidden-file"
-          type="file"
-          accept="application/json,.json"
-          @change="onImportFile"
-        />
-        <p v-if="ioMessage" class="io-msg">{{ ioMessage }}</p>
+          <div class="hover-readout">
+            <template v-if="hover?.piece">
+              <span class="hover-glyph" :style="{ color: hover.piece.color }">{{ hover.piece.glyph }}</span>
+              <b>{{ hover.piece.name }}</b>
+              <span class="muted">· {{ hover.kind }}</span>
+              <span v-if="hover.piece.redacted" class="muted">· intent hidden</span>
+              <span v-else class="hover-intent">· {{ hoverIntent(hover) }}</span>
+              <span v-if="hover.piece.targetCoord" class="muted">→ {{ hover.piece.targetCoord }}</span>
+            </template>
+            <template v-else>
+              <span>{{ hover?.coord ?? '—' }}</span>
+              <span v-if="hover" class="muted">· {{ hover.kind }}</span>
+            </template>
+          </div>
+
+          <CollapsibleSection
+            title="copy"
+            :open="!snapshot.copyCollapsed"
+            @toggle="onToggleCopy"
+          >
+            <button class="ctl copy-btn" @click="copyLlm">
+              {{ copied === 'llm' ? 'Copied!' : 'Copy history for LLM' }}
+            </button>
+            <button class="ctl copy-btn" @click="copySnapshot">
+              {{ copied === 'snapshot' ? 'Copied!' : 'Copy snapshot for LLM' }}
+            </button>
+            <button class="ctl copy-btn" @click="copyJson">
+              {{ copied === 'json' ? 'Copied!' : 'Copy state (JSON)' }}
+            </button>
+            <div class="save-row">
+              <input
+                v-model="slotName"
+                class="slot-input"
+                type="text"
+                placeholder="slot name"
+                @keydown.enter="onSaveSlot"
+              />
+              <button class="ctl" @click="onSaveSlot">Save</button>
+            </div>
+            <ul v-if="slots.length" class="slots">
+              <li v-for="slot in slots" :key="slot.id">
+                <span class="slot-name" :title="new Date(slot.savedAt).toLocaleString()">{{ slot.name }}</span>
+                <button class="ctl small" @click="onLoadSlot(slot.id)">Load</button>
+                <button class="ctl small" @click="onDeleteSlot(slot.id)">Del</button>
+              </li>
+            </ul>
+            <div class="io-row">
+              <button class="ctl" @click="onExport">Export JSON</button>
+              <button class="ctl" @click="onImportClick">Import JSON</button>
+            </div>
+            <input
+              ref="fileInput"
+              class="hidden-file"
+              type="file"
+              accept="application/json,.json"
+              @change="onImportFile"
+            />
+            <p v-if="ioMessage" class="io-msg">{{ ioMessage }}</p>
+          </CollapsibleSection>
         </aside>
       </div>
     </div>

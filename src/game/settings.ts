@@ -26,6 +26,10 @@ export interface GameSettings {
   /** Whether the left "controls" hints and right "stance" legend are collapsed. */
   controlsCollapsed: boolean
   stanceCollapsed: boolean
+  /** Whether the right-rail legend / firing-lines / copy sections are collapsed. */
+  legendCollapsed: boolean
+  firingLinesCollapsed: boolean
+  copyCollapsed: boolean
 }
 
 /** A validated subset of settings to apply, as read from storage. */
@@ -43,6 +47,9 @@ export interface SettingsPatch {
   rightRailFraction?: number
   controlsCollapsed?: boolean
   stanceCollapsed?: boolean
+  legendCollapsed?: boolean
+  firingLinesCollapsed?: boolean
+  copyCollapsed?: boolean
 }
 
 const SETTINGS_KEY = 'bar-chess.settings'
@@ -94,6 +101,11 @@ export function loadSettings(): SettingsPatch | null {
   }
   if (typeof parsed.controlsCollapsed === 'boolean') out.controlsCollapsed = parsed.controlsCollapsed
   if (typeof parsed.stanceCollapsed === 'boolean') out.stanceCollapsed = parsed.stanceCollapsed
+  if (typeof parsed.legendCollapsed === 'boolean') out.legendCollapsed = parsed.legendCollapsed
+  if (typeof parsed.firingLinesCollapsed === 'boolean') {
+    out.firingLinesCollapsed = parsed.firingLinesCollapsed
+  }
+  if (typeof parsed.copyCollapsed === 'boolean') out.copyCollapsed = parsed.copyCollapsed
   return out
 }
 

@@ -27,15 +27,16 @@ const emit = defineEmits<{ (e: 'toggle'): void }>()
 .collapsible-head {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   width: 100%;
   margin: 0;
-  padding: 0;
+  padding: 2px 0;
   background: none;
   border: none;
   cursor: pointer;
   text-align: left;
   font: inherit;
+  user-select: none;
 }
 
 .collapsible-head:hover {
@@ -43,8 +44,16 @@ const emit = defineEmits<{ (e: 'toggle'): void }>()
 }
 
 .caret {
-  display: inline-block;
-  width: 10px;
-  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.collapsible-head:hover .caret {
+  color: var(--accent);
 }
 </style>

@@ -258,10 +258,10 @@ input {
 
 .rail-title {
   color: var(--heading);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  margin: 10px 0 4px;
+  margin: 12px 0 5px;
 }
 
 .rail-title:first-child {
@@ -274,7 +274,7 @@ input {
   margin: 0 0 6px;
   padding: 0;
   color: var(--muted);
-  line-height: 1.6;
+  line-height: 1.7;
 }
 
 .hints b,
@@ -282,70 +282,22 @@ input {
   color: var(--text);
 }
 
-.dot {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
-  margin-right: 5px;
-  vertical-align: middle;
-}
-
-.sw {
-  display: inline-block;
-  width: 11px;
-  height: 11px;
-  border-radius: 2px;
-  margin-right: 5px;
-  vertical-align: middle;
-}
-
-.sw-move {
-  background: rgba(90, 176, 255, 0.3);
-  border: 1px solid rgba(90, 176, 255, 0.8);
-}
-
-.sw-attack {
-  border: 2px solid rgba(255, 90, 70, 0.9);
-}
-
-.ln {
-  display: inline-block;
-  width: 22px;
-  height: 0;
-  margin-right: 6px;
-  vertical-align: middle;
-  border-top-width: 2px;
-  border-top-style: solid;
-}
-
-.ln-route {
-  border-top: 2px dashed #ffd166;
-}
-
-.ln-shoot {
-  border-top: 2px solid #ff2d20;
-}
-
-.ln-blocked {
-  border-top: 2px dashed #ff2d20;
-}
-
-.ln-unreachable {
-  border-top: 2px dashed #a0a6ac;
-}
-
-.sw-bar {
-  background: #4cd964;
-}
-
-.sw-reload {
-  background: #15c2b6;
-}
-
 .hover-readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
   color: var(--text);
   font-size: 13px;
+}
+
+.hover-readout .hover-glyph {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.hover-readout .hover-intent {
+  color: var(--accent);
 }
 
 .hover-readout .muted {

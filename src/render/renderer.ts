@@ -30,22 +30,26 @@ import { firingLine, routePolyline, type FiringLine, type FiringSegment } from '
 import {
   BAR_BG,
   BAR_HIDE_THRESHOLD,
+  ENGAGE_COLOR,
   POTSHOT_COLOR,
   PRESERVE_COLOR,
   RELOAD_FILL,
   RELOAD_MIN_COOLDOWN,
+  ROUTE_COLOR,
+  ROUTE_PARTIAL_COLOR,
+  SELECT_COLOR,
+  STANCE_ATTACK_COLOR,
+  STANCE_MOVE_COLOR,
+  TRACK_COLOR,
+  UNREACHABLE_COLOR,
   healthColor,
 } from './palette'
 import { bakeTerrain } from './terrain'
 
 const STANCE_COLORS: Record<string, string> = {
-  move: '#4ad991',
-  attack: '#ff3b30',
+  move: STANCE_MOVE_COLOR,
+  attack: STANCE_ATTACK_COLOR,
 }
-const TRACK_COLOR = '#ff2d20'
-const UNREACHABLE_COLOR = '#a0a6ac'
-/** Auto-acquired / retaliation target, distinct from an explicitly ordered one. */
-const ENGAGE_COLOR = '#e3b341'
 
 export class Renderer {
   camera = new Camera()
@@ -278,7 +282,7 @@ export class Renderer {
         motion?.blocked ||
         !(order?.kind === 'goto' && order.dest && vecEquals(order.dest, goal))
       ctx.strokeStyle =
-        motion?.intent === 'preserve' ? PRESERVE_COLOR : partial ? '#ffb347' : '#ffd166'
+        motion?.intent === 'preserve' ? PRESERVE_COLOR : partial ? ROUTE_PARTIAL_COLOR : ROUTE_COLOR
       ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
       // Connect the route to the objective whenever the path does not already
       // end there (empty path, or a best-effort partial route).
@@ -414,7 +418,7 @@ export class Renderer {
     color?: string,
   ): void {
     if (path.length === 0) return
-    ctx.strokeStyle = color ?? (full ? '#ffd166' : 'rgba(255,209,102,0.7)')
+    ctx.strokeStyle = color ?? (full ? ROUTE_COLOR : 'rgba(255,209,102,0.7)')
     ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
     ctx.setLineDash([5 / this.camera.zoom, 4 / this.camera.zoom])
     ctx.beginPath()
@@ -786,7 +790,7 @@ export class Renderer {
       }
 
       if (game.selected.includes(e)) {
-        ctx.strokeStyle = '#ffd166'
+        ctx.strokeStyle = SELECT_COLOR
         ctx.lineWidth = 2 / this.camera.zoom
         ctx.beginPath()
         ctx.arc(pos.x, pos.y, size * 0.56, 0, Math.PI * 2)

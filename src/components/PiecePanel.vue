@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { GameSnapshot } from '../game/game'
 import type { StanceMode } from '../game/types'
+import { INTENT_LABELS } from '../game/intent'
 import { PRESERVE_COLOR, healthColor } from '../render/palette'
 
 const props = defineProps<{
@@ -20,22 +21,13 @@ const stances: Array<{ id: StanceMode; label: string; title: string }> = [
 ]
 
 /** Human labels for the source of the current motion goal. */
-const INTENT_LABEL: Record<string, string> = {
-  none: '',
-  order: 'ordered',
-  preserve: 'self-preservation',
-  defense: 'AI defense',
-  engage: 'engaging',
-  rally: 'rally',
-}
-
 const info = computed(() => props.snapshot.pieceInfo)
 const summary = computed(() => props.snapshot.stanceSummary)
 const activeStance = computed<StanceMode | null>(() =>
   info.value && !summary.value.mixed ? info.value.stance : null,
 )
 const intent = computed(() => info.value?.motion.intent ?? 'none')
-const intentLabel = computed(() => INTENT_LABEL[intent.value] ?? intent.value)
+const intentLabel = computed(() => INTENT_LABELS[intent.value] ?? intent.value)
 /** An autonomous goal (not a player order) — shown as an "auto" pseudo-order. */
 const isAuto = computed(() => intent.value !== 'none' && intent.value !== 'order')
 const orderIdle = computed(() => !info.value || info.value.order.kind === 'none')
