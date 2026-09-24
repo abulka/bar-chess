@@ -211,7 +211,7 @@ requestAnimationFrame(frame):
 - `history` is a bounded list of `HistoryEntry` (cap `HISTORY_LIMIT = 100`);
   `historyTrimmed` counts beats dropped off the front, and `snapshot().turns`
   lazily exposes per-boundary `TurnSummary` metadata (turn, mega, ticks, piece
-  counts, active orders, moves/kills/losses) for the left-rail **turns** list.
+  counts, active orders, moves/kills/losses) for the right-rail **turns** list.
   The list is rebuilt whenever the history changes and is restored on import
   (the trimmed count rides along in `SavedPosition.trimmed`).
 - `togglePause()` starts a mega turn when idle (Play) and closes the running one
@@ -627,7 +627,7 @@ terrainVersion`.
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle |
 | `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed, `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. The **order / auto changes** list shows the piece's last few transitions with their tick, so it is clear *why* an order was issued/replaced/completed/abandoned (e.g. `target at e7 lost — attack abandoned`) and includes autonomous self-preservation retreats |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
-| `TurnList.vue` | left-rail **turns** section: newest-first history rows (jump on click, replay per row), backtrack warning + explicit Fork, trimmed-history hint, per-row piece/order/time info |
+| `TurnList.vue` | right-rail **turns** section: newest-first history rows (jump on click, replay per row), backtrack warning + explicit Fork, trimmed-history hint, per-row piece/order/time info |
 | `StatsBar.vue` | turn/tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Sound config panel, Inspector for the selection |
 | `CollapsibleSection.vue` | clickable rail-title header with a caret that hides its slot body; state owned/persisted by `App.vue` |

@@ -311,7 +311,7 @@ export interface GameSnapshot {
   /** Whether the left "controls" hints and right "stance" legend are collapsed. */
   controlsCollapsed: boolean
   stanceCollapsed: boolean
-  /** Whether the left-rail "turns" list is collapsed. */
+  /** Whether the right-rail "turns" list is collapsed. */
   turnsCollapsed: boolean
   /** Whether the right-rail legend / firing-lines / copy sections are collapsed. */
   legendCollapsed: boolean
@@ -406,7 +406,7 @@ export class Game {
   railsVisible = true
   controlsCollapsed = false
   stanceCollapsed = false
-  /** Whether the left-rail "turns" list section is collapsed. */
+  /** Whether the right-rail "turns" list section is collapsed. */
   turnsCollapsed = false
   legendCollapsed = false
   firingLinesCollapsed = false

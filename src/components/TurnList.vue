@@ -59,7 +59,8 @@ watch(
   <div class="turn-panel">
     <p v-if="backtracked" class="warn">
       viewing turn {{ current }} of {{ latest }} — <b>space</b> replays forward ·
-      <b>f</b> forks a new path (discards {{ dropped }} redone beat{{ dropped === 1 ? '' : 's' }})
+      <b>f</b> forks a new path (discards {{ dropped }} redone beat{{ dropped === 1 ? '' : 's' }}) ·
+      <b>u</b>/<b>r</b> undo/redo · <b>y</b> replay
     </p>
     <p v-if="snapshot.historyTrimmed > 0" class="muted tiny">
       {{ snapshot.historyTrimmed }} earlier beat{{ snapshot.historyTrimmed === 1 ? '' : 's' }} trimmed (history cap)

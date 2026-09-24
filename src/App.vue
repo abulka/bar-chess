@@ -729,18 +729,6 @@ onBeforeUnmount(() => {
             @set-stance="onSetPieceStance"
             @clear-orders="onClearOrders"
           />
-          <CollapsibleSection
-            title="turns"
-            :open="!snapshot.turnsCollapsed"
-            @toggle="onToggleTurns"
-          >
-            <TurnList
-              :snapshot="snapshot"
-              @jump="onJumpTurn"
-              @play="onPlayTurn"
-              @fork="onFork"
-            />
-          </CollapsibleSection>
         </aside>
         <div
           class="splitter vertical"
@@ -896,6 +884,19 @@ onBeforeUnmount(() => {
               @change="onImportFile"
             />
             <p v-if="ioMessage" class="io-msg">{{ ioMessage }}</p>
+          </CollapsibleSection>
+
+          <CollapsibleSection
+            title="turns"
+            :open="!snapshot.turnsCollapsed"
+            @toggle="onToggleTurns"
+          >
+            <TurnList
+              :snapshot="snapshot"
+              @jump="onJumpTurn"
+              @play="onPlayTurn"
+              @fork="onFork"
+            />
           </CollapsibleSection>
         </aside>
       </div>

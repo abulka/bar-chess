@@ -38,7 +38,7 @@ export interface GameSettings {
   /** Whether the left "controls" hints and right "stance" legend are collapsed. */
   controlsCollapsed: boolean
   stanceCollapsed: boolean
-  /** Whether the left-rail "turns" list is collapsed. */
+  /** Whether the right-rail "turns" list is collapsed. */
   turnsCollapsed: boolean
   /** Whether the right-rail legend / firing-lines / copy sections are collapsed. */
   legendCollapsed: boolean
