@@ -2,12 +2,23 @@
 import type { TeamSnapshot } from '../game/game'
 
 const props = defineProps<{ team: TeamSnapshot; side: 'left' | 'right' }>()
-const emit = defineEmits<{ (e: 'deploy', key: string): void }>()
+const emit = defineEmits<{
+  (e: 'deploy', key: string): void
+  (e: 'grab', payload: { key: string; x: number; y: number }): void
+}>()
 
 function blocked(key: string): boolean {
   const p = props.team.pieces.find((x) => x.key === key)
   if (!p) return true
   return p.alive >= p.cap
+}
+
+function onGrab(key: string, event: PointerEvent): void {
+  emit('grab', { key, x: event.clientX, y: event.clientY })
+}
+
+function onClick(key: string): void {
+  if (!blocked(key)) emit('deploy', key)
 }
 </script>
 
@@ -23,8 +34,10 @@ function blocked(key: string): boolean {
       class="unit-card"
       :class="{ blocked: blocked(p.key) }"
       :style="{ '--team': team.color }"
-      :disabled="blocked(p.key)"
-      @click="emit('deploy', p.key)"
+      :aria-disabled="blocked(p.key)"
+      :title="blocked(p.key) ? 'at population cap — drag to place anyway' : 'click to deploy · drag onto a square to place'"
+      @pointerdown="onGrab(p.key, $event)"
+      @click="onClick(p.key)"
     >
       <span class="card-glyph" :style="{ color: team.color }">{{ p.glyph }}</span>
       <span class="card-body">

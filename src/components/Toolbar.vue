@@ -20,6 +20,8 @@ const emit = defineEmits<{
   (e: 'toggle-overlay', key: keyof OverlayFlags): void
   (e: 'toggle-sound'): void
   (e: 'reset'): void
+  (e: 'open-maps'): void
+  (e: 'toggle-editor'): void
   (e: 'toggle-hud'): void
   (e: 'toggle-auto-preserve'): void
   (e: 'toggle-capture-advance'): void
@@ -68,7 +70,17 @@ function onSoundChange(event: Event): void {
   <header class="toolbar">
     <div class="brand">Bar Chess</div>
 
-    <button class="ctl" @click="emit('reset')">Reset</button>
+    <button class="ctl" @click="emit('reset')">New game</button>
+    <button class="ctl" @click="emit('open-maps')">New from template…</button>
+    <button
+      class="ctl"
+      :class="{ active: props.snapshot.editorMode }"
+      :disabled="!props.snapshot.editorMode && !props.snapshot.canEdit"
+      title="place pieces and set up starting positions"
+      @click="emit('toggle-editor')"
+    >
+      {{ props.snapshot.editorMode ? '✓ Editor' : 'Editor' }}
+    </button>
 
     <select
       class="ctl"

@@ -3,11 +3,13 @@ import type { EventRecord } from '../ecs/events'
 import type { BoardSize } from './boards'
 import { Game } from './game'
 import type { GameMode } from './game'
+import { validatePosition } from './position'
+import type { SavedPosition } from './position'
 import type { SimSettings } from './settings'
 import type { StanceMode, TeamId, Vec2 } from './types'
 
 /** Bump when the record shape changes incompatibly. */
-const RECORD_VERSION = 1
+const RECORD_VERSION = 2
 
 /**
  * A player command, normalized to board cells so it survives replay. Piece
@@ -19,6 +21,8 @@ export type GameCommandIntent =
   | { t: 'stance'; from: Vec2; mode: StanceMode }
   | { t: 'clear'; from: Vec2 }
   | { t: 'deploy'; team: TeamId; key: string }
+  | { t: 'place'; team: TeamId; key: string; to: Vec2 }
+  | { t: 'remove'; at: Vec2 }
   | { t: 'mode'; mode: GameMode }
 
 export interface TurnRecord {
@@ -55,6 +59,13 @@ export interface GameRecord {
   playerTeam: TeamId
   seed: number
   settings: SimSettings
+  /**
+   * The exact battle state the recorded inputs start from (position-only, no
+   * history). Restored before the turns are re-applied, so games started from a
+   * template, a loaded position or a sandbox edit replay bit-for-bit. Absent on
+   * pre-v2 records, which fall back to the default layout.
+   */
+  baseline?: SavedPosition
   turns: TurnRecord[]
   result: GameRecordResult | null
 }
@@ -122,6 +133,13 @@ export class Recorder {
     this.byTurn.clear()
   }
 
+  /** Replace the recorded state, e.g. to roll back an editor session. */
+  restore(record: GameRecord): void {
+    this.data = structuredClone(record)
+    this.byTurn = new Map()
+    for (const turn of record.turns) this.byTurn.set(turn.turn, structuredClone(turn))
+  }
+
   /** Fill a result, defaulting each field to the live game's current value. */
   private buildResult(result: Partial<GameRecordResult>): GameRecordResult {
     return {
@@ -167,6 +185,7 @@ function headerFor(game: Game): GameRecord {
     playerTeam: game.playerTeam,
     seed: game.seed,
     settings: game.simSettings(),
+    baseline: game.exportPosition(),
     turns: [],
     result: null,
   }
@@ -192,6 +211,10 @@ export interface ReplayResult {
 export function replayRecord(record: GameRecord, options: ReplayOptions = {}): ReplayResult {
   clearAllComponents()
   const game = new Game(record.size as BoardSize, record.mode, record.seed)
+  if (record.baseline) {
+    const imported = game.importPosition(record.baseline)
+    if (!imported.ok) throw new Error(`could not restore record baseline: ${imported.error}`)
+  }
   game.playerTeam = record.playerTeam
   game.autoPreserve = record.settings.autoPreserve
   game.captureAdvance = record.settings.captureAdvance
@@ -205,7 +228,7 @@ export function replayRecord(record: GameRecord, options: ReplayOptions = {}): R
     record.result?.turns ?? record.turns.reduce((max, turn) => Math.max(max, turn.turn), 0)
   const byTurn = new Map(record.turns.map((turn) => [turn.turn, turn]))
 
-  for (let turn = 1; turn <= totalTurns; turn++) {
+  for (let turn = game.turn + 1; turn <= totalTurns; turn++) {
     if (game.winner !== null) break
     const entry = byTurn.get(turn)
     // Rules in force for this turn (recorded per turn when available); the
@@ -244,6 +267,12 @@ function applyIntents(game: Game, intents: GameCommandIntent[]): void {
       case 'deploy':
         game.deploy(intent.team, intent.key)
         break
+      case 'place':
+        game.placePiece(intent.team, intent.key, intent.to.x, intent.to.y)
+        break
+      case 'remove':
+        game.removePieceAt(intent.at.x, intent.at.y)
+        break
       case 'mode':
         game.setGameMode(intent.mode)
         break
@@ -280,7 +309,8 @@ export function serializeRecord(record: GameRecord): string {
 export function validateRecord(data: unknown): { ok: true } | { ok: false; error: string } {
   if (!data || typeof data !== 'object') return { ok: false, error: 'not an object' }
   const record = data as Partial<GameRecord>
-  if (record.v !== RECORD_VERSION) {
+  // v1 records predate the embedded baseline and replay from the default layout.
+  if (record.v !== 1 && record.v !== RECORD_VERSION) {
     return { ok: false, error: `unsupported record version ${String(record.v)}` }
   }
   if (typeof record.size !== 'number' || typeof record.seed !== 'number') {
@@ -289,6 +319,10 @@ export function validateRecord(data: unknown): { ok: true } | { ok: false; error
   if (!Array.isArray(record.turns)) return { ok: false, error: 'missing turns' }
   if (!record.settings || typeof record.settings !== 'object') {
     return { ok: false, error: 'missing settings' }
+  }
+  if (record.baseline !== undefined) {
+    const valid = validatePosition(record.baseline)
+    if (!valid.ok) return { ok: false, error: `record baseline: ${valid.error}` }
   }
   return { ok: true }
 }

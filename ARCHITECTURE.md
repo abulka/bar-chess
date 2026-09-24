@@ -619,15 +619,18 @@ captureAdvance soundEnabled railsVisible controlsCollapsed stanceCollapsed
 legendCollapsed firingLinesCollapsed copyCollapsed hover
 playerTeam turnActive queuedTurns canReplay canUndo canRedo replaying
 barProgress pendingCommand selectionCount stanceSummary pieceInfo
-terrainVersion`.
+terrainVersion editorMode editorBrush editorDirty canEdit mapName`.
 
 | Component | Responsibility |
 | --------- | -------------- |
-| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay/fork, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, reset |
-| `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle |
+| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay/fork, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, reset, `New game`, `New from template…`, editor toggle |
+| `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle; routes map-editor clicks/drags (stamp, continuous erase) and exposes `cellAtClient`/`overBoard` for palette drops |
 | `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed, `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. The **order / auto changes** list shows the piece's last few transitions with their tick, so it is clear *why* an order was issued/replaced/completed/abandoned (e.g. `target at e7 lost — attack abandoned`) and includes autonomous self-preservation retreats |
-| `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane |
+| `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane, drag drops the piece on a chosen cell (or arms an editor brush in editor mode) |
 | `TurnList.vue` | right-rail **turns** section: newest-first history rows (jump on click, replay per row), backtrack warning + explicit Fork, trimmed-history hint, per-row piece/order/time info |
+| `EditorPanel.vue` | floating map-editor controls: map name, save, eraser, blank-board size, `Maps…`, cancel/done |
+| `MapsModal.vue` | saved-map browser: `MapThumbnail` previews with Play / Edit / Rename / Export / Delete, plus New map and Import JSON |
+| `MapThumbnail.vue` | square canvas rendering `drawMapPreview` for a `SavedMap` |
 | `StatsBar.vue` | turn/tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Sound config panel, Inspector for the selection |
 | `CollapsibleSection.vue` | clickable rail-title header with a caret that hides its slot body; state owned/persisted by `App.vue` |
@@ -748,14 +751,45 @@ malformed history) before anything is mutated.
   saved sim settings, restores the history/cursor (trimming to `HISTORY_LIMIT`),
   resets all transient turn/replay/selection state, pauses and rebuilds `ctx`.
   A position-only save (no `history`) still loads, starting a fresh history.
-- **Save/Load**: named slots in `localStorage` (`src/game/storage.ts`), keys
-  `bar-chess.positions.index` and `bar-chess.positions.<id>`; a same-named save
-  overwrites. Slots save the full game by default and record a turn count
-  (`SlotMeta.turns`); if the storage quota rejects the history, the save falls
-  back to position-only and reports it. Load/Delete apply immediately.
+- **Save/Load**: named slots in **IndexedDB** (`src/game/storage.ts` over the
+  Promise wrapper `src/game/idb.ts`, DB `bar-chess`), split between a light
+  `saveIndex` store (meta) and a `saves` store (`{ id, data }`) so listing never
+  loads a multi-turn history; a same-named save overwrites. Slots save the full
+  game by default and record a turn count (`SlotMeta.turns`); if a write rejects
+  (e.g. quota / clone failure), the save falls back to position-only and reports
+  it. All slot APIs are async and never throw to the caller; old `localStorage`
+  slots are not migrated.
 - **Copy / Export / Import**: **Copy state (JSON)** emits a position-only
   `SavedPosition` for LLM/debug, while **Export JSON** includes the full history;
   both re-import. `Game.toDebugJson()` remains the terse debug view.
+
+### Maps (templates & map editor)
+
+A **map** is a reusable starting position, deliberately leaner than a
+`SavedPosition`: `SavedMap` (`src/game/map.ts`) is terrain + spawns/lanes + a
+`Placement[]` of `{ team, key, x, y }`. Pieces are always full health with no
+orders, so a map is a scenario rather than a savegame; `validateMap` rejects a
+bad version, terrain/size mismatch, unknown pieces, out-of-bounds or overlapping
+placements.
+
+- **Persistence**: `src/game/mapStore.ts` stores whole `SavedMap` records in the
+  IndexedDB `maps` store (`listMaps`/`getMap`/`saveMap`/`renameMap`/`deleteMap`).
+  `MapsModal.vue` lists them with a `MapThumbnail` canvas (`drawMapPreview` in
+  `src/render/editor.ts`) and offers Play / Edit / Rename / Export / Delete, New
+  map and Import JSON.
+- **Loading**: `Game.loadMap(map, seed)` shares `loadSize`'s reset path
+  (`loadBoard`), rebuilding the `Board` from the map (terrain, spawns, lanes) and
+  placing its pieces; it also records `Game.currentMap` so study batches re-run
+  the template. `Game.newMap(size)` starts a blank board with the editor open.
+- **Editor**: toggling `Game.setEditor(true)` snapshots the battle (history
+  included) into `editorBackup`, pauses and clears transient state. Piece
+  brushes/eraser are stamped through `placePiece`/`removePieceAt` (sandbox: no
+  cap/supply check, allowed only while `canEdit`, i.e. no turn or replay is
+  running). Done pushes an undo boundary so `u` steps back over the session and
+  re-runs study; Cancel restores `editorBackup` via `importPosition`, and
+  `App.vue` rolls the `Recorder` back to its pre-session copy. The renderer draws
+  a validity-tinted cursor and brush ghost (`src/render/editor.ts`). Only pieces
+  are editable in this pass; terrain and spawn/lane painting remain future work.
 
 `Rng.getState()` is canonicalized to 32 bits so a save/restore produces a
 byte-identical stream (see §10).
@@ -819,24 +853,30 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   inputs)` fully determines a battle. The seed is exposed on `GameSnapshot.seed`
   and `SavedPosition.seed` (absent on pre-seed saves, defaulted on load).
 - **Game record.** `Game.onCommand` reports player commands (order, stance,
-  clear, deploy, mode) normalized to board cells. `Recorder`
+  clear, deploy, place, remove, mode) normalized to board cells. `Recorder`
   (`src/game/record.ts`) groups them by the turn they precede; a `GameRecord` is
-  a header (`boardId`, `size`, `mode`, `playerTeam`, `seed`, rule settings) plus
-  turns and result. Each turn entry also snapshots the rule settings when its
-  first order was issued, so a mid-game toggle replays correctly; the header is
-  refreshed from the live game at export and is the fallback for order-free
+  a header (`boardId`, `size`, `mode`, `playerTeam`, `seed`, rule settings,
+  `baseline`) plus turns and result. Since v2 the header embeds `baseline`, a
+  position-only `SavedPosition` of the exact starting battle (captured by
+  `Recorder.reset`), so games started from a template, a loaded position or a
+  sandbox edit replay bit-for-bit rather than from the default layout; v1 records
+  (no baseline) still load. Each turn entry also snapshots the rule settings when
+  its first order was issued, so a mid-game toggle replays correctly; the header
+  is refreshed from the live game at export and is the fallback for order-free
   turns. AI-vs-AI records carry no intents — the seed alone reproduces
-  them. `replayRecord` clears the component stores, rebuilds
-  `new Game(size, mode, seed)`, re-applies each turn's intents and re-simulates;
-  it is exact (`tests/unit/record.spec.ts`). This is the compact, replayable
-  stand-in for a stack of position snapshots. `Recorder.snapshot()` returns a
-  detached copy with the current outcome (and `result.partial` while unfinished)
-  without mutating the live recorder; the record is a replay format, not a
+  them. `replayRecord` clears the component stores, constructs `new Game(...)`,
+  imports the baseline if present, then re-applies each turn's intents and
+  re-simulates; it is exact (`tests/unit/record.spec.ts`). This is the compact,
+  replayable stand-in for a stack of position snapshots. `Recorder.snapshot()`
+  returns a detached copy with the current outcome (and `result.partial` while
+  unfinished) without mutating the live recorder; `Recorder.restore(record)` rolls
+  it back (used when the editor is cancelled). The record is a replay format, not a
   narrative, so it is only pasted to an LLM as part of the **Copy history for LLM** bundle.
 - **Study mode.** The bottom HUD's **Study** tab (`src/components/StudyPanel.vue`)
   runs a batch of games **on the live board** so they can be watched. A pure
   `StudyController` (`src/game/study.ts`) drives the main `Game`: per game it
-  `loadSize`es a new seed, resets the `Recorder`, auto-advances turns with
+  reloads the current template via `loadMap` (falling back to `loadSize` for a
+  different size) with a new seed, resets the `Recorder`, auto-advances turns with
   `queueTurn()`, and applies an optional scripted "human" policy (`advance`,
   `focus`, `turtle`) before each turn. It samples a per-turn **piece trace**
   (`src/game/trace.ts`) and collects the event stream. `Stop game` keeps the
@@ -1113,7 +1153,11 @@ src/
     pieces.ts                  Piece/Weapon/Projectile defs, weaponVision
     factory.ts                 createPiece
     position.ts                SavedPosition serialize/validate/restore
-    record.ts                  seed+inputs GameRecord, Recorder, deterministic replay
+    map.ts                     SavedMap export/validate, buildMapBoard, emptyMap
+    idb.ts                     promise wrapper over IndexedDB (openDb, get/put/delete)
+    storage.ts                 IndexedDB save slots
+    mapStore.ts                IndexedDB saved maps
+    record.ts                  seed+inputs GameRecord (+baseline), Recorder, deterministic replay
     trace.ts                   per-turn piece trace types + labels
     transcript.ts              LLM-readable per-game transcript
     analysis.ts                per-game gap flags + batch summary
@@ -1121,15 +1165,15 @@ src/
     study.ts                   StudyController: watchable batch on the live board
     shorthand.ts               compact read-oriented position dump for LLMs
     settings.ts                persisted UI/session preferences (localStorage)
-    storage.ts                 localStorage save slots
     game.ts                    Game facade + loop + GameSnapshot + runTicks
   render/
     camera.ts                  centre-based camera with fit floor
     terrain.ts                 bakeTerrain
     overlays.ts                pure firingLine/routePolyline segment data
+    editor.ts                  editor cursor + drawMapPreview thumbnails
     renderer.ts                canvas draw pipeline + overlays
   components/
-    Toolbar.vue BoardView.vue PiecePanel.vue TurnList.vue ReinforcementBar.vue StatsBar.vue EventLog.vue SoundPanel.vue SynthEditor.vue Knob.vue StudyPanel.vue
+    Toolbar.vue BoardView.vue PiecePanel.vue TurnList.vue ReinforcementBar.vue EditorPanel.vue MapsModal.vue MapThumbnail.vue StatsBar.vue EventLog.vue SoundPanel.vue SynthEditor.vue Knob.vue StudyPanel.vue
 tests/
   unit/                        logic, systems, Game integration, perf guards,
                                settings/events + audio (fake AudioContext)

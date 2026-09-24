@@ -352,6 +352,14 @@ colour for both), pulsing while playing.
       projected projectile paths.
 - [ ] **Phase 9 — Map maker.** Obstacles, entry lanes, formation placement,
       import/export.
+  - [x] **Phase 9a — Piece placement & templates.** Map editor overlay (`Editor`
+        toggle) with click/drag piece brushes and an eraser on the main board,
+        sandbox mid-game drops from the rosters, `SavedMap` templates in
+        IndexedDB with a thumbnail browser (`New from template…`), and
+        template-exact replay via a `GameRecord` baseline.
+  - [ ] **Phase 9b — Terrain & spawn editing.** Paint the five terrain types and
+        edit spawn rectangles / entry lanes; currently maps carry terrain
+        read-only.
 - [ ] **Phase 10 — Replay (stretch).** Record seed + ordered commands; re-sim.
 
 ## Rule bank (planned)

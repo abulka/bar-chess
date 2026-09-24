@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Cell, Health, PieceType, Team } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
+import { exportMap } from '../../src/game/map'
 import {
   Recorder,
   parseRecord,
@@ -8,6 +9,7 @@ import {
   serializeRecord,
   validateRecord,
 } from '../../src/game/record'
+import type { GameRecord } from '../../src/game/record'
 import { clearComponents } from '../helpers'
 
 function playTurns(game: Game, turns: number): void {
@@ -153,5 +155,69 @@ describe('game record', () => {
     expect(copy.result?.turns).toBe(2)
     expect(copy.result?.partial).toBe(true)
     expect(recorder.record.result).toBeNull()
+  })
+
+  it('replays a game started from a custom map exactly', () => {
+    const template = new Game(8, 'human-vs-ai', 11)
+    const map = exportMap(template, 'odd layout')
+    map.placements = [
+      { team: 'red', key: 'king', x: 3, y: 3 },
+      { team: 'blue', key: 'king', x: 4, y: 4 },
+      { team: 'red', key: 'rook', x: 0, y: 0 },
+      { team: 'blue', key: 'knight', x: 7, y: 7 },
+    ]
+
+    const game = new Game(8, 'human-vs-ai', 11)
+    game.loadMap(map, 11)
+    const recorder = new Recorder(game)
+
+    for (let turn = 0; turn < 4 && game.winner === null; turn++) {
+      for (const e of bluePieces(game)) {
+        const cell = game.world.require(e, Cell)
+        game.selected = [e]
+        game.orderAt({ x: cell.x, y: 0 }, 'move')
+      }
+      game.selected = []
+      game.beginTurn()
+      let guard = 0
+      while (game.turnActive && guard++ < 2000) game.runTicks(1)
+    }
+
+    const before = JSON.stringify(game.toDebugJson())
+    const record = recorder.finish({ turns: game.turn, ticks: game.tick })
+    expect(record.baseline).toBeDefined()
+
+    const replay = replayRecord(record)
+    expect(JSON.stringify(replay.game.toDebugJson())).toBe(before)
+  })
+
+  it('replays sandbox placements and removals', () => {
+    const game = new Game(8, 'human-vs-ai', 3)
+    const recorder = new Recorder(game)
+    game.placePiece('red', 'queen', 4, 4)
+    game.removePieceAt(0, 0)
+    playTurns(game, 2)
+
+    const before = JSON.stringify(game.toDebugJson())
+    const record = recorder.finish({ turns: game.turn, ticks: game.tick })
+    const replay = replayRecord(record)
+    expect(JSON.stringify(replay.game.toDebugJson())).toBe(before)
+  })
+
+  it('still accepts version 1 records without a baseline', () => {
+    const legacy = {
+      v: 1,
+      boardId: 'board-8',
+      size: 8,
+      mode: 'ai-vs-ai',
+      playerTeam: 'blue',
+      seed: 1,
+      settings: { autoPreserve: true, captureAdvance: false, chessKills: false },
+      turns: [],
+      result: null,
+    }
+    expect(validateRecord(legacy).ok).toBe(true)
+    const replay = replayRecord(legacy as unknown as GameRecord)
+    expect(replay.game.board.width).toBe(8)
   })
 })

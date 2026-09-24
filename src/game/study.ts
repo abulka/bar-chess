@@ -221,7 +221,14 @@ export class StudyController {
     this.game.autoPreserve = this.options.autoPreserve
     this.game.captureAdvance = this.options.captureAdvance
     this.game.chessKills = this.options.chessKills
-    this.game.loadSize(this.options.size as BoardSize, seed)
+    // Re-run the current template when the requested size matches it, so study
+    // batches keep custom starting positions instead of resetting to the default.
+    const template = this.game.currentMap
+    if (template && template.board.width === this.options.size) {
+      this.game.loadMap(template, seed)
+    } else {
+      this.game.loadSize(this.options.size as BoardSize, seed)
+    }
     this.recorder.reset()
     this.log.begin()
   }

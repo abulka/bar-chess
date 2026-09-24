@@ -23,6 +23,8 @@ import type { MotionData, MotionIntent, OrderData, OrderLogEntry, OrderStep } fr
 import { Board } from './board'
 import type { BoardSize, Placement } from './boards'
 import { createBoardData, initialArmy } from './boards'
+import { buildMapBoard, emptyMap } from './map'
+import type { SavedMap } from './map'
 import {
   BOTTOM_FRACTION_DEFAULT,
   BOTTOM_FRACTION_MAX,
@@ -204,6 +206,20 @@ export interface OverlayFlags {
   healing: boolean
 }
 
+/** What the map editor stamps on the next board click. */
+export type EditorBrush =
+  | { kind: 'piece'; team: TeamId; key: string }
+  | { kind: 'erase' }
+
+/** A display-ready view of the active editor brush. */
+export interface EditorBrushSnapshot {
+  kind: 'piece' | 'erase'
+  team: TeamId | null
+  key: string | null
+  glyph: string | null
+  name: string | null
+}
+
 interface TurnState {
   world: WorldSnapshot
   rng: number
@@ -356,6 +372,16 @@ export interface GameSnapshot {
   historyLength: number
   /** Beats dropped off the front by the history cap (0 when nothing was lost). */
   historyTrimmed: number
+  /** Map editor: whether the editor overlay is active. */
+  editorMode: boolean
+  /** Active editor brush, or null when none is armed. */
+  editorBrush: EditorBrushSnapshot | null
+  /** True when editor edits changed the battle since entry. */
+  editorDirty: boolean
+  /** Whether placement/removal is allowed right now (no turn/replay running). */
+  canEdit: boolean
+  /** Name of the currently loaded map/board. */
+  mapName: string
 }
 
 function createTeamRuntime(controller: TeamController): TeamRuntime {
@@ -429,6 +455,14 @@ export class Game {
   chessKills = false
   /** Transient BAR-style command awaiting the next left-click. */
   pendingCommand: StanceMode = 'none'
+
+  /** The saved map this battle was loaded from, if any (used to re-run study). */
+  currentMap: SavedMap | null = null
+  /** Map editor overlay: active brush and a backup for cancel/dirty tracking. */
+  editorMode = false
+  editorBrush: EditorBrush | null = null
+  private editorBackup: SavedPosition | null = null
+  private editorDirty = false
 
   overlays: OverlayFlags = {
     grid: true,
@@ -1452,6 +1486,24 @@ export class Game {
   }
 
   loadSize(size: BoardSize, seed: number = this.seed): void {
+    this.currentMap = null
+    this.loadBoard(new Board(createBoardData(size)), initialArmy(size), seed)
+  }
+
+  /** Load a saved map as a fresh battle: its terrain, spawns and starting pieces. */
+  loadMap(map: SavedMap, seed: number = this.seed): void {
+    this.currentMap = map
+    this.loadBoard(buildMapBoard(map), map.placements.slice(), seed)
+  }
+
+  /** Start a blank map at `size` and open the editor on it. */
+  newMap(size: BoardSize, name?: string): void {
+    this.loadMap(emptyMap(size, name))
+    this.setEditor(true)
+  }
+
+  /** Shared reset used by `loadSize` / `loadMap`: fresh world, board and army. */
+  private loadBoard(board: Board, army: Placement[], seed: number): void {
     this.world.clear()
     this.seed = seed >>> 0
     const controllers = controllersFor(this.gameMode, this.playerTeam)
@@ -1459,7 +1511,7 @@ export class Game {
       red: createTeamRuntime(controllers.red),
       blue: createTeamRuntime(controllers.blue),
     }
-    this.board = new Board(createBoardData(size))
+    this.board = board
     this.occupancy.clear()
     this.tick = 0
     this.turn = 0
@@ -1482,8 +1534,12 @@ export class Game {
     this.queuedForward = 0
     this.forwardPlay = false
     this.paused = true
+    this.editorMode = false
+    this.editorBrush = null
+    this.editorBackup = null
+    this.editorDirty = false
     this.ctx = this.buildContext()
-    this.placeArmy(initialArmy(size))
+    this.placeArmy(army)
     this.history = [this.boundary()]
     this.cursor = 0
     this.historyTrimmed = 0
@@ -1501,6 +1557,135 @@ export class Game {
       this.cmds.deploy.push({ team, key })
       this.onCommand?.({ t: 'deploy', team, key })
     })
+  }
+
+  /** Whether scenario edits (place/remove) are allowed right now. */
+  get canEdit(): boolean {
+    return !this.turnActive && !this.replaying
+  }
+
+  /**
+   * Enter or leave the map editor. Entering snapshots the whole battle (history
+   * included) so Cancel can restore it; leaving keeps the edits and records a
+   * history boundary so undo can step back over the session.
+   */
+  setEditor(enabled: boolean): void {
+    if (enabled === this.editorMode) return
+    if (enabled) {
+      this.editorBackup = this.exportPosition({ history: true })
+      this.editorDirty = false
+      this.editorMode = true
+      this.paused = true
+      this.pendingCommand = 'none'
+      this.selected = []
+      this.bus.emit('info', 'map editor — pick a piece, then click or drag onto the board')
+      return
+    }
+    this.editorMode = false
+    this.editorBrush = null
+    const changed = this.editorDirty
+    if (changed) this.pushHistoryBoundary()
+    this.editorBackup = null
+    this.editorDirty = false
+    this.bus.emit('info', changed ? 'map editor changes applied' : 'map editor closed')
+  }
+
+  /** Restore the battle exactly as it was when the editor opened. */
+  cancelEditor(): void {
+    if (!this.editorMode) return
+    const backup = this.editorBackup
+    this.editorMode = false
+    this.editorBrush = null
+    this.editorBackup = null
+    this.editorDirty = false
+    if (backup) {
+      this.importPosition(backup)
+      this.bus.emit('info', 'map editor changes discarded')
+    }
+  }
+
+  setEditorBrush(brush: EditorBrush | null): void {
+    this.editorBrush = brush
+    if (brush?.kind === 'piece') {
+      this.bus.emit('info', `brush: ${PIECES[brush.key]?.name ?? brush.key}`)
+    } else if (brush?.kind === 'erase') {
+      this.bus.emit('info', 'brush: eraser')
+    }
+  }
+
+  /** Record the current world as a new undo boundary (truncates any redo). */
+  private pushHistoryBoundary(): void {
+    this.history.length = this.cursor + 1
+    this.history.push(this.boundary())
+    if (this.history.length > Game.HISTORY_LIMIT) this.history.shift()
+    this.cursor = this.history.length - 1
+  }
+
+  /** The piece occupying a cell, if any. */
+  pieceAt(x: number, y: number): Entity | null {
+    if (!this.board.inBounds(x, y)) return null
+    return buildOccupancy(this.world, this.board).get(this.board.cellIndex(x, y)) ?? null
+  }
+
+  /** Whether a piece could be placed on this cell (passable and unoccupied). */
+  canPlaceAt(x: number, y: number): boolean {
+    return this.board.passable(x, y) && this.pieceAt(x, y) === null
+  }
+
+  /**
+   * Sandbox placement: add one piece at a specific cell, ignoring supply/cap.
+   * Allowed only while no turn or replay is running so the sim stays settled.
+   */
+  placePiece(team: TeamId, key: string, x: number, y: number): boolean {
+    if (!this.canEdit) {
+      this.bus.emit('warn', 'finish the turn before editing the board')
+      return false
+    }
+    const def = PIECES[key]
+    if (!def) return false
+    if (!this.board.inBounds(x, y)) return false
+    if (!this.board.passable(x, y)) {
+      this.bus.emit('warn', `cannot place on ${this.board.defAt(x, y).name}`)
+      return false
+    }
+    if (this.pieceAt(x, y) !== null) {
+      this.bus.emit('warn', 'that square is already occupied')
+      return false
+    }
+    const e = createPiece(this.ctx, team, def, { x, y })
+    const runtime = this.teams[team]
+    runtime.alive[key] = (runtime.alive[key] ?? 0) + 1
+    runtime.deployed++
+    if (this.editorMode) this.editorDirty = true
+    this.onCommand?.({ t: 'place', team, key, to: { x, y } })
+    this.bus.emit('spawn', `${team} placed ${def.name} #${e} at (${x},${y})`, {
+      entity: e,
+      team,
+      data: { key },
+    })
+    return true
+  }
+
+  /** Remove the piece on a cell (editor eraser / sandbox cleanup). */
+  removePieceAt(x: number, y: number): boolean {
+    if (!this.canEdit) {
+      this.bus.emit('warn', 'finish the turn before editing the board')
+      return false
+    }
+    const e = this.pieceAt(x, y)
+    if (e === null) return false
+    const team = this.world.get(e, Team)
+    const key = this.world.get(e, PieceType)?.kind
+    if (team && key) {
+      const runtime = this.teams[team]
+      runtime.alive[key] = Math.max(0, (runtime.alive[key] ?? 1) - 1)
+      runtime.deployed = Math.max(0, runtime.deployed - 1)
+    }
+    this.world.destroy(e)
+    this.selected = this.selected.filter((s) => s !== e)
+    if (this.editorMode) this.editorDirty = true
+    this.onCommand?.({ t: 'remove', at: { x, y } })
+    return true
   }
 
   /** World-pixel hit test; `additive` toggles the piece in the multi-selection. */
@@ -2183,6 +2368,12 @@ export class Game {
     this.accumulator = 0
     this.paused = true
 
+    this.currentMap = null
+    this.editorMode = false
+    this.editorBrush = null
+    this.editorBackup = null
+    this.editorDirty = false
+
     this.terrainVersion++
     this.ctx = this.buildContext()
     this.restoreHistory(saved)
@@ -2417,6 +2608,27 @@ export class Game {
       historyIndex: this.cursor,
       historyLength: this.history.length,
       historyTrimmed: this.historyTrimmed,
+      editorMode: this.editorMode,
+      editorBrush: this.editorBrushSnapshot(),
+      editorDirty: this.editorDirty,
+      canEdit: this.canEdit,
+      mapName: this.board.data.name,
+    }
+  }
+
+  private editorBrushSnapshot(): EditorBrushSnapshot | null {
+    const brush = this.editorBrush
+    if (!brush) return null
+    if (brush.kind === 'erase') {
+      return { kind: 'erase', team: null, key: null, glyph: null, name: 'eraser' }
+    }
+    const def = PIECES[brush.key]
+    return {
+      kind: 'piece',
+      team: brush.team,
+      key: brush.key,
+      glyph: def?.glyph ?? null,
+      name: def?.name ?? brush.key,
     }
   }
 

@@ -26,6 +26,7 @@ import { coordName, fileLabel } from '../game/coords'
 import { TEAM_IDS } from '../game/constants'
 import type { Game } from '../game/game'
 import { Camera } from './camera'
+import { drawEditorCursor } from './editor'
 import { firingLine, routePolyline, type FiringLine, type FiringSegment } from './overlays'
 import {
   BAR_BG,
@@ -129,6 +130,7 @@ export class Renderer {
     this.drawProjectiles(ctx, game)
     this.drawFx(ctx, game)
     this.drawHoverCursor(ctx, game, occupied)
+    if (game.editorMode) drawEditorCursor(ctx, game, this.camera.zoom)
     ctx.restore()
 
     this.drawCoords(ctx, game)

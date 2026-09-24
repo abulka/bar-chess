@@ -8,6 +8,8 @@ const props = defineProps<{
   game: Game
   /** Pending BAR-style command (`m`/`a`), used for the cursor and click routing. */
   pending: StanceMode
+  /** Whether the map editor is active (cursor + pointer routing). */
+  editor: boolean
 }>()
 
 const emit = defineEmits<{ (e: 'changed'): void; (e: 'ordered'): void }>()
@@ -29,6 +31,8 @@ let observer: ResizeObserver | null = null
 let pointerDown = false
 let selecting = false
 let commandClick = false
+let editing = false
+let lastEditKey = ''
 let moved = false
 let button = 0
 let shiftDown = false
@@ -55,6 +59,32 @@ function cellAt(event: PointerEvent | MouseEvent): Vec2 {
   return props.game.board.worldToCell(w.x, w.y)
 }
 
+/** Board cell under an arbitrary client point, for palette drops from outside. */
+function cellAtClient(clientX: number, clientY: number): Vec2 {
+  const canvas = canvasRef.value
+  if (!renderer || !canvas) return { x: -1, y: -1 }
+  const rect = canvas.getBoundingClientRect()
+  const w = renderer.camera.screenToWorld(clientX - rect.left, clientY - rect.top)
+  return props.game.board.worldToCell(w.x, w.y)
+}
+
+function overBoard(clientX: number, clientY: number): boolean {
+  const canvas = canvasRef.value
+  if (!canvas) return false
+  const rect = canvas.getBoundingClientRect()
+  return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+}
+
+/** Apply the active editor brush at a cell; `place` true only for a clean click. */
+function applyEdit(cell: Vec2, place: boolean): void {
+  if (!props.game.editorMode || !props.game.board.inBounds(cell.x, cell.y)) return
+  const brush = props.game.editorBrush
+  if (!brush) return
+  if (brush.kind === 'erase') props.game.removePieceAt(cell.x, cell.y)
+  else if (place) props.game.placePiece(brush.team, brush.key, cell.x, cell.y)
+  emit('changed')
+}
+
 function additive(event: PointerEvent | MouseEvent): boolean {
   return event.ctrlKey || event.metaKey
 }
@@ -72,11 +102,22 @@ function onPointerDown(event: PointerEvent): void {
   shiftDown = event.shiftKey
   pointerDown = true
   commandClick = false
+  editing = false
+  lastEditKey = ''
 
   // Middle always pans; while a command prefix is armed, left-click issues the
   // command (Shift keeps it armed to queue more) instead of selecting/panning.
   if (button === 1) {
     panning.value = true
+  } else if (props.game.editorMode) {
+    if (event.shiftKey || button !== 0) {
+      panning.value = true
+    } else {
+      editing = true
+      const cell = cellAt(event)
+      lastEditKey = `${cell.x},${cell.y}`
+      applyEdit(cell, false)
+    }
   } else if (button === 0 && props.pending !== 'none') {
     commandClick = true
   } else if (event.shiftKey) {
@@ -95,7 +136,14 @@ function onPointerMove(event: PointerEvent): void {
   const p = pointerPos(event)
   if (Math.abs(p.x - lastX) > DRAG_THRESHOLD || Math.abs(p.y - lastY) > DRAG_THRESHOLD) moved = true
 
-  if (panning.value && moved) {
+  if (editing) {
+    const cell = cellAt(event)
+    const key = `${cell.x},${cell.y}`
+    if (key !== lastEditKey) {
+      lastEditKey = key
+      applyEdit(cell, false)
+    }
+  } else if (panning.value && moved) {
     renderer?.camera.panBy(p.x - lastX, p.y - lastY)
     emit('changed')
   } else if (selecting) {
@@ -112,12 +160,23 @@ function onPointerMove(event: PointerEvent): void {
 
 function onPointerUp(event: PointerEvent): void {
   canvasRef.value?.releasePointerCapture(event.pointerId)
+  if (!pointerDown) return
   pointerDown = false
   panning.value = false
   const wasCommand = commandClick
   commandClick = false
+  const wasEditing = editing
+  editing = false
 
   if (button === 2) {
+    selecting = false
+    box.value = null
+    moved = false
+    return
+  }
+
+  if (wasEditing) {
+    if (!moved && button === 0) applyEdit(cellAt(event), true)
     selecting = false
     box.value = null
     moved = false
@@ -164,6 +223,12 @@ function onPointerUp(event: PointerEvent): void {
 
 function onContextMenu(event: MouseEvent): void {
   event.preventDefault()
+  if (props.game.editorMode) {
+    const cell = cellAt(event)
+    props.game.removePieceAt(cell.x, cell.y)
+    emit('changed')
+    return
+  }
   props.game.clearPendingCommand()
   props.game.orderAt(cellAt(event))
   emit('ordered')
@@ -199,7 +264,7 @@ function resize(): void {
   renderer?.resize()
 }
 
-defineExpose({ fit, resize })
+defineExpose({ fit, resize, cellAtClient, overBoard })
 
 onMounted(() => {
   const canvas = canvasRef.value
@@ -227,6 +292,7 @@ onBeforeUnmount(() => {
       class="board-canvas"
       :class="{
         panning: panning,
+        editor: props.editor,
         'pending-move': props.pending === 'move',
         'pending-attack': props.pending === 'attack',
       }"

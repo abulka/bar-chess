@@ -17,7 +17,7 @@ test('saves a named slot, survives reload, loads and deletes it', async ({ page 
   expect(await page.evaluate(() => (window as any).game.board.width)).toBe(8)
 
   await page.getByRole('button', { name: 'Load', exact: true }).click()
-  expect(await page.evaluate(() => (window as any).game.board.width)).toBe(16)
+  await expect.poll(() => page.evaluate(() => (window as any).game.board.width)).toBe(16)
 
   await page.reload()
   await page.waitForFunction(() => Boolean((window as any).game))
@@ -67,7 +67,7 @@ test('imports a position from a JSON file', async ({ page }) => {
   })
   expect(await page.evaluate(() => (window as any).game.board.width)).toBe(8)
 
-  await page.setInputFiles('input[type=file]', {
+  await page.setInputFiles('#position-file', {
     name: 'position.json',
     mimeType: 'application/json',
     buffer: Buffer.from(json),
@@ -110,7 +110,7 @@ test('copies the importable state as JSON', async ({ page, context }) => {
 })
 
 test('reports invalid imported JSON without breaking the game', async ({ page }) => {
-  await page.setInputFiles('input[type=file]', {
+  await page.setInputFiles('#position-file', {
     name: 'bad.json',
     mimeType: 'application/json',
     buffer: Buffer.from('{"version":999}'),
