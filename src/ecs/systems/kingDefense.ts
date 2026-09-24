@@ -9,6 +9,7 @@ import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import { coverageThreats, homeCell } from './preservation'
 import type { Threat, ThreatMemo } from './preservation'
+import { bestSafeStep, buildCoverage, dangerAt, minThreatDist } from './threatField'
 
 /** How close an enemy must get before the AI king reacts even without a shot. */
 export const KING_THREAT_RADIUS = 3
@@ -121,57 +122,28 @@ export function aiKingGoal(ctx: SimContext, king: Entity, team: TeamId, threats:
   // Threat weight = damage, for every threat's firing geometry — including a
   // nearby enemy that cannot hit the king yet but can hit its escape square.
   const selfFree = occupiedExcept(ctx.board, ctx.occupancy, king)
-  const coverages = threats
-    .map((t) => {
-      const od = PIECES[ctx.world.require(t.entity, PieceType).kind]
-      const cells = od ? fireCells(ctx.board, t.cell, WEAPONS[od.weapon].geometry, t.team, selfFree) : []
-      return { cells, weight: t.damage }
-    })
-
-  const dangerAt = (x: number, y: number): number => {
-    let danger = 0
-    for (const cov of coverages) {
-      if (containsCell(cov.cells, x, y)) danger += cov.weight
-    }
-    // Step-in penalty: adjacent enemies can strike next turn, nearby ones apply
-    // pressure even without a current line.
-    for (const t of threats) {
-      const d = chebyshev(x, y, t.cell.x, t.cell.y)
-      if (d <= 1) danger += 30
-      else if (d <= KING_THREAT_RADIUS) danger += (KING_THREAT_RADIUS - d + 1) * 3
-    }
-    return danger
-  }
-  const minThreatDist = (x: number, y: number): number => {
-    let min = Infinity
-    for (const t of threats) min = Math.min(min, dist(x, y, t.cell.x, t.cell.y))
-    return min
+  const coverages = buildCoverage(ctx, threats, selfFree)
+  // Step-in penalty: adjacent enemies can strike next turn, nearby ones apply
+  // pressure even without a current line.
+  const proximityPenalty = (d: number): number => {
+    if (d <= 1) return 30
+    if (d <= KING_THREAT_RADIUS) return (KING_THREAT_RADIUS - d + 1) * 3
+    return 0
   }
 
   const options = moveDestinations(ctx.board, cell, def.move, team, makeOccupied(ctx.board, ctx.occupancy))
-  const currentDanger = dangerAt(cell.x, cell.y)
-  const currentDist = minThreatDist(cell.x, cell.y)
-  let best: Vec2 | null = null
-  let bestDanger = Infinity
-  let bestDist = -Infinity
-  let bestHome = Infinity
-  for (const c of options) {
-    const danger = dangerAt(c.x, c.y)
-    const threatDist = minThreatDist(c.x, c.y)
-    const homeDist = home ? dist(c.x, c.y, home.x, home.y) : 0
-    const better =
-      danger < bestDanger ||
-      (danger === bestDanger && threatDist > bestDist + 1e-9) ||
-      (danger === bestDanger && threatDist > bestDist - 1e-9 && homeDist < bestHome)
-    if (better) {
-      best = c
-      bestDanger = danger
-      bestDist = threatDist
-      bestHome = homeDist
-    }
-  }
+  const currentDanger = dangerAt(coverages, threats, cell.x, cell.y, proximityPenalty)
+  const currentDist = minThreatDist(threats, cell.x, cell.y)
 
+  const best = bestSafeStep(options, (c) => ({
+    danger: dangerAt(coverages, threats, c.x, c.y, proximityPenalty),
+    primary: minThreatDist(threats, c.x, c.y),
+    secondary: home ? dist(c.x, c.y, home.x, home.y) : 0,
+  }))
   if (best === null) return null
+
+  const bestDanger = dangerAt(coverages, threats, best.x, best.y, proximityPenalty)
+  const bestDist = minThreatDist(threats, best.x, best.y)
   if (currentDanger > 0) {
     // Exposed: take the safest step, or a step that opens the gap at equal risk.
     if (bestDanger < currentDanger) return best

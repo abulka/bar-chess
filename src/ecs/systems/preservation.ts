@@ -8,6 +8,7 @@ import type { TeamId, Vec2 } from '../../game/types'
 import { Cell, Health, PieceType, Target, Team } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
+import { bestSafeStep, buildCoverage, dangerAt, minThreatDist } from './threatField'
 
 /** A ranked enemy that can hurt `piece` this moment. */
 export interface Threat {
@@ -206,27 +207,8 @@ export function escapeGoal(
   // Every threat's firing geometry counts, not only the ones already covering
   // the piece: a nearby enemy that cannot hit it *yet* can still hit the square
   // it is about to step into.
-  const coverages = threats.map((t) => {
-    const od = PIECES[ctx.world.require(t.entity, PieceType).kind]
-    const cells = od ? fireCells(ctx.board, t.cell, WEAPONS[od.weapon].geometry, t.team, selfFree) : []
-    return { cells, weight: t.damage }
-  })
-
-  const dangerAt = (x: number, y: number): number => {
-    let danger = 0
-    for (const cov of coverages) {
-      if (containsCell(cov.cells, x, y)) danger += cov.weight
-    }
-    for (const t of threats) {
-      if (chebyshev(x, y, t.cell.x, t.cell.y) <= 1) danger += ADJACENT_PENALTY
-    }
-    return danger
-  }
-  const minThreatDist = (x: number, y: number): number => {
-    let min = Infinity
-    for (const t of threats) min = Math.min(min, dist(x, y, t.cell.x, t.cell.y))
-    return min
-  }
+  const coverages = buildCoverage(ctx, threats, selfFree)
+  const proximityPenalty = (d: number): number => (d <= 1 ? ADJACENT_PENALTY : 0)
 
   const keepCell = keepShot !== null ? ctx.world.get(keepShot, Cell) ?? null : null
   const keepsShot = (x: number, y: number): boolean => {
@@ -235,31 +217,20 @@ export function escapeGoal(
   }
 
   const options = moveDestinations(ctx.board, cell, def.move, team, makeOccupied(ctx.board, ctx.occupancy))
-  const currentDanger = dangerAt(cell.x, cell.y)
+  const currentDanger = dangerAt(coverages, threats, cell.x, cell.y, proximityPenalty)
   const currentKeeps = keepsShot(cell.x, cell.y)
-  const currentDist = minThreatDist(cell.x, cell.y)
+  const currentDist = minThreatDist(threats, cell.x, cell.y)
 
-  let best: Vec2 | null = null
-  let bestDanger = Infinity
-  let bestKeeps = false
-  let bestDist = -Infinity
-  for (const c of options) {
-    const danger = dangerAt(c.x, c.y)
-    const keeps = keepsShot(c.x, c.y)
-    const dist = minThreatDist(c.x, c.y)
-    const better =
-      danger < bestDanger ||
-      (danger === bestDanger && keeps && !bestKeeps) ||
-      (danger === bestDanger && keeps === bestKeeps && dist > bestDist + 1e-9)
-    if (better) {
-      best = c
-      bestDanger = danger
-      bestKeeps = keeps
-      bestDist = dist
-    }
-  }
-
+  const best = bestSafeStep(options, (c) => ({
+    danger: dangerAt(coverages, threats, c.x, c.y, proximityPenalty),
+    prefer: keepsShot(c.x, c.y),
+    primary: minThreatDist(threats, c.x, c.y),
+  }))
   if (best === null) return null
+
+  const bestDanger = dangerAt(coverages, threats, best.x, best.y, proximityPenalty)
+  const bestKeeps = keepsShot(best.x, best.y)
+  const bestDist = minThreatDist(threats, best.x, best.y)
   if (bestDanger < currentDanger) return best
   if (bestDanger === currentDanger) {
     if (bestKeeps && !currentKeeps) return best
