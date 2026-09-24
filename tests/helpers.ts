@@ -3,8 +3,14 @@ import type { MapData } from '../src/game/board'
 import type { OccupiedFn } from '../src/game/geometry'
 import * as components from '../src/ecs/components'
 import { Cell, Motion, Order, PieceType, Position, Team } from '../src/ecs/components'
-import type { Game } from '../src/game/game'
+import { EventBus } from '../src/ecs/events'
+import type { SimContext, TeamController, TeamRuntime } from '../src/ecs/types'
+import { World } from '../src/ecs/world'
+import { PATH_BUDGET_PER_TICK } from '../src/game/constants'
+import { Game } from '../src/game/game'
+import type { GameMode } from '../src/game/game'
 import type { PieceDef } from '../src/game/pieces'
+import { Rng } from '../src/game/rng'
 import type { TeamId, Vec2 } from '../src/game/types'
 
 /**
@@ -35,6 +41,65 @@ export function flatBoard(size = 8): Board {
     lanes: { red: [], blue: [] },
   }
   return new Board(data)
+}
+
+/** Fresh per-team runtime counters for a system-level `SimContext`. */
+export function teamRuntime(controller: TeamController = 'human'): TeamRuntime {
+  return {
+    controller,
+    cooldown: {},
+    alive: {},
+    kills: 0,
+    losses: 0,
+    supply: 0,
+    deployed: 0,
+    movesMade: 0,
+    movesThisTurn: 0,
+  }
+}
+
+/**
+ * Shared system-test context: flat board, deterministic RNG, empty commands.
+ * Override `size` / `captureAdvance` / `autoPreserve` per suite.
+ */
+export function makeContext(
+  opts?: { size?: number; captureAdvance?: boolean; autoPreserve?: boolean },
+): SimContext {
+  return {
+    world: new World(),
+    bus: new EventBus(),
+    board: flatBoard(opts?.size ?? 8),
+    rng: new Rng(1),
+    tick: 0,
+    turn: 0,
+    dt: 1 / 30,
+    cmds: { damage: [], deploy: [], destroy: [], advance: [] },
+    teams: { red: teamRuntime(), blue: teamRuntime() },
+    occupancy: new Map(),
+    pathBudget: PATH_BUDGET_PER_TICK,
+    verbosePhases: false,
+    turnActive: false,
+    autoPreserve: opts?.autoPreserve ?? true,
+    captureAdvance: opts?.captureAdvance ?? false,
+  }
+}
+
+/**
+ * Common queen-vs-king fixture: blue queen at e4 (4,4), red king at e5 (4,5)
+ * on a fresh size-8 game (full army still deployed; `placePiece` relocates).
+ */
+export function duelSetup(
+  size = 8,
+  mode: GameMode = 'human-vs-ai',
+): {
+  game: Game
+  attacker: number
+  victim: number
+} {
+  const game = new Game(size, mode)
+  const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
+  const victim = placePiece(game, 'king', 'red', { x: 4, y: 5 })
+  return { game, attacker, victim }
 }
 
 /** An OccupiedFn that reports true for exactly the given cells. */

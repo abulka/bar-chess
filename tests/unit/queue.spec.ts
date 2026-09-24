@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Motion, Order, Target } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
-import { clearComponents, placePiece } from '../helpers'
+import { clearComponents, duelSetup, placePiece } from '../helpers'
 
 function runTurn(game: Game): void {
   game.beginTurn()
@@ -30,9 +30,7 @@ describe('order queue', () => {
   })
 
   it('queues moves then an attack, context-based', () => {
-    const game = new Game(8)
-    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
-    const victim = placePiece(game, 'king', 'red', { x: 4, y: 5 })
+    const { game, attacker, victim } = duelSetup()
     game.selected = [attacker]
 
     game.orderAt({ x: 4, y: 3 })
@@ -121,9 +119,7 @@ describe('order queue', () => {
   })
 
   it('round-trips a queued sequence through save/load', () => {
-    const game = new Game(8)
-    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
-    placePiece(game, 'king', 'red', { x: 4, y: 5 })
+    const { game, attacker } = duelSetup()
     game.selected = [attacker]
 
     game.orderAt({ x: 4, y: 3 })

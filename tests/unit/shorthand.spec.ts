@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { Order, Weapon } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
 import { LLM_PREAMBLE } from '../../src/game/shorthand'
-import { clearComponents, placePiece } from '../helpers'
+import { clearComponents, duelSetup, placePiece } from '../helpers'
 
 const pieceLine = /^[rb][PNBRQK] /
 
@@ -31,9 +31,7 @@ describe('position shorthand', () => {
   })
 
   it('shows stances, orders, targets and routes', () => {
-    const attack = new Game(8)
-    const queen = placePiece(attack, 'queen', 'blue', { x: 4, y: 4 })
-    placePiece(attack, 'king', 'red', { x: 4, y: 5 })
+    const { game: attack, attacker: queen } = duelSetup()
     attack.world.require(queen, Weapon).left = 0
     attack.selected = [queen]
     attack.setPieceStance('attack')

@@ -5,7 +5,7 @@ import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
 import { PIECES } from '../../src/game/pieces'
 import { MAX_ORDER_LOG, noteOrder } from '../../src/game/queue'
-import { clearComponents, orderAttack, placePiece } from '../helpers'
+import { clearComponents, duelSetup, orderAttack, placePiece } from '../helpers'
 
 function runTurn(game: Game): void {
   game.beginTurn()
@@ -113,9 +113,7 @@ describe('Game integration', () => {
   })
 
   it('orderAt honors an explicit move/attack and is context-sensitive by default', () => {
-    const game = new Game(8)
-    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
-    const victim = placePiece(game, 'king', 'red', { x: 4, y: 5 })
+    const { game, attacker, victim } = duelSetup()
     game.selected = [attacker]
     const order = game.world.require(attacker, Order)
 
@@ -133,9 +131,7 @@ describe('Game integration', () => {
   })
 
   it('records the reason for each player order change', () => {
-    const game = new Game(8)
-    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
-    placePiece(game, 'king', 'red', { x: 4, y: 5 })
+    const { game, attacker } = duelSetup()
     game.selected = [attacker]
     const order = game.world.require(attacker, Order)
 
@@ -168,9 +164,7 @@ describe('Game integration', () => {
   })
 
   it('does not command AI-controlled pieces', () => {
-    const game = new Game(8, 'ai-vs-ai')
-    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
-    placePiece(game, 'king', 'red', { x: 4, y: 5 })
+    const { game, attacker } = duelSetup(8, 'ai-vs-ai')
     game.selected = [attacker]
 
     game.orderAt({ x: 4, y: 5 }, 'attack')
@@ -318,9 +312,7 @@ describe('Game integration', () => {
   })
 
   it('an attack order does not change the piece stance', () => {
-    const game = new Game(8)
-    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
-    placePiece(game, 'king', 'red', { x: 4, y: 5 })
+    const { game, attacker } = duelSetup()
     game.selected = [attacker]
     expect(game.world.require(attacker, Stance).mode).toBe('none')
 
@@ -357,9 +349,7 @@ describe('Game integration', () => {
   })
 
   it('clearOrders drops the current target so the piece stops engaging', () => {
-    const game = new Game(8)
-    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
-    const victim = placePiece(game, 'king', 'red', { x: 4, y: 5 })
+    const { game, attacker, victim } = duelSetup()
     game.selected = [attacker]
     game.orderAt({ x: 4, y: 5 }, 'attack')
     game.world.require(attacker, Target).entity = victim
@@ -402,9 +392,7 @@ describe('Game integration', () => {
   })
 
   it('orderAttack helper marks a clear shot as reachable', () => {
-    const game = new Game(8)
-    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
-    const victim = placePiece(game, 'king', 'red', { x: 4, y: 5 })
+    const { game, attacker, victim } = duelSetup()
     orderAttack(game, attacker, victim, true)
     expect(game.world.require(attacker, Order).target).toBe(victim)
   })

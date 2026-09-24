@@ -1,54 +1,18 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Cell, Motion, Order, PieceType, Position, Stance, Team } from '../../src/ecs/components'
-import { EventBus } from '../../src/ecs/events'
-import type { SimContext, TeamRuntime } from '../../src/ecs/types'
-import { World } from '../../src/ecs/world'
-import { PATH_BUDGET_PER_TICK } from '../../src/game/constants'
+import type { SimContext } from '../../src/ecs/types'
 import { createPiece } from '../../src/game/factory'
 import { PIECES } from '../../src/game/pieces'
-import { Rng } from '../../src/game/rng'
 import advance from '../../src/ecs/systems/advance'
 import cleanup from '../../src/ecs/systems/cleanup'
 import damage from '../../src/ecs/systems/damage'
 import death from '../../src/ecs/systems/death'
-import { clearComponents, flatBoard } from '../helpers'
-
-function runtime(): TeamRuntime {
-  return {
-    controller: 'human',
-    cooldown: {},
-    alive: {},
-    kills: 0,
-    losses: 0,
-    supply: 0,
-    deployed: 0,
-    movesMade: 0,
-    movesThisTurn: 0,
-  }
-}
-
-function makeContext(): SimContext {
-  return {
-    world: new World(),
-    bus: new EventBus(),
-    board: flatBoard(8),
-    rng: new Rng(1),
-    tick: 0,
-    turn: 0,
-    dt: 1 / 30,
-    cmds: { damage: [], deploy: [], destroy: [], advance: [] },
-    teams: { red: runtime(), blue: runtime() },
-    occupancy: new Map(),
-    pathBudget: PATH_BUDGET_PER_TICK,
-    verbosePhases: false,
-    turnActive: false,
-    autoPreserve: true,
-    captureAdvance: true,
-  }
-}
+import { clearComponents, makeContext } from '../helpers'
 
 describe('advance system — chess-style capture step', () => {
   beforeEach(() => clearComponents())
+
+  const context = (): SimContext => makeContext({ captureAdvance: true })
 
   /** Kill `victim` (remove it) and queue the killer-to-victim-cell intent. */
   function kill(ctx: SimContext, killer: number, victim: number): void {
@@ -63,7 +27,7 @@ describe('advance system — chess-style capture step', () => {
   }
 
   it('steps an idle killer onto the victim square it shot along', () => {
-    const ctx = makeContext()
+    const ctx = context()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
     const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
     kill(ctx, queen, victim)
@@ -76,7 +40,7 @@ describe('advance system — chess-style capture step', () => {
   })
 
   it('does not advance when the firing line is blocked', () => {
-    const ctx = makeContext()
+    const ctx = context()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
     const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
     createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 2 }) // stands between them
@@ -88,7 +52,7 @@ describe('advance system — chess-style capture step', () => {
   })
 
   it('leaves an occupied destination alone', () => {
-    const ctx = makeContext()
+    const ctx = context()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
     const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
     const blocker = createPiece(ctx, 'red', PIECES.pawn, { x: 1, y: 4 })
@@ -104,7 +68,7 @@ describe('advance system — chess-style capture step', () => {
   })
 
   it('still captures when the killer held an attack order on the victim', () => {
-    const ctx = makeContext()
+    const ctx = context()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
     const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
     const order = ctx.world.require(queen, Order)
@@ -118,7 +82,7 @@ describe('advance system — chess-style capture step', () => {
   })
 
   it('does not advance a piece that is busy with an order or hop', () => {
-    const ctx = makeContext()
+    const ctx = context()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
     const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
     const motion = ctx.world.require(queen, Motion)
@@ -133,7 +97,7 @@ describe('advance system — chess-style capture step', () => {
   })
 
   it('lets a leaping knight capture over a blocker', () => {
-    const ctx = makeContext()
+    const ctx = context()
     const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 0, y: 0 })
     const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 1, y: 2 })
     createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 1 }) // does not block a leap
@@ -145,7 +109,7 @@ describe('advance system — chess-style capture step', () => {
   })
 
   it('records the intent through damage/death/cleanup for a direct leaping kill', () => {
-    const ctx = makeContext()
+    const ctx = context()
     ctx.captureAdvance = true
     const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 6, y: 3 }) // g5
     const pawn = createPiece(ctx, 'red', PIECES.pawn, { x: 5, y: 1 }) // f7
@@ -161,7 +125,7 @@ describe('advance system — chess-style capture step', () => {
   })
 
   it('never capture-advances a passive (none/move) killer', () => {
-    const ctx = makeContext()
+    const ctx = context()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
     const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
     // kill() defaults the killer to Attack; drop it back to a passive stance.
@@ -176,7 +140,7 @@ describe('advance system — chess-style capture step', () => {
   })
 
   it('ignores a killer that died in the same tick', () => {
-    const ctx = makeContext()
+    const ctx = context()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
     const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
     kill(ctx, queen, victim)

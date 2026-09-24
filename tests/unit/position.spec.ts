@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Order } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
-import { clearComponents, orderAttack, placePiece } from '../helpers'
+import { clearComponents, duelSetup, orderAttack } from '../helpers'
 
 describe('position serialization', () => {
   beforeEach(() => clearComponents())
@@ -19,9 +19,7 @@ describe('position serialization', () => {
   })
 
   it('round-trips in-flight projectiles', () => {
-    const game = new Game(8)
-    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
-    const victim = placePiece(game, 'king', 'red', { x: 4, y: 5 })
+    const { game, attacker, victim } = duelSetup()
     orderAttack(game, attacker, victim, true)
     game.runTicks(2)
     expect(game.snapshot().counts.projectiles).toBeGreaterThan(0)
@@ -47,9 +45,7 @@ describe('position serialization', () => {
   })
 
   it('keeps entity references valid across a round trip', () => {
-    const game = new Game(8)
-    const attacker = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
-    const victim = placePiece(game, 'king', 'red', { x: 4, y: 5 })
+    const { game, attacker, victim } = duelSetup()
     orderAttack(game, attacker, victim, true)
     game.runTicks(3)
 
