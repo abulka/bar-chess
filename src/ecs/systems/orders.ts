@@ -104,11 +104,12 @@ function inFiringGeometryNow(ctx: SimContext, e: Entity, target: Entity, team: '
  * executed route never diverges from the preview shown when the order was issued.
  *
  * A target with no firing position anywhere for this piece (positionally
- * unreachable: opposite colour, walled off) returns null. Walking to the closest
- * square would only feed the piece into enemy fire for a shot it can never take,
- * and the retreat/resume cycle would drag it back every time it healed a little.
- * Targeting keeps `reachable` current, so if the target ever moves into a shot
- * the order resumes on its own.
+ * unreachable: opposite colour, walled off) is still approached best-effort: the
+ * route ends on the closest reachable empty square, and the overlay draws that
+ * route followed by the dashed "unreachable" firing line. Self-preservation runs
+ * before this pass, so a hurt piece is interrupted while it heals and resumes the
+ * approach once recovered; `closestEmptyCell` holds on distance ties, so a piece
+ * already standing on a closest square parks there instead of shuttling.
  */
 function pursue(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'): { x: number; y: number } | null {
   const def = PIECES[ctx.world.require(e, PieceType).kind]
@@ -118,7 +119,6 @@ function pursue(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'
   const occupied = makeOccupied(ctx.board, ctx.occupancy)
   const weaponGeom = WEAPONS[def.weapon].geometry
   const plan = attackPlan(ctx.board, cell, tcell, def.move, weaponGeom, team, occupied)
-  if (!plan.reachable) return null
   return plan.inRange ? null : plan.cell
 }
 

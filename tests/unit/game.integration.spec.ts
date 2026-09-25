@@ -129,6 +129,29 @@ describe('Game integration', () => {
     expect(motion.holdUntilHp).toBeCloseTo(45, 6)
   })
 
+  it('routes a healthy piece to the nearest point of an unreachable target', () => {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    const bishop = createPiece(shim, 'blue', PIECES.bishop, { x: 5, y: 7 }) // f1, far from the target
+    const knight = createPiece(shim, 'red', PIECES.knight, { x: 7, y: 2 }) // h6, opposite colour
+    game.selected = [bishop]
+    const order = game.world.require(bishop, Order)
+    order.kind = 'attack'
+    order.target = knight
+    order.reachable = false
+
+    game.runTicks(1)
+
+    // Best-effort route to the closest reachable square to h6, never the target
+    // itself, so the overlay can draw the route plus the unreachable firing line.
+    const motion = game.world.require(bishop, Motion)
+    expect(motion.intent).toBe('order')
+    expect(motion.goal).not.toBeNull()
+    expect(motion.goal).not.toEqual({ x: 7, y: 2 })
+    expect(motion.path.length).toBeGreaterThan(0)
+  })
+
   it('clears the reported under-fire once the piece leaves the attacker line', () => {
     const game = new Game(8, 'human-vs-human')
     for (const e of [...game.world.query(Cell)]) game.world.destroy(e)

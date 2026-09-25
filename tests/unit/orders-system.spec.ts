@@ -668,7 +668,7 @@ describe('orders system — automatic self-preservation', () => {
 describe('orders system — attack orders', () => {
   beforeEach(() => clearComponents())
 
-  it('holds instead of chasing a positionally unreachable target', () => {
+  it('approaches a positionally unreachable target as close as it can get', () => {
     const ctx = makeContext()
     const bishop = createPiece(ctx, 'blue', PIECES.bishop, { x: 5, y: 3 }) // f5 (light)
     const king = createPiece(ctx, 'red', PIECES.king, { x: 3, y: 0 }) // d8 (dark)
@@ -679,10 +679,29 @@ describe('orders system — attack orders', () => {
 
     run(ctx)
 
-    // No firing square exists anywhere, so walking to the closest square would
-    // only feed the piece into enemy fire — it holds instead.
+    // Best-effort: it still routes toward the target rather than freezing, so the
+    // overlay can show the route followed by the unreachable firing line. The
+    // goal is the closest reachable empty square to d8, never d8 itself.
     const motion = ctx.world.require(bishop, Motion)
-    expect(motion.goal).toBeNull()
+    expect(motion.goal).not.toBeNull()
+    expect(motion.goal).not.toEqual({ x: 3, y: 0 })
+  })
+
+  it('parks on the closest square to an unreachable target instead of shuttling', () => {
+    const ctx = makeContext()
+    const bishop = createPiece(ctx, 'blue', PIECES.bishop, { x: 6, y: 2 }) // g6 (light)
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 7, y: 2 }) // h6 (dark)
+    const order = ctx.world.require(bishop, Order)
+    order.kind = 'attack'
+    order.target = king
+    order.reachable = false
+
+    run(ctx)
+
+    // g6 is already as close as any reachable square, so the goal is its own cell
+    // (the tie-hold), not the equidistant h7 the old code shuffled to.
+    const motion = ctx.world.require(bishop, Motion)
+    expect(motion.goal).toEqual({ x: 6, y: 2 })
     expect(motion.path).toEqual([])
   })
 

@@ -1809,8 +1809,8 @@ export class Game {
    * Whether a piece's active order has done all it can: it has arrived, or it
    * can make no further (theoretical) progress toward the objective. Other
    * pieces are ignored, so a route merely blocked by a friendly still counts as
-   * progress and keeps waiting; a parked best-effort goto — and any attack on a
-   * positionally impossible target, which is never chased — is "settled".
+   * progress and keeps waiting; a parked best-effort goto — and an attack on a
+   * positionally impossible target parked at the closest point — is "settled".
    * Such an order yields to the next command instead of swallowing it in the
    * queue (the fix for "I issued an impossible move and it ate every later
    * order").
@@ -1830,17 +1830,17 @@ export class Game {
       return findPath(this.board, cell, order.dest, def.move, team, never).cells.length === 0
     }
     if (order.kind === 'attack' && order.target !== null && this.world.isAlive(order.target)) {
-      // A positionally impossible target can never be hit, so the order has no
-      // progress left to make wherever the piece stands: it is settled at once
-      // (the piece holds) and yields to the next command. A *reachable* target
-      // that is merely in range is still being fulfilled, so a move
-      // suspends/regroups (resumes after) instead of abandoning it.
+      // A positionally impossible target still settles once the piece is parked
+      // at the closest legal point its best-effort route can reach (the tie-hold
+      // in `closestEmptyCell` settles it immediately when it is already there). A
+      // *reachable* target that is merely in range is still being fulfilled, so a
+      // move suspends/regroups (resumes after) instead of abandoning it.
       const tcell = this.world.get(order.target, Cell)
       if (!tcell) return false
       const geometry = WEAPONS[def.weapon].geometry
       const plan = attackPlan(this.board, cell, tcell, def.move, geometry, team, never)
       if (plan.reachable) return false
-      return true
+      return findPath(this.board, cell, plan.cell, def.move, team, never).cells.length === 0
     }
     return false
   }
@@ -2440,20 +2440,13 @@ export class Game {
       motion.path = []
       return true
     }
-    // A positionally unreachable target can never be hit, so never preview a
-    // route into the enemy's guns for it. The piece holds; targeting refreshes
-    // `reachable` every tick, so the order resumes if a shot ever appears.
-    if (!plan.reachable) {
-      clearMotion(motion)
-      motion.path = []
-      return false
-    }
     // Navigation is theoretical (future): other pieces are assumed to move, so
     // the route only avoids walls and the target's own square and is shown even
     // when the board is currently blocked. It should still end on a real square,
     // so the goal is chosen against the live board (a firing cell, else the
-    // closest empty reachable cell). The firing line itself is judged against
-    // the live board: clear / blocked / out of reach.
+    // closest empty reachable cell — a positionally unreachable target still
+    // routes best-effort to that nearest square). The firing line itself is
+    // judged against the live board: clear / blocked / out of reach.
     const targetIdx = this.board.cellIndex(tcell.x, tcell.y)
     const planOccupied: OccupiedFn = (x, y) => this.board.cellIndex(x, y) === targetIdx
     motion.goal = plan.cell

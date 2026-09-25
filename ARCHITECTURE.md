@@ -336,15 +336,15 @@ cell/reservation during movement validation and path planning.
 - **orders** — turns stance/order into `Motion.goal` for every piece (human or
   AI): an `attack` order pursues the target (or stops to fire when in geometry).
   A **positionally unreachable** target (`order.reachable === false`, e.g. a bishop
-  ordered onto the opposite colour) can never be hit, so it is **not chased**: the
-  piece holds, and the overlay draws only the dashed "unreachable" firing line
-  from where it stands. Walking to the closest square would only feed the piece
-  into the enemy's guns, and the retreat/resume cycle would drag it back every
-  time it healed a little. Targeting keeps `reachable` current, so the order
-  resumes by itself if the target ever moves into a shot. `closestEmptyCell`
-  breaks distance ties toward the
-  piece's current square, so a best-effort approach to a merely occupied firing
-  cell does not shuttle between two equidistant squares (the bishop g6↔h7 case);
+  ordered onto the opposite colour) is still approached best-effort: the route
+  ends on the closest reachable empty square, and the overlay draws that route
+  followed by the dashed "unreachable" firing line, both recomputed each tick as
+  the piece and target move. Self-preservation runs before this pass, so a hurt
+  piece is interrupted while it heals and resumes the approach once recovered.
+  `closestEmptyCell` breaks distance ties toward the
+  piece's current square, so a piece already standing on a closest square parks
+  there instead of shuttling between two equidistant squares (the bishop g6↔h7
+  case);
   a `goto` order advances toward the objective (best effort); autonomous `attack`
   pursues in a leash, and rallies only for AI teams; a low-HP piece retreats via
   `preservation.ts` (escape the shooters that actually cover it, else head home
@@ -352,7 +352,9 @@ cell/reservation during movement validation and path planning.
   `attack` clears the goal. Pursuit picks a goal with the
   same chain as `Game.planAttack` (`previewFiringCell` → `closestEmptyCell` →
   target) so the executed route cannot diverge from the preview; a firing position
-  beats piling onto the occupied target. `previewFiringCell` picks the approach
+  beats piling onto the occupied target, and an impossible target still ends on
+  the closest reachable square rather than a straight line to the victim.
+  `previewFiringCell` picks the approach
   square by **actual movement hops** (`moveDistances`, a BFS alongside
   `reachableCells`), not Euclidean distance — so a knight heads for the firing
   square it can reach in the fewest moves instead of a "nearer-looking" one four
@@ -688,8 +690,8 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   cyan dashed line only, matching the common override case.
 - **Target** — an ordered attack (`order.kind === 'attack'`) draws a red firing
   line + reticle and rings the victim red; a positionally impossible target draws
-  it dashed grey from the piece's current square (there is no approach route to
-  draw, because the piece holds). An auto-acquired target is drawn two
+  the movement route to its closest reachable point and then the same line dashed
+  grey. An auto-acquired target is drawn two
   ways: a **committed** piece (AI controller, or Attack stance) will pursue it, so
   it gets the same line + reticle in **amber** and rings the victim; a stationary
   **None/Move** piece only fires at whatever passes in range and will not follow
@@ -705,8 +707,9 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   "in range only — …" note that adds "holding position" when the piece has no
   goal. It also surfaces the pending state directly: a parked insta-kill line, a
   latched `safe-hold until <hp> hp`, a "self-preservation overriding the attack
-  order" banner while a standing attack is interrupted, and a "no firing position
-  exists — holding position" note for an impossible target.
+  order" banner while a standing attack is interrupted, and a "target unreachable
+  — moving to the nearest point / at the nearest point" note for an impossible
+  target.
 - **Healing** (`show healing`, off by default) — a pulsing green aura around each
   living king, a dashed ring at the two-square boundary, and wavy tendrils to the
   damaged same-team pieces inside it. This toggle is display-only: the
@@ -737,11 +740,10 @@ Ordering is BAR-style and **context-sensitive** — there is no global order mod
   the whole plan. A move on an un-queued attacker **replaces** the attack (no
   parked target to resume) rather than queueing behind it. A piece whose active
   order has **settled**
-  (arrived, parked at the closest legal point a best-effort goto can reach, or a
-  positionally impossible attack target that has no progress left to make —
-  `Game.orderSettled`) yields to the new command instead of hiding it in the
-  queue, so an impossible order can no longer swallow every later click; an order
-  that is still progressing, or merely blocked by friends, keeps its queue.
+  (arrived, parked at the closest legal point a best-effort goto or attack can
+  reach — `Game.orderSettled`) yields to the new command instead of hiding it in
+  the queue, so an impossible order can no longer swallow every later click; an
+  order that is still progressing, or merely blocked by friends, keeps its queue.
 - **`m` / `a` + left-click** arms a transient **pending command**
   (`Game.pendingCommand`) to force a move/attack: `Game.orderAt(cell, command)`.
   The prefix is consumed by the click unless **Shift** is held (kept armed to

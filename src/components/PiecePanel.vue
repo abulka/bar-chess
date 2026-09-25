@@ -155,7 +155,8 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
         v-else-if="info.order.kind === 'attack' && !info.order.reachable"
         class="line muted tiny"
       >
-        no firing position exists — holding position, not chasing
+        target unreachable —
+        {{ info.motion.pathLength > 0 ? 'moving to the nearest point' : 'at the nearest point' }}
       </p>
       <p v-if="isAuto && orderIdle" class="line">
         <b>auto</b> ·
