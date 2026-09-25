@@ -147,7 +147,10 @@ export interface GameAnalysis {
   shots: number
   hits: number
   kills: number
+  /** Every piece that spent at least one turn stationary while under fire. */
   heldUnderFire: HeldUnderFire[]
+  /** The subset of `heldUnderFire` that never moved at all, the stricter gap. */
+  neverMovedUnderFire: HeldUnderFire[]
   neverMoved: string[]
   neverFired: string[]
   focusFire: FocusFire[]
@@ -172,6 +175,15 @@ export function analyzeGame(record: GameRecord, events: EventRecord[], trace: Tu
   const kills = events.filter((e) => e.type === 'kill').length
 
   const heldUnderFire: HeldUnderFire[] = stats
+    .filter((s) => s.heldTurns.length > 0)
+    .map((s) => ({
+      piece: pieceLabel(s, height),
+      turns: rangeLabel(s.heldTurns),
+      hitsTaken: s.hitsTaken,
+      isPawn: s.kind === 'pawn',
+    }))
+
+  const neverMovedUnderFire: HeldUnderFire[] = stats
     .filter((s) => s.moves === 0 && s.underFireTurns > 0)
     .map((s) => ({
       piece: pieceLabel(s, height),
@@ -244,6 +256,7 @@ export function analyzeGame(record: GameRecord, events: EventRecord[], trace: Tu
     hits,
     kills,
     heldUnderFire,
+    neverMovedUnderFire,
     neverMoved,
     neverFired,
     focusFire,
@@ -264,35 +277,52 @@ export interface BatchSummary {
   games: number
   redWins: number
   blueWins: number
+  /** Games that ended with no winner for a reason other than the turn cap. */
   draws: number
-  partials: number
+  /** Games stopped at the turn cap without a king death. */
+  timeouts: number
   avgTurns: number
   totalKills: number
   totalShots: number
   totalHits: number
   heldCount: number
+  neverMovedUnderFireCount: number
+  neverMovedCount: number
+  neverFiredCount: number
+  oscillationCount: number
+  noProgressTurns: number
 }
 
 export function summarizeBatch(games: BatchGame[]): BatchSummary {
   let redWins = 0
   let blueWins = 0
   let draws = 0
-  let partials = 0
+  let timeouts = 0
   let turns = 0
   let totalKills = 0
   let totalShots = 0
   let totalHits = 0
   let heldCount = 0
+  let neverMovedUnderFireCount = 0
+  let neverMovedCount = 0
+  let neverFiredCount = 0
+  let oscillationCount = 0
+  let noProgressTurns = 0
   for (const g of games) {
     if (g.winner === 'red') redWins++
     else if (g.winner === 'blue') blueWins++
+    else if (g.partial) timeouts++
     else draws++
-    if (g.partial) partials++
     turns += g.turns
     totalKills += g.analysis.kills
     totalShots += g.analysis.shots
     totalHits += g.analysis.hits
     heldCount += g.analysis.heldUnderFire.length
+    neverMovedUnderFireCount += g.analysis.neverMovedUnderFire.length
+    neverMovedCount += g.analysis.neverMoved.length
+    neverFiredCount += g.analysis.neverFired.length
+    oscillationCount += g.analysis.oscillation.length
+    noProgressTurns += g.analysis.noProgressTurns
   }
   const n = games.length || 1
   return {
@@ -300,12 +330,17 @@ export function summarizeBatch(games: BatchGame[]): BatchSummary {
     redWins,
     blueWins,
     draws,
-    partials,
+    timeouts,
     avgTurns: turns / n,
     totalKills,
     totalShots,
     totalHits,
     heldCount,
+    neverMovedUnderFireCount,
+    neverMovedCount,
+    neverFiredCount,
+    oscillationCount,
+    noProgressTurns,
   }
 }
 
@@ -314,7 +349,10 @@ export function formatBatchSummary(summary: BatchSummary): string {
   const hitRate = summary.totalShots > 0 ? ((summary.totalHits / summary.totalShots) * 100).toFixed(0) : '0'
   return (
     `games=${summary.games} red=${summary.redWins} blue=${summary.blueWins} draw=${summary.draws} ` +
-    `partial=${summary.partials} avgTurns=${summary.avgTurns.toFixed(1)} kills=${summary.totalKills} ` +
-    `shots=${summary.totalShots} hits=${summary.totalHits} hitRate=${hitRate}% heldUnderFire=${summary.heldCount}`
+    `timeouts=${summary.timeouts} avgTurns=${summary.avgTurns.toFixed(1)} kills=${summary.totalKills} ` +
+    `shots=${summary.totalShots} hits=${summary.totalHits} hitRate=${hitRate}% ` +
+    `heldUnderFire=${summary.heldCount} neverMovedUnderFire=${summary.neverMovedUnderFireCount} ` +
+    `neverMoved=${summary.neverMovedCount} neverFired=${summary.neverFiredCount} ` +
+    `oscillation=${summary.oscillationCount} noProgressTurns=${summary.noProgressTurns}`
   )
 }

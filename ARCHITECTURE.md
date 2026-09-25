@@ -941,10 +941,13 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   completed/abandoned, including autonomous self-preservation retreats) — taken
   from the piece's `Order.log` (`src/game/queue.ts`) via the
   per-turn trace, so holds and target losses are explained, not just movement.
-  `src/game/studyPrompt.ts` wraps a
-  batch's full transcripts in a reusable "analyse these games" prompt; the panel's
-  **Copy analysis prompt** button puts it on the clipboard for an LLM session.
-  The seed is shown read-only in the stats bar.
+  `src/game/studyPrompt.ts` reuses the shared `LLM_GAME_RULES` preamble and the
+  same per-game body as the live copy bundle (`formatGamePromptBody`), then wraps
+  a batch in a "analyse these games" prompt with a batch summary, a generated
+  piece/weapon stat table and each game's flagged analysis; the panel's
+  **Copy analysis prompt** button puts it on the clipboard for an LLM session,
+  with a **replay record** toggle and a prompt-size estimate. The seed is shown
+  read-only in the stats bar.
 
 Keyboard: `m`/`a` arm a move/attack command (then left-click; Shift keeps it
 armed), `space` next turn / replay forward, `shift+space` play forward then live,

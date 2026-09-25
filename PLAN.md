@@ -181,10 +181,13 @@ policy and the rule toggles, then **Run N games**. `Stop game` keeps the current
 (game's) partial recording and moves on; `Cancel all` discards everything. As it
 runs, `StudyController` (`src/game/study.ts`) records each game and samples a
 per-turn piece trace, then `transcript.ts` / `analysis.ts` produce a compact
-per-game transcript and flag gameplay gaps (pieces that held under fire, never
-moved, oscillation, focus fire, no-progress turns). **Copy analysis prompt** puts
-the batch summary plus every transcript, wrapped in a reusable "analyse these
-games" prompt, on the clipboard for an LLM session.
+per-game transcript (including a board per turn) and flag gameplay gaps (pieces
+that held under fire, never moved, oscillation, focus fire, no-progress turns).
+**Copy analysis prompt** reuses the shared `LLM_GAME_RULES` preamble and the same
+per-game body as the live "copy history for LLM" bundle, then prepends a batch
+summary, a generated piece/weapon stat table and each game's flagged analysis; a
+**replay record** toggle optionally appends the full record JSON, and a size
+estimate warns before the prompt grows too large for an LLM session.
 
 ## Victory
 

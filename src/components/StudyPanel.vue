@@ -29,6 +29,7 @@ const policy = ref<StudyPolicyName>('focus')
 const autoPreserve = ref(true)
 const captureAdvance = ref(false)
 const chessKills = ref(false)
+const includeRecord = ref(false)
 const copied = ref(false)
 
 const prompt = computed(() =>
@@ -42,12 +43,22 @@ const prompt = computed(() =>
           partial: r.partial,
           transcript: r.transcript,
           analysis: r.analysis,
+          record: r.record,
         })),
-        { mode: props.state.results[0]?.mode, size: props.state.results[0]?.size },
+        {
+          mode: props.state.results[0]?.mode,
+          size: props.state.results[0]?.size,
+          includeRecord: includeRecord.value,
+        },
       ),
 )
 
 const preview = computed(() => (prompt.value.length > 1600 ? prompt.value.slice(0, 1600) + '\n…' : prompt.value))
+
+const promptSize = computed(() => {
+  const chars = prompt.value.length
+  return chars === 0 ? '' : `${(chars / 1024).toFixed(1)} KB · ~${Math.round(chars / 400) / 10}k tokens`
+})
 
 const scripted = computed(() => mode.value === 'human-vs-ai')
 
@@ -113,6 +124,7 @@ async function copyPrompt(): Promise<void> {
       <label class="toggle"><input v-model="autoPreserve" type="checkbox" :disabled="state.running" /> auto-preserve</label>
       <label class="toggle"><input v-model="captureAdvance" type="checkbox" :disabled="state.running" /> capture advance</label>
       <label class="toggle"><input v-model="chessKills" type="checkbox" :disabled="state.running" /> chess kills</label>
+      <label class="toggle" title="Include each game's replay record JSON (verbose)"><input v-model="includeRecord" type="checkbox" /> replay record</label>
     </div>
 
     <div class="study-actions">
@@ -148,9 +160,12 @@ async function copyPrompt(): Promise<void> {
       </div>
 
       <div class="study-copy">
-        <button class="ctl" :disabled="state.results.length === 0" @click="copyPrompt">
-          {{ copied ? 'Copied!' : '📋 Copy analysis prompt' }}
-        </button>
+        <div class="study-copy-actions">
+          <button class="ctl" :disabled="state.results.length === 0" @click="copyPrompt">
+            {{ copied ? 'Copied!' : '📋 Copy analysis prompt' }}
+          </button>
+          <span v-if="promptSize" class="study-size">{{ promptSize }}</span>
+        </div>
         <textarea v-if="preview" class="study-preview" readonly :value="preview"></textarea>
       </div>
     </div>
@@ -230,6 +245,16 @@ async function copyPrompt(): Promise<void> {
   gap: 6px;
   width: 42%;
   min-width: 220px;
+}
+.study-copy-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.study-size {
+  color: #9aa4b2;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 .study-preview {
   flex: 1;

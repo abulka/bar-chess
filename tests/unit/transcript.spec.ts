@@ -55,6 +55,15 @@ describe('transcript & analysis', () => {
     expect(text).toContain('underFire=1t held=T1')
   })
 
+  it('renders capture-advance destinations as chess coordinates', () => {
+    const advances: EventRecord[] = [
+      { seq: 3, tick: 70, phase: 'advance', type: 'advance', msg: '#2 advanced to 1,4', entity: 2, team: 'blue' },
+    ]
+    const text = formatTranscript({ record: record(), events: advances, trace: trace() })
+    expect(text).toContain('advanced to b4')
+    expect(text).not.toContain('advanced to 1,4')
+  })
+
   it('flags held-under-fire, never-moved and hit rate gaps', () => {
     const analysis = analyzeGame(record(), events, trace())
     expect(analysis.shots).toBe(1)

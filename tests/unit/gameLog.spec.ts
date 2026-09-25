@@ -236,6 +236,7 @@ describe('GameLog & LLM game prompt', () => {
       hits: 2,
       kills: 0,
       heldUnderFire: [{ piece: 'rP e2', turns: 'T1-T2', hitsTaken: 2, isPawn: true }],
+      neverMovedUnderFire: [{ piece: 'rP e2', turns: 'T1-T2', hitsTaken: 2, isPawn: true }],
       neverMoved: ['bK e1'],
       neverFired: [],
       focusFire: [],

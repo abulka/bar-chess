@@ -243,7 +243,7 @@ export class StudyController {
         timedOut: partial,
       }),
     )
-    const { transcript, analysis } = this.log.finish(record)
+    const { transcript, analysis } = this.log.finish(record, { boards: true })
     this.results.push({
       index: this.index,
       seed: record.seed,

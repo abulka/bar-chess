@@ -40,10 +40,11 @@ const FORMAT_LEGEND =
   'w=weapon reload seconds; grid red=Upper blue=lower. terrain: . floor : road , sand ~ water # wall'
 
 /**
- * One-time context for an LLM reading the shorthand. Prepend to a position when
- * the model has no other explanation of the game or the format.
+ * One-time context for an LLM reading the shorthand: the game rules and the
+ * position-block format. Prepend to a position when the model has no other
+ * explanation of the game or the format.
  */
-export const LLM_PREAMBLE = `Bar Chess is a real-time, chess-derived battle simulation on a rectangular grid.
+export const LLM_GAME_RULES = `Bar Chess is a real-time, chess-derived battle simulation on a rectangular grid.
 Squares are named <file a..><rank from bottom>: a1 is bottom-left, h8 top-right.
 Pieces are P N B R Q K. Movement and firing use chess geometry: pawns step/capture one diagonal
 forward, sliding pieces (R/B/Q) are blocked by the first piece or wall, knights leap, bishops stay
@@ -52,6 +53,11 @@ two forward diagonals at range 1; a rook fires along ranks/files).
 The sim runs a fixed 30Hz tick loop. A "turn" gives each piece one move; a route is an A* path over
 its own move geometry, so one "path" cell is one hop (a rook's next hop can be far, a knight's
 fixed). All randomness is seeded, so a position plus inputs replays identically.
+Win: the battle ends when a king dies and the other team wins; both kings down on the same tick is a
+draw. A game stopped at the turn cap without a king death is a partial, not a draw.
+Rules toggles: autoPreserve lets a wounded AI/Attack-stance piece retreat to heal; captureAdvance
+lets an idle killer step onto a victim's now-empty square; chessKills enables the parked immediate
+chess kill (lands next tick, outranks self-preservation).
 Reading a position block:
   <r|b><PNBRQK> <cell>   one unit (r=red, b=blue); grid uses Upper=red, lower=blue
   hp<cur>/<max>          present only when damaged
@@ -74,7 +80,10 @@ Reading a position block:
   fire=#id               firing under retaliation from that unit
 Other lines: "# terrain" lists non-floor cells only; "# proj:" lists in-flight shots as
 <team> <cell> -> <target cell> <trajectory> ttl=<seconds>. Empty cells in the grid are terrain.
+`
 
+/** `LLM_GAME_RULES` plus the cue that a position block follows. */
+export const LLM_PREAMBLE = `${LLM_GAME_RULES}
 Position follows:
 `
 

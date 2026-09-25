@@ -57,7 +57,11 @@ function turnActivities(trace: TurnTrace[], events: EventRecord[], height: numbe
     const before = new Map(trace[i - 1].pieces.map((p) => [p.entity, p]))
     const tokens: string[] = []
     const relabel = (text: string): string =>
-      text.replace(/#(\d+)/g, (_m, id: string) => labelAt(i, Number(id)))
+      text
+        .replace(/advanced to (\d+),(\d+)/, (_m, x: string, y: string) =>
+          `advanced to ${coordName(Number(x), Number(y), height)}`,
+        )
+        .replace(/#(\d+)/g, (_m, id: string) => labelAt(i, Number(id)))
     for (const piece of trace[i].pieces) {
       const prev = before.get(piece.entity)
       if (prev && !vecEquals(prev.cell, piece.cell)) {
