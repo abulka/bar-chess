@@ -221,14 +221,17 @@ and stay planted while they are blocking it, otherwise they move to intercept th
 attacker, while the rest of the army keeps attacking. Both sides still fire
 autonomously.
 
-**Self-preservation** runs for every piece, human or AI: once it is badly hurt
-and still under fire it steps off the firing line on its own — even with an
-explicit **standing attack order**, which it interrupts and resumes when it is
-safe (a badly wounded piece safe-holds until fully healed). It judges the escape
-against **every** shooter covering it (not just the last one); if nothing covers
-it while
-it is hurt, it seeks cover from any nearby enemy and holds, firing when it can,
-rather than chasing or blindly fleeing its target. Valuable pieces
+**Self-preservation** runs for every piece, human or AI: once it is hurt and
+still under fire it steps off the firing line on its own — even with an
+explicit **standing attack order**, which it interrupts and resumes after
+healing. A hurt piece outside its king's healing aura walks home to the nearest
+aura square rather than taking one local cover step and resuming (that one-step
+cycle made it yo-yo between cover and the same fire); only a volley that would
+kill it this tick forces a local dodge first, and a badly wounded piece
+safe-holds until fully healed. It judges the escape
+against **every** shooter covering it (not just the last one), and a damaged
+piece already inside the aura holds there, firing when it can, rather than
+chasing. Valuable pieces
 (queen/rook/bishop/knight) watch for crossfire every moment and back off before
 they are hit once they are outgunned or focused
 by two or more attackers; cheaper pieces only react once they are hurt. Costlier
@@ -249,11 +252,11 @@ chasing over several moves and yielding to safety. See `src/game/instaKill.ts`.
 (8 squares) instead of a slider's board-wide vision, so pieces fight locally
 rather than wandering across the map to an out-of-range enemy. An attack order on
 a **positionally impossible** target (e.g. a bishop ordered onto the opposite
-colour square) is still approached best-effort: the route ends on the closest
-reachable square and the overlay draws it followed by the dashed "unreachable"
-firing line, both recomputed each move. Once it stands on a closest square it
-holds there rather than hopping between two equidistant cells. Only automatically
-acquired targets are
+colour square) is not chased at all: no firing square exists anywhere, so
+advancing would only feed the piece into the enemy's guns. It holds, and the
+overlay draws only the dashed "unreachable" firing line from where it stands;
+targeting keeps the flag current, so the order resumes on its own if a shot ever
+appears. Only automatically acquired targets are
 leashed — an explicit order is followed.
 
 **Capture advance.** A persisted **capture advance** checkbox in the toolbar

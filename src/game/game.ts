@@ -1809,10 +1809,11 @@ export class Game {
    * Whether a piece's active order has done all it can: it has arrived, or it
    * can make no further (theoretical) progress toward the objective. Other
    * pieces are ignored, so a route merely blocked by a friendly still counts as
-   * progress and keeps waiting; only a parked best-effort order is "settled".
+   * progress and keeps waiting; a parked best-effort goto — and any attack on a
+   * positionally impossible target, which is never chased — is "settled".
    * Such an order yields to the next command instead of swallowing it in the
    * queue (the fix for "I issued an impossible move and it ate every later
-   * order"). Best-effort routing itself is untouched.
+   * order").
    */
   private orderSettled(e: Entity): boolean {
     const order = this.world.get(e, Order)
@@ -1829,16 +1830,17 @@ export class Game {
       return findPath(this.board, cell, order.dest, def.move, team, never).cells.length === 0
     }
     if (order.kind === 'attack' && order.target !== null && this.world.isAlive(order.target)) {
-      // Only a positionally impossible target settles: the piece has done all it
-      // can and is parked at the closest legal point. A *reachable* target that
-      // is merely in range is still being fulfilled, so a move suspends/regroups
-      // (resumes after) instead of abandoning it.
+      // A positionally impossible target can never be hit, so the order has no
+      // progress left to make wherever the piece stands: it is settled at once
+      // (the piece holds) and yields to the next command. A *reachable* target
+      // that is merely in range is still being fulfilled, so a move
+      // suspends/regroups (resumes after) instead of abandoning it.
       const tcell = this.world.get(order.target, Cell)
       if (!tcell) return false
       const geometry = WEAPONS[def.weapon].geometry
       const plan = attackPlan(this.board, cell, tcell, def.move, geometry, team, never)
       if (plan.reachable) return false
-      return findPath(this.board, cell, plan.cell, def.move, team, never).cells.length === 0
+      return true
     }
     return false
   }
@@ -2437,6 +2439,14 @@ export class Game {
       clearMotion(motion)
       motion.path = []
       return true
+    }
+    // A positionally unreachable target can never be hit, so never preview a
+    // route into the enemy's guns for it. The piece holds; targeting refreshes
+    // `reachable` every tick, so the order resumes if a shot ever appears.
+    if (!plan.reachable) {
+      clearMotion(motion)
+      motion.path = []
+      return false
     }
     // Navigation is theoretical (future): other pieces are assumed to move, so
     // the route only avoids walls and the target's own square and is shown even

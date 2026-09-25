@@ -611,14 +611,32 @@ describe('orders system — automatic self-preservation', () => {
     expect(motion.intent).toBe('preserve')
     expect(motion.goal).not.toBeNull()
     expect(Math.max(Math.abs(motion.goal!.x - 4), Math.abs(motion.goal!.y - 7))).toBeLessThanOrEqual(2)
-    expect(motion.holdUntilHp).toBe(0)
+  })
+
+  it('sends a wounded piece home to heal instead of a one-step dodge', () => {
+    const ctx = auraContext()
+    const rook = createPiece(ctx, 'blue', PIECES.rook, { x: 0, y: 0 }) // a8, far outside the aura
+    const shooter = createPiece(ctx, 'red', PIECES.rook, { x: 0, y: 4 }) // a4, covers the file
+    const hp = ctx.world.require(rook, Health)
+    hp.cur = 40 // wounded, but above the critical latch
+    const target = ctx.world.require(rook, Target)
+    target.lastAttacker = shooter
+    target.underFireUntil = ctx.tick + 90
+
+    run(ctx)
+
+    const motion = ctx.world.require(rook, Motion)
+    expect(motion.intent).toBe('preserve')
+    expect(motion.goal).not.toBeNull()
+    // The goal is inside the king's aura, not merely local cover beside a8.
+    expect(Math.max(Math.abs(motion.goal!.x - 4), Math.abs(motion.goal!.y - 7))).toBeLessThanOrEqual(2)
   })
 })
 
 describe('orders system — attack orders', () => {
   beforeEach(() => clearComponents())
 
-  it('approaches a positionally unreachable target as close as it can get', () => {
+  it('holds instead of chasing a positionally unreachable target', () => {
     const ctx = makeContext()
     const bishop = createPiece(ctx, 'blue', PIECES.bishop, { x: 5, y: 3 }) // f5 (light)
     const king = createPiece(ctx, 'red', PIECES.king, { x: 3, y: 0 }) // d8 (dark)
@@ -629,9 +647,11 @@ describe('orders system — attack orders', () => {
 
     run(ctx)
 
-    // Best-effort: it still routes toward the target rather than freezing, so the
-    // overlay can show the route followed by the unreachable firing line.
-    expect(ctx.world.require(bishop, Motion).goal).not.toBeNull()
+    // No firing square exists anywhere, so walking to the closest square would
+    // only feed the piece into enemy fire — it holds instead.
+    const motion = ctx.world.require(bishop, Motion)
+    expect(motion.goal).toBeNull()
+    expect(motion.path).toEqual([])
   })
 
   it('still pursues a reachable attack target', () => {

@@ -92,6 +92,13 @@ function inFiringGeometryNow(ctx: SimContext, e: Entity, target: Entity, team: '
  * target can be hit (not onto the occupied target itself, which would deadlock).
  * Goal selection is `attackPlan` — the same policy as `Game.planAttack` — so the
  * executed route never diverges from the preview shown when the order was issued.
+ *
+ * A target with no firing position anywhere for this piece (positionally
+ * unreachable: opposite colour, walled off) returns null. Walking to the closest
+ * square would only feed the piece into enemy fire for a shot it can never take,
+ * and the retreat/resume cycle would drag it back every time it healed a little.
+ * Targeting keeps `reachable` current, so if the target ever moves into a shot
+ * the order resumes on its own.
  */
 function pursue(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'): { x: number; y: number } | null {
   const def = PIECES[ctx.world.require(e, PieceType).kind]
@@ -101,6 +108,7 @@ function pursue(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'
   const occupied = makeOccupied(ctx.board, ctx.occupancy)
   const weaponGeom = WEAPONS[def.weapon].geometry
   const plan = attackPlan(ctx.board, cell, tcell, def.move, weaponGeom, team, occupied)
+  if (!plan.reachable) return null
   return plan.inRange ? null : plan.cell
 }
 
@@ -228,13 +236,19 @@ const system: System = {
             let goal: { x: number; y: number } | null = null
             let intent: MotionIntent = 'none'
             let noSaferStep = false
-            // A latched, badly wounded piece heads for the king's aura to heal.
-            if (holding && !inAura && kc && kind !== 'pawn') {
-              const heal = nearestHealingCell(ctx, e, team, kc)
-              if (heal) {
-                goal = lethal && shouldDodge ? escapeGoal(ctx, e, team, threats, null) ?? heal : heal
-                intent = 'preserve'
-              }
+            // Healing trip: a latched or merely wounded piece outside the king's
+            // aura walks to the nearest healing square instead of taking one local
+            // step and then resuming a fight it cannot win. That yo-yo — retreat,
+            // heal a tick, walk back into the same fire — is exactly what a long
+            // trip home avoids, and it is how a medium wound actually recovers.
+            // Only a volley that would kill it this tick takes precedence.
+            const heal =
+              (holding || wounded) && !inAura && kc && kind !== 'pawn'
+                ? nearestHealingCell(ctx, e, team, kc)
+                : null
+            if (heal) {
+              goal = lethal && shouldDodge ? escapeGoal(ctx, e, team, threats, null) ?? heal : heal
+              intent = 'preserve'
             }
             if (intent === 'none' && shouldDodge) {
               // Seek cover: step to the least-exposed nearby square, keeping a shot
@@ -248,12 +262,6 @@ const system: System = {
                   ? (target.entity as number)
                   : null
               goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, keepShot)
-              // No local step is safer (e.g. boxed in by ranged fire while the
-              // current square is only "safe" by adjacency): a wounded piece should
-              // not stand and die — head home to the king's aura to heal instead.
-              if (goal === null && wounded && !inAura && kc && kind !== 'pawn') {
-                goal = nearestHealingCell(ctx, e, team, kc)
-              }
               if (goal !== null) intent = 'preserve'
               else noSaferStep = true
             }
@@ -278,7 +286,9 @@ const system: System = {
                   ? 'self-preservation: no safer step — holding'
                   : order.kind === 'none'
                     ? 'self-preservation: safe — holding'
-                    : 'self-preservation: safe — resuming order',
+                    : order.kind === 'attack' && !order.reachable
+                      ? 'self-preservation: safe — holding (target unreachable)'
+                      : 'self-preservation: safe — resuming order',
               )
             }
             continue
@@ -294,7 +304,9 @@ const system: System = {
           ctx.tick,
           order.kind === 'none'
             ? 'self-preservation: no longer needed — holding'
-            : 'self-preservation: no longer needed — resuming order',
+            : order.kind === 'attack' && !order.reachable
+              ? 'self-preservation: no longer needed — holding (target unreachable)'
+              : 'self-preservation: no longer needed — resuming order',
         )
       }
 

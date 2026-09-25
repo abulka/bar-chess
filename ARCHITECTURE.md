@@ -336,23 +336,23 @@ cell/reservation during movement validation and path planning.
 - **orders** — turns stance/order into `Motion.goal` for every piece (human or
   AI): an `attack` order pursues the target (or stops to fire when in geometry).
   A **positionally unreachable** target (`order.reachable === false`, e.g. a bishop
-  ordered onto the opposite colour) is still approached best-effort — the route
-  ends on the closest reachable empty square, and the overlay draws that route
-  followed by a dashed "unreachable" firing line, both recomputed each tick as the
-  piece and target move (the `reachable` flag only classifies the firing line; it
-  no longer freezes the piece). `closestEmptyCell` breaks distance ties toward the
-  piece's current square, so once it stands on a closest square it holds there
-  instead of shuttling between two equidistant cells (the bishop g6↔h7 case);
+  ordered onto the opposite colour) can never be hit, so it is **not chased**: the
+  piece holds, and the overlay draws only the dashed "unreachable" firing line
+  from where it stands. Walking to the closest square would only feed the piece
+  into the enemy's guns, and the retreat/resume cycle would drag it back every
+  time it healed a little. Targeting keeps `reachable` current, so the order
+  resumes by itself if the target ever moves into a shot. `closestEmptyCell`
+  breaks distance ties toward the
+  piece's current square, so a best-effort approach to a merely occupied firing
+  cell does not shuttle between two equidistant squares (the bishop g6↔h7 case);
   a `goto` order advances toward the objective (best effort); autonomous `attack`
   pursues in a leash, and rallies only for AI teams; a low-HP piece retreats via
-  `preservation.ts` (escape the shooters that actually cover it, else seek nearby
-  cover — see the self-preservation note below). Anything other than
+  `preservation.ts` (escape the shooters that actually cover it, else head home
+  to the king's aura to heal — see the self-preservation note below). Anything other than
   `attack` clears the goal. Pursuit picks a goal with the
   same chain as `Game.planAttack` (`previewFiringCell` → `closestEmptyCell` →
   target) so the executed route cannot diverge from the preview; a firing position
-  beats piling onto the occupied target, and a positionally unreachable target
-  (e.g. a bishop on the other colour) still routes to the closest reachable square
-  instead of a straight line to the target. `previewFiringCell` picks the approach
+  beats piling onto the occupied target. `previewFiringCell` picks the approach
   square by **actual movement hops** (`moveDistances`, a BFS alongside
   `reachableCells`), not Euclidean distance — so a knight heads for the firing
   square it can reach in the fewest moves instead of a "nearer-looking" one four
@@ -404,8 +404,12 @@ cell/reservation during movement validation and path planning.
   `src/game/instaKill.ts`): `hasInstaKill` suppresses preserve for its single
   lethal tick, so a badly wounded piece still presses and a suicide kill is
   allowed. A
-  **medium wound** retreats only while the danger is present and then resumes the
-  interrupted order (move continues, attack resumes). A **badly wounded** piece
+  **medium wound** heads home to heal: while outside the king's aura it walks to
+  the nearest reachable aura square (`nearestHealingCell`) rather than taking one
+  local cover step and then resuming the fight — the one-step-then-resume cycle
+  made a hurt piece yo-yo between cover and the same fire, healing only the sliver
+  that let it resume. Only a volley that would kill it this tick breaks the trip
+  for a local dodge. A **badly wounded** piece
   (below `CRITICAL_WOUND = 0.2`) latches a safe-hold (`Motion.holdUntilHp = max`)
   and will not advance its order until it is **fully healed** — a new player order
   clears the hold. Because healing only happens inside the aura, the hold is
@@ -414,17 +418,16 @@ cell/reservation during movement validation and path planning.
   never recover, breaking off only to dodge a volley that would kill it this tick;
   an explicit move order whose destination already lies inside the aura is left to
   run (only the hold is relaxed, so a pawn can still advance onto a healing
-  square). The same fallback covers any wounded piece that is merely below its
-  `preserveThreshold`: when `escapeGoal` finds no strictly safer step (e.g. it is
-  boxed in by ranged fire while its own square is only "safe" by the adjacency
-  term), it heads for the aura instead of standing in the fire. The king's
+  square). The king's
   **healing aura** is a
-  strong sanctuary: a piece inside it holds unless the volley it currently faces
+  strong sanctuary: a piece inside it holds while wounded unless the volley it
+  currently faces
   would **kill** it (`outgunned`) — a mere shooter or a stale "recent attacker" is
   not enough — so it recovers instead of being nudged out of range. When
   hurt, the scan widens to `COVER_RADIUS = 6` so nearby enemies count even before
-  they can shoot; it then steps to the least-exposed nearby square (keeping its
-  shot as a tie-break) and holds there rather than chasing or trekking home. Gated by
+  they can shoot, and a piece that is merely pressured (not yet wounded) still
+  steps to the least-exposed nearby square, keeping its
+  shot as a tie-break, rather than chasing. Gated by
   `ctx.autoPreserve`, the persisted **auto-preserve** toolbar toggle; with it off
   the same coverage-based retreat still runs for a low-HP Attack-stance piece
   (there is no longer a single-target `fleeCell` path). A `none`/`move` piece
@@ -677,7 +680,9 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   preserve goal still draws the cyan diamond. The right-rail legend shows the
   cyan dashed line only, matching the common override case.
 - **Target** — an ordered attack (`order.kind === 'attack'`) draws a red firing
-  line + reticle and rings the victim red. An auto-acquired target is drawn two
+  line + reticle and rings the victim red; a positionally impossible target draws
+  it dashed grey from the piece's current square (there is no approach route to
+  draw, because the piece holds). An auto-acquired target is drawn two
   ways: a **committed** piece (AI controller, or Attack stance) will pursue it, so
   it gets the same line + reticle in **amber** and rings the victim; a stationary
   **None/Move** piece only fires at whatever passes in range and will not follow
@@ -692,8 +697,9 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   attack order** — and `pot shot` otherwise, with an
   "in range only — …" note that adds "holding position" when the piece has no
   goal. It also surfaces the pending state directly: a parked insta-kill line, a
-  latched `safe-hold until <hp> hp`, and a "self-preservation overriding the
-  attack order" banner while a standing attack is interrupted.
+  latched `safe-hold until <hp> hp`, a "self-preservation overriding the attack
+  order" banner while a standing attack is interrupted, and a "no firing position
+  exists — holding position" note for an impossible target.
 - **Healing** (`show healing`, off by default) — a pulsing green aura around each
   living king, a dashed ring at the two-square boundary, and wavy tendrils to the
   damaged same-team pieces inside it. This toggle is display-only: the
@@ -724,7 +730,8 @@ Ordering is BAR-style and **context-sensitive** — there is no global order mod
   the whole plan. A move on an un-queued attacker **replaces** the attack (no
   parked target to resume) rather than queueing behind it. A piece whose active
   order has **settled**
-  (arrived, or parked at the closest legal point a best-effort route can reach —
+  (arrived, parked at the closest legal point a best-effort goto can reach, or a
+  positionally impossible attack target that has no progress left to make —
   `Game.orderSettled`) yields to the new command instead of hiding it in the
   queue, so an impossible order can no longer swallow every later click; an order
   that is still progressing, or merely blocked by friends, keeps its queue.

@@ -149,7 +149,13 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
         <b>insta-kill</b> · {{ instaKillName }} · target {{ info.order.instaKill.coord }}
       </p>
       <p v-if="preserveOverride" class="line warn">
-        self-preservation overriding the attack order — resumes when safe/healed
+        self-preservation overriding the attack order — resumes after healing
+      </p>
+      <p
+        v-else-if="info.order.kind === 'attack' && !info.order.reachable"
+        class="line muted tiny"
+      >
+        no firing position exists — holding position, not chasing
       </p>
       <p v-if="isAuto && orderIdle" class="line">
         <b>auto</b> ·

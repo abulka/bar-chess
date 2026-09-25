@@ -99,31 +99,33 @@ describe('Game integration', () => {
     expect(game.world.isAlive(knight)).toBe(true)
   })
 
-  it('retreats a wounded bishop from an impossible attack instead of shuttling (g6 reporter)', () => {
+  it('sends a wounded bishop home rather than chasing an impossible target (g6 reporter)', () => {
     const game = new Game(8)
     for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
     const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
     const bishop = createPiece(shim, 'blue', PIECES.bishop, { x: 6, y: 2 }) // g6
-    const rook = createPiece(shim, 'red', PIECES.rook, { x: 7, y: 2 }) // h6, opposite colour
+    const knight = createPiece(shim, 'red', PIECES.knight, { x: 7, y: 2 }) // h6, opposite colour
     const shooter = createPiece(shim, 'red', PIECES.rook, { x: 6, y: 0 }) // g8, covers g6
     createPiece(shim, 'blue', PIECES.king, { x: 4, y: 7 }) // e1, healing aura
-    game.world.require(bishop, Health).cur = 14
+    game.world.require(bishop, Health).cur = 25 // wounded, above the critical latch
     const target = game.world.require(bishop, Target)
     target.lastAttacker = shooter
     target.underFireUntil = game.tick + 90
     const order = game.world.require(bishop, Order)
     order.kind = 'attack'
-    order.target = rook
+    order.target = knight
     order.reachable = false
 
     game.runTicks(1)
 
-    // The standing attack (impossibly chasing h6) yields to self-preservation:
-    // no g6→h7 hop, and a critical wound latches a safe-hold until fully healed.
+    // The standing attack is impossible, so it is not pursued. The wound sends
+    // the bishop home to the king's aura instead of taking one step and then
+    // walking back to the h-file.
     const motion = game.world.require(bishop, Motion)
     expect(motion.intent).toBe('preserve')
-    expect(motion.holdUntilHp).toBe(75)
+    expect(motion.goal).not.toBeNull()
     expect(motion.goal).not.toEqual({ x: 7, y: 1 })
+    expect(Math.max(Math.abs(motion.goal!.x - 4), Math.abs(motion.goal!.y - 7))).toBeLessThanOrEqual(2)
   })
 
   it('clears the reported under-fire once the piece leaves the attacker line', () => {
