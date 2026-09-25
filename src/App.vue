@@ -1027,6 +1027,7 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-show="leftTab === 'games'" class="rail-tab-body">
+              <div class="rail-title">debug</div>
               <button class="ctl copy-btn" @click="copyLlm">
                 {{ copied === 'llm' ? 'Copied!' : 'Copy history for LLM' }}
               </button>
@@ -1036,6 +1037,7 @@ onBeforeUnmount(() => {
               <button class="ctl copy-btn" @click="copyJson">
                 {{ copied === 'json' ? 'Copied!' : 'Copy state (JSON)' }}
               </button>
+              <div class="rail-title">save</div>
               <div class="save-row">
                 <input
                   v-model="slotName"
@@ -1046,6 +1048,7 @@ onBeforeUnmount(() => {
                 />
                 <button class="ctl" @click="onSaveSlot">Save</button>
               </div>
+              <div class="rail-title">load</div>
               <ul v-if="slots.length" class="slots">
                 <li v-for="slot in slots" :key="slot.id">
                   <span class="slot-name" :title="new Date(slot.savedAt).toLocaleString()">
@@ -1055,6 +1058,7 @@ onBeforeUnmount(() => {
                   <button class="ctl small" @click="onDeleteSlot(slot.id)">Del</button>
                 </li>
               </ul>
+              <div class="rail-title">export</div>
               <div class="io-row">
                 <button class="ctl" @click="onExport">Export JSON</button>
                 <button class="ctl" @click="onImportClick">Import JSON</button>

@@ -57,21 +57,6 @@ watch(
 
 <template>
   <div class="turn-panel">
-    <p v-if="backtracked" class="warn">
-      viewing turn {{ current }} of {{ latest }} — <b>space</b> replays forward ·
-      <b>f</b> forks a new path (discards {{ dropped }} redone beat{{ dropped === 1 ? '' : 's' }}) ·
-      <b>u</b>/<b>r</b> undo/redo · <b>y</b> replay
-    </p>
-    <p v-if="snapshot.historyTrimmed > 0" class="muted tiny">
-      {{ snapshot.historyTrimmed }} earlier beat{{ snapshot.historyTrimmed === 1 ? '' : 's' }} trimmed (history cap)
-    </p>
-
-    <div v-if="backtracked" class="fork-row">
-      <button class="ctl small" :disabled="busy" @click="emit('fork')">
-        ⑂ Fork here (f) — discards {{ dropped }} beat{{ dropped === 1 ? '' : 's' }}
-      </button>
-    </div>
-
     <ul ref="listEl" class="list">
       <li
         v-for="t in rows"
@@ -101,14 +86,31 @@ watch(
             {{ timeLabel(t) }} · {{ t.pieces }} pieces · {{ t.orders }} orders
           </div>
         </div>
+        <button
+          v-if="t.index === current && backtracked"
+          class="fork"
+          :disabled="busy"
+          :title="`fork here (f) — discards ${dropped} redone beat${dropped === 1 ? '' : 's'}`"
+          @click.stop="emit('fork')"
+        >
+          ⑂
+        </button>
       </li>
     </ul>
+
+    <p v-if="backtracked" class="warn">
+      viewing turn {{ current }} of {{ latest }} — <b>space</b> replays forward ·
+      <b>f</b> fork here · <b>u</b>/<b>r</b> undo/redo · <b>y</b> replay
+    </p>
+    <p v-if="snapshot.historyTrimmed > 0" class="muted tiny">
+      {{ snapshot.historyTrimmed }} earlier beat{{ snapshot.historyTrimmed === 1 ? '' : 's' }} trimmed (history cap)
+    </p>
   </div>
 </template>
 
 <style scoped>
 .warn {
-  margin: 0 0 6px;
+  margin: 6px 0 0;
   padding: 4px 6px;
   border: 1px solid #ff9f43;
   border-radius: 3px;
@@ -126,14 +128,6 @@ watch(
 
 .tiny {
   font-size: 0.9em;
-}
-
-.fork-row {
-  margin: 6px 0;
-}
-
-.fork-row .ctl {
-  width: 100%;
 }
 
 .list {
@@ -183,6 +177,31 @@ watch(
 }
 
 .play:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.fork {
+  flex: none;
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid #ff9f43;
+  border-radius: 3px;
+  background: transparent;
+  color: #ffb066;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fork:hover {
+  color: #ffd8a0;
+  border-color: #ffd8a0;
+}
+
+.fork:disabled {
   opacity: 0.35;
   cursor: default;
 }

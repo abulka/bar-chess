@@ -29,7 +29,7 @@ test('lists turns, jumps to one, and replays forward without forking', async ({ 
   await page.keyboard.press('u')
   await page.keyboard.press('u')
   await expect(page.locator('.turn-panel .warn')).toBeVisible()
-  await expect(page.locator('.turn-panel .fork-row button')).toBeVisible()
+  await expect(page.locator('.turn-panel .row.active .fork')).toBeVisible()
   expect(await page.evaluate(() => (window as any).game.snapshot().historyIndex)).toBe(0)
 
   // Space replays the next recorded beat forward, keeping the redo branch.
@@ -52,7 +52,7 @@ test('fork discards the redo branch', async ({ page }) => {
 
   // The fork button lives in the left rail's "turns" tab (hidden by default).
   await page.getByRole('button', { name: 'turns', exact: true }).click()
-  await page.locator('.turn-panel .fork-row button').click()
+  await page.locator('.turn-panel .row.active .fork').click()
   await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().canRedo)).toBe(false)
   expect(await page.evaluate(() => (window as any).game.snapshot().turnActive)).toBe(true)
 })
