@@ -41,6 +41,9 @@ Known artifacts of the compact transcript (do not read these as rule flaws):
   - A '->' line is start-of-turn to end-of-turn and can combine a normal move with a
     capture-advance step.
   - A piece that moves and dies in the same turn has no move line and can show moves=0.
+  - In human-vs-ai batches the human side is a scripted policy, announced by a '# study'
+    line in each transcript. Its orders can be suboptimal, so treat unreachable-order notes
+    as policy artifacts unless the same behaviour appears in ai-vs-ai games.
 The per-turn boards and the # pieces stats are the authority on positions and movement.
 
 Please analyse these games and identify gameplay gaps and playability issues:
@@ -82,6 +85,10 @@ export function formatPieceRules(): string {
 export interface StudyPromptOptions {
   mode?: string
   size?: number
+  /** Scripted human policy, when the batch used one. */
+  policy?: string
+  piecesPerTurn?: number
+  attackChance?: number
   /** Include each game's full replay record JSON (default false: verbose replay data). */
   includeRecord?: boolean
 }
@@ -94,7 +101,15 @@ export function buildStudyPrompt(
   const summary = summarizeBatch(games)
   const size = options.size ?? 8
   const includeRecord = options.includeRecord ?? false
-  const header = `Batch: ${games.length} game(s), board ${size}x${size}, mode ${options.mode ?? 'ai-vs-ai'}.`
+  const policyNote =
+    options.policy && options.policy !== 'none'
+      ? ` The human side is a scripted policy (${options.policy}), ` +
+        `${options.piecesPerTurn ?? 0} piece(s) per turn and ` +
+        `${Math.round((options.attackChance ?? 0) * 100)}% attacks.`
+      : ''
+  const header =
+    `Batch: ${games.length} game(s), board ${size}x${size}, mode ${options.mode ?? 'ai-vs-ai'}.` +
+    policyNote
   const report = formatBatchSummary(summary)
   const transcripts = games
     .map((g) => {

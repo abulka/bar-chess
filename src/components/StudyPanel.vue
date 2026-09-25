@@ -3,8 +3,8 @@ import { computed, ref } from 'vue'
 import { BOARD_SIZES } from '../game/boards'
 import type { BoardSize } from '../game/boards'
 import type { GameMode } from '../game/game'
-import { STUDY_POLICIES } from '../game/study'
-import type { StudyOptions, StudyPolicyName, StudyState } from '../game/study'
+import { DEFAULT_STUDY_TUNING } from '../game/study'
+import type { StudyOptions, StudySpeed, StudyState } from '../game/study'
 import { buildStudyPrompt } from '../game/studyPrompt'
 
 const props = defineProps<{ state: StudyState }>()
@@ -17,7 +17,12 @@ const emit = defineEmits<{
 
 const modes: Array<{ id: GameMode; label: string }> = [
   { id: 'ai-vs-ai', label: 'AI vs AI' },
-  { id: 'human-vs-ai', label: 'Human (scripted) vs AI' },
+  { id: 'human-vs-ai', label: 'Human (random) vs AI' },
+]
+
+const speeds: Array<{ id: StudySpeed; label: string }> = [
+  { id: 'watch', label: 'Watch' },
+  { id: 'fast', label: 'Fast (skip animation)' },
 ]
 
 const games = ref(5)
@@ -25,7 +30,9 @@ const mode = ref<GameMode>('ai-vs-ai')
 const size = ref<BoardSize>(8)
 const seedBase = ref(1)
 const maxTurns = ref(120)
-const policy = ref<StudyPolicyName>('focus')
+const speed = ref<StudySpeed>('watch')
+const piecesPerTurn = ref(DEFAULT_STUDY_TUNING.piecesPerTurn)
+const attackPct = ref(Math.round(DEFAULT_STUDY_TUNING.attackChance * 100))
 const autoPreserve = ref(true)
 const captureAdvance = ref(false)
 const chessKills = ref(false)
@@ -48,6 +55,9 @@ const prompt = computed(() =>
         {
           mode: props.state.results[0]?.mode,
           size: props.state.results[0]?.size,
+          policy: props.state.results[0]?.policy,
+          piecesPerTurn: props.state.results[0]?.piecesPerTurn,
+          attackChance: props.state.results[0]?.attackChance,
           includeRecord: includeRecord.value,
         },
       ),
@@ -60,7 +70,7 @@ const promptSize = computed(() => {
   return chars === 0 ? '' : `${(chars / 1024).toFixed(1)} KB · ~${Math.round(chars / 400) / 10}k tokens`
 })
 
-const scripted = computed(() => mode.value === 'human-vs-ai')
+const humanSide = computed(() => mode.value === 'human-vs-ai')
 
 function onRun(): void {
   copied.value = false
@@ -70,7 +80,10 @@ function onRun(): void {
     mode: mode.value,
     seedBase: seedBase.value,
     maxTurns: Math.max(5, maxTurns.value),
-    policy: policy.value,
+    policy: humanSide.value ? 'human' : 'none',
+    speed: speed.value,
+    piecesPerTurn: Math.max(1, Math.round(piecesPerTurn.value)),
+    attackChance: Math.max(0, Math.min(100, attackPct.value)) / 100,
     autoPreserve: autoPreserve.value,
     captureAdvance: captureAdvance.value,
     chessKills: chessKills.value,
@@ -115,11 +128,31 @@ async function copyPrompt(): Promise<void> {
       </label>
       <label class="toggle">seed <input v-model.number="seedBase" type="number" :disabled="state.running" /></label>
       <label class="toggle">max turns <input v-model.number="maxTurns" type="number" min="5" :disabled="state.running" /></label>
-      <label class="toggle" title="Scripted orders for the human side (human-vs-ai only)">
-        policy
-        <select v-model="policy" :disabled="state.running || !scripted">
-          <option v-for="p in STUDY_POLICIES" :key="p.id" :value="p.id">{{ p.label }}</option>
+      <label class="toggle">
+        speed
+        <select v-model="speed" :disabled="state.running">
+          <option v-for="s in speeds" :key="s.id" :value="s.id">{{ s.label }}</option>
         </select>
+      </label>
+      <label class="toggle" title="Most pieces the random human side orders in one turn (human-vs-ai only)">
+        pieces/turn
+        <input
+          v-model.number="piecesPerTurn"
+          type="number"
+          min="1"
+          max="16"
+          :disabled="state.running || !humanSide"
+        />
+      </label>
+      <label class="toggle" title="Chance a chosen piece attacks instead of moving (human-vs-ai only)">
+        attack %
+        <input
+          v-model.number="attackPct"
+          type="number"
+          min="0"
+          max="100"
+          :disabled="state.running || !humanSide"
+        />
       </label>
       <label class="toggle"><input v-model="autoPreserve" type="checkbox" :disabled="state.running" /> auto-preserve</label>
       <label class="toggle"><input v-model="captureAdvance" type="checkbox" :disabled="state.running" /> capture advance</label>
@@ -155,7 +188,7 @@ async function copyPrompt(): Promise<void> {
           <span v-if="r.partial" class="flag partial-flag">partial</span>
         </div>
         <div v-if="state.results.length === 0 && !state.running" class="log-empty">
-          run a batch to watch AI-vs-AI games and study them
+          run a batch of AI-vs-AI games, or a random human against the AI, and study them
         </div>
       </div>
 

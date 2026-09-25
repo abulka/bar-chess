@@ -1,26 +1,43 @@
-import { Cell, Health, PieceType, Team } from '../ecs/components'
+import { Cell, Health, Motion, PieceType, Team } from '../ecs/components'
 import type { EventRecord } from '../ecs/events'
+import { firingPositionExists } from './approach'
 import type { BoardSize } from './boards'
 import { Game } from './game'
 import type { GameMode } from './game'
 import { GameLog } from './gameLog'
+import { chebyshev, moveDestinations } from './geometry'
+import { dist2 } from './math'
+import { buildOccupancy, makeOccupied } from './occupancy'
+import { PIECES, WEAPONS } from './pieces'
 import { Recorder } from './record'
 import type { GameRecord } from './record'
+import { Rng } from './rng'
 import type { GameAnalysis } from './analysis'
-import { dist2 } from './math'
 import type { TurnTrace } from './trace'
-import type { TeamId } from './types'
+import type { TeamId, Vec2 } from './types'
+import type { Entity } from '../ecs/world'
 
-export type StudyPolicyName = 'none' | 'advance' | 'focus' | 'turtle'
+/** `none` runs no scripted orders; `human` is the gentle random player policy. */
+export type StudyPolicyName = 'none' | 'human'
 
-export const STUDY_POLICIES: Array<{ id: StudyPolicyName; label: string }> = [
-  { id: 'none', label: 'None' },
-  { id: 'advance', label: 'Advance' },
-  { id: 'focus', label: 'Focus fire' },
-  { id: 'turtle', label: 'Attack stance' },
-]
+/** `watch` plays at animation speed; `fast` drains turns without waiting. */
+export type StudySpeed = 'watch' | 'fast'
 
-type StudyPolicy = (game: Game, turn: number) => void
+/** How the scripted human behaves. */
+export interface StudyPolicyTuning {
+  /** Most pieces given an order in one turn. */
+  piecesPerTurn: number
+  /** Chance that a chosen piece attacks instead of making a short move. */
+  attackChance: number
+}
+
+export const DEFAULT_STUDY_TUNING: StudyPolicyTuning = {
+  piecesPerTurn: 3,
+  attackChance: 0.2,
+}
+
+/** Ticks one fast frame may simulate, so the page never freezes for long. */
+const FAST_STEPS_PER_FRAME = 2000
 
 function piecesOf(game: Game, team: TeamId): number[] {
   const out: number[] = []
@@ -34,60 +51,117 @@ function enemyOf(team: TeamId): TeamId {
   return team === 'red' ? 'blue' : 'red'
 }
 
-/** Advance every piece toward the enemy back rank; never initiates a fight. */
-const advancePolicy: StudyPolicy = (game) => {
-  const goalY = enemyOf(game.playerTeam) === 'red' ? 0 : game.board.height - 1
-  for (const e of piecesOf(game, game.playerTeam)) {
-    const cell = game.world.get(e, Cell)
-    if (!cell) continue
-    game.selected = [e]
-    game.orderAt({ x: cell.x, y: goalY }, 'move')
+/** Pick `count` distinct items at random, in a seeded, reproducible order. */
+function pickSome<T>(items: T[], count: number, rng: Rng): T[] {
+  const pool = [...items]
+  const out: T[] = []
+  const n = Math.min(Math.max(1, count), pool.length)
+  for (let i = 0; i < n; i++) {
+    const j = rng.int(0, pool.length - 1)
+    out.push(pool[j])
+    pool.splice(j, 1)
   }
-  game.selected = []
+  return out
 }
 
-/** Attack the nearest enemy within 8 squares, else advance. */
-const focusFirePolicy: StudyPolicy = (game) => {
-  const team = game.playerTeam
-  const enemy = enemyOf(team)
-  const goalY = enemy === 'red' ? 0 : game.board.height - 1
-  const enemies: Array<{ x: number; y: number }> = []
-  for (const e of piecesOf(game, enemy)) {
-    const cell = game.world.get(e, Cell)
-    if (cell) enemies.push({ x: cell.x, y: cell.y })
+/** Closest living enemy's square, or null when the board is already cleared. */
+function nearestEnemyCell(game: Game, e: Entity, team: TeamId): Vec2 | null {
+  const cell = game.world.get(e, Cell)
+  if (!cell) return null
+  let best: Vec2 | null = null
+  let bestDist = Infinity
+  for (const other of game.world.query(Cell, Team, Health)) {
+    if (game.world.require(other, Team) === team) continue
+    const oc = game.world.require(other, Cell)
+    const d = dist2(oc.x, oc.y, cell.x, cell.y)
+    if (d < bestDist) {
+      bestDist = d
+      best = { x: oc.x, y: oc.y }
+    }
   }
-  for (const e of piecesOf(game, team)) {
-    const cell = game.world.get(e, Cell)
-    if (!cell) continue
-    let best: { x: number; y: number } | null = null
-    let bestDist = Infinity
-    for (const target of enemies) {
-      const d = dist2(target.x, target.y, cell.x, cell.y)
-      if (d < bestDist) {
-        bestDist = d
-        best = target
+  return best
+}
+
+/**
+ * An enemy this piece could eventually shoot, chosen at random. Uses the same
+ * reachability test the order system uses, so the attack order is never
+ * positionally impossible (a pawn ordered straight ahead, a bishop on the
+ * wrong colour). Returns null when nothing is engageable.
+ */
+function randomEngageableEnemy(game: Game, e: Entity, team: TeamId, rng: Rng): Entity | null {
+  const cell = game.world.get(e, Cell)
+  const kind = game.world.get(e, PieceType)?.kind
+  const def = kind ? PIECES[kind] : undefined
+  if (!cell || !def) return null
+  const weaponGeom = WEAPONS[def.weapon].geometry
+  const candidates: Entity[] = []
+  for (const other of game.world.query(Cell, Team, Health)) {
+    if (game.world.require(other, Team) === team) continue
+    const oc = game.world.require(other, Cell)
+    if (firingPositionExists(game.board, cell, oc, def.move, weaponGeom, team)) {
+      candidates.push(other)
+    }
+  }
+  if (candidates.length === 0) return null
+  return candidates[rng.int(0, candidates.length - 1)]
+}
+
+/**
+ * One short, legal move: a single movement hop, biased toward the nearest
+ * enemy but chosen from the best few squares so the army does not march in
+ * lockstep. Returns null when the piece is boxed in.
+ */
+function gentleMove(game: Game, e: Entity, team: TeamId, rng: Rng): Vec2 | null {
+  const cell = game.world.get(e, Cell)
+  const kind = game.world.get(e, PieceType)?.kind
+  const def = kind ? PIECES[kind] : undefined
+  if (!cell || !def) return null
+  const occupied = makeOccupied(game.board, buildOccupancy(game.world, game.board))
+  const steps = moveDestinations(game.board, cell, def.move, team, occupied).filter(
+    (c) => !occupied(c.x, c.y),
+  )
+  if (steps.length === 0) return null
+  const enemy = enemyOf(team)
+  const aim = nearestEnemyCell(game, e, team) ?? game.board.laneMidpoint(enemy) ?? cell
+  const ranked = steps
+    .map((c) => ({ c, d: chebyshev(c.x, c.y, aim.x, aim.y) }))
+    .sort((a, b) => a.d - b.d)
+  const window = Math.min(3, ranked.length)
+  return ranked[rng.int(0, window - 1)].c
+}
+
+/**
+ * A gentle, human-like player: each turn it gives orders to a few random
+ * pieces. Most orders are a short move toward the fight; now and then a piece
+ * attacks an enemy it can genuinely engage. Pieces that are already retreating
+ * to heal are left alone.
+ */
+export function humanPolicy(game: Game, rng: Rng, tuning: StudyPolicyTuning): void {
+  const team = game.playerTeam
+  const idle = piecesOf(game, team).filter((e) => {
+    const motion = game.world.get(e, Motion)
+    // Leave pieces that are already retreating or holding to heal alone.
+    return !motion || (motion.intent !== 'preserve' && motion.holdUntilHp <= 0)
+  })
+  if (idle.length === 0) return
+  const chosen = pickSome(idle, Math.round(tuning.piecesPerTurn), rng)
+  const attackChance = Math.min(0.9, Math.max(0, tuning.attackChance))
+  for (const e of chosen) {
+    // Each order starts fresh, so long queues never build up behind a piece.
+    game.selected = [e]
+    game.clearOrders()
+    if (rng.next() < attackChance) {
+      const victim = randomEngageableEnemy(game, e, team, rng)
+      const vcell = victim !== null ? game.world.get(victim, Cell) : null
+      if (vcell) {
+        game.orderAt({ x: vcell.x, y: vcell.y })
+        continue
       }
     }
-    game.selected = [e]
-    if (best && bestDist <= 64) game.orderAt({ x: best.x, y: best.y })
-    else game.orderAt({ x: cell.x, y: goalY }, 'move')
+    const dest = gentleMove(game, e, team, rng)
+    if (dest) game.orderAt(dest, 'move')
   }
   game.selected = []
-}
-
-/** Set the whole army to Attack stance once and let it fight autonomously. */
-const turtlePolicy: StudyPolicy = (game, turn) => {
-  if (turn > 1) return
-  game.selected = piecesOf(game, game.playerTeam)
-  game.setPieceStance('attack')
-  game.selected = []
-}
-
-const POLICIES: Record<StudyPolicyName, StudyPolicy | undefined> = {
-  none: undefined,
-  advance: advancePolicy,
-  focus: focusFirePolicy,
-  turtle: turtlePolicy,
 }
 
 export interface StudyOptions {
@@ -97,6 +171,9 @@ export interface StudyOptions {
   seedBase: number
   maxTurns: number
   policy: StudyPolicyName
+  speed: StudySpeed
+  piecesPerTurn: number
+  attackChance: number
   autoPreserve: boolean
   captureAdvance: boolean
   chessKills: boolean
@@ -107,6 +184,9 @@ export interface StudyGameResult {
   seed: number
   mode: GameMode
   size: number
+  policy: StudyPolicyName
+  piecesPerTurn: number
+  attackChance: number
   winner: TeamId | null
   turns: number
   ticks: number
@@ -132,8 +212,10 @@ export interface StudyState {
 /**
  * Drives the live `Game` through a batch of watchable games, recording each one
  * (seed + inputs, event stream and per-turn piece trace). It owns the main board
- * while running: `tick()` is called from the UI loop to keep turns flowing.
- * `stopCurrent` keeps the partial game's recording; `cancel` discards everything.
+ * while running: `tick()` is called from the UI loop. `watch` queues one turn
+ * per call and lets the animation play it; `fast` drains whole turns per call
+ * without waiting, so long batches finish in seconds. `stopCurrent` keeps the
+ * partial game's recording; `cancel` discards everything.
  */
 export class StudyController {
   private game: Game
@@ -143,6 +225,8 @@ export class StudyController {
   private results: StudyGameResult[] = []
   private running = false
   private index = -1
+  /** Scripted-policy randomness, kept separate so the battle's RNG is untouched. */
+  private policyRng = new Rng()
 
   constructor(game: Game, recorder: Recorder) {
     this.game = game
@@ -176,24 +260,51 @@ export class StudyController {
     this.log.begin()
   }
 
-  /** Called every UI refresh: samples, applies the policy, starts the next turn. */
+  /** Called every UI refresh: samples, applies the policy, advances the game. */
   tick(): void {
     if (!this.running || !this.options) return
+    if (this.options.speed === 'fast') {
+      this.drainFast(FAST_STEPS_PER_FRAME)
+      return
+    }
     if (this.game.turnActive || this.game.isReplaying) return
-    if (this.game.winner !== null) {
+    if (this.game.winner !== null || this.game.turn >= this.options.maxTurns) {
       this.finishGame()
       return
     }
-    if (this.game.turn >= this.options.maxTurns) {
-      this.finishGame()
-      return
+    this.startNextTurn()
+  }
+
+  /** Simulate up to `budget` steps without waiting for animation. */
+  private drainFast(budget: number): void {
+    let left = budget
+    while (left-- > 0 && this.running && this.options) {
+      if (this.game.turnActive || this.game.isReplaying) {
+        this.game.runTicks(1)
+        continue
+      }
+      if (this.game.winner !== null || this.game.turn >= this.options.maxTurns) {
+        this.finishGame()
+        continue
+      }
+      this.startNextTurn()
     }
+  }
+
+  private startNextTurn(): void {
     this.log.tick()
-    const policy = POLICIES[this.options.policy]
-    if (policy && this.game.teams[this.game.playerTeam].controller === 'human') {
-      policy(this.game, this.game.turn + 1)
-    }
+    this.applyPolicy()
     this.game.queueTurn()
+  }
+
+  private applyPolicy(): void {
+    const options = this.options
+    if (!options || options.policy === 'none') return
+    if (this.game.teams[this.game.playerTeam].controller !== 'human') return
+    humanPolicy(this.game, this.policyRng, {
+      piecesPerTurn: options.piecesPerTurn,
+      attackChance: options.attackChance,
+    })
   }
 
   get state(): StudyState {
@@ -229,6 +340,7 @@ export class StudyController {
     } else {
       this.game.loadSize(this.options.size as BoardSize, seed)
     }
+    this.policyRng = new Rng((seed ^ 0x5eed1234) >>> 0)
     this.recorder.reset()
     this.log.begin()
   }
@@ -243,12 +355,22 @@ export class StudyController {
         timedOut: partial,
       }),
     )
-    const { transcript, analysis } = this.log.finish(record, { boards: true })
+    const { transcript, analysis } = this.log.finish(record, {
+      boards: true,
+      study: this.options.policy === 'none' ? undefined : {
+        policy: this.options.policy,
+        piecesPerTurn: this.options.piecesPerTurn,
+        attackChance: this.options.attackChance,
+      },
+    })
     this.results.push({
       index: this.index,
       seed: record.seed,
       mode: record.mode,
       size: record.size,
+      policy: this.options.policy,
+      piecesPerTurn: this.options.piecesPerTurn,
+      attackChance: this.options.attackChance,
       winner: record.result?.winner ?? null,
       turns: record.result?.turns ?? this.game.turn,
       ticks: record.result?.ticks ?? this.game.tick,

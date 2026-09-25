@@ -17,6 +17,8 @@ export interface GameLogFinish {
 export interface GameLogOptions {
   /** Include a compact board after each turn in the transcript. */
   boards?: boolean
+  /** How a scripted human side played, so the reader can tell it from the sim. */
+  study?: { policy: string; piecesPerTurn: number; attackChance: number }
 }
 
 /**
@@ -113,6 +115,7 @@ export class GameLog {
         final: this.game.shorthand(),
         terrain: Array.from(this.game.board.terrain),
         boards: options.boards,
+        study: options.study,
       }),
       analysis: analyzeGame(record, events, trace),
     }

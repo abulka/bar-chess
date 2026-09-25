@@ -73,8 +73,20 @@ describe('study prompt', () => {
     expect(full).toContain('"boardId":"board-8"')
   })
 
-  it('shares its body with the live copy bundle', () => {
-    const body = formatGamePromptBody({ transcript: 'T1: bP d2->d4', analysis: analysis(), record: record() })
+  it('announces the scripted human policy in the batch header', () => {
+    const text = buildStudyPrompt([game()], {
+      mode: 'human-vs-ai',
+      policy: 'human',
+      piecesPerTurn: 2,
+      attackChance: 0.25,
+    })
+    expect(text).toContain('The human side is a scripted policy (human)')
+    expect(text).toContain('2 piece(s) per turn')
+    expect(text).toContain('25% attacks')
+    expect(text).toContain("announced by a '# study'")
+  })
+
+  it('shares its body with the live copy bundle', () => {    const body = formatGamePromptBody({ transcript: 'T1: bP d2->d4', analysis: analysis(), record: record() })
     expect(body).toContain('# transcript')
     expect(body).toContain('# analysis')
     expect(body).toContain('# replay record')

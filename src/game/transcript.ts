@@ -19,6 +19,8 @@ export interface TranscriptInput {
   terrain?: number[]
   /** Draw a compact board after each turn (default false). */
   boards?: boolean
+  /** How a scripted human side played, so the reader can tell it from the sim. */
+  study?: { policy: string; piecesPerTurn: number; attackChance: number }
 }
 
 const ACTIVITY_TYPES = new Set(['shot', 'damage', 'kill', 'advance', 'warn'])
@@ -140,6 +142,14 @@ export function formatTranscript(input: TranscriptInput): string {
       `captureAdvance=${record.settings.captureAdvance ? 'on' : 'off'} ` +
       `chessKills=${record.settings.chessKills ? 'on' : 'off'} playerTeam=${record.playerTeam}`,
   )
+  if (input.study) {
+    const pct = Math.round(input.study.attackChance * 100)
+    lines.push(
+      `# study the human side is a scripted policy (${input.study.policy}): ` +
+        `${input.study.piecesPerTurn} piece(s) per turn, ${pct}% attacks; ` +
+        'unreachable-order notes can come from the policy, not the rules',
+    )
+  }
 
   lines.push('# opening')
   lines.push(

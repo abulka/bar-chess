@@ -175,14 +175,20 @@ snapshots. `Game.onCommand` reports each player command (order, stance, clear,
 deploy, mode); `Recorder` (`src/game/record.ts`) collects them per turn and
 `replayRecord` reproduces the game exactly.
 
-The HUD's **Study** tab runs a batch of games **on the live board** so you can
-watch them. Pick a count, mode, board, seed base, max turns, a scripted "human"
-policy and the rule toggles, then **Run N games**. `Stop game` keeps the current
-(game's) partial recording and moves on; `Cancel all` discards everything. As it
-runs, `StudyController` (`src/game/study.ts`) records each game and samples a
-per-turn piece trace, then `transcript.ts` / `analysis.ts` produce a compact
-per-game transcript (including a board per turn) and flag gameplay gaps (pieces
-that held under fire, never moved, oscillation, focus fire, no-progress turns).
+The HUD's **Study** tab runs a batch of games, on the live board in **Watch**
+speed or without waiting in **Fast** speed. Pick a count, mode (AI vs AI, or a
+random human against the AI), board, seed base, max turns, the scripted human's
+pace (pieces per turn and attack chance) and the rule toggles, then
+**Run N games**. The scripted human gives short move orders to a few random
+pieces each turn and only attacks enemies it can genuinely engage, so it never
+issues a positionally impossible attack; hurt pieces that are retreating to heal
+are left alone. `Stop game` keeps the current (game's) partial recording and
+moves on; `Cancel all` discards everything. As it runs, `StudyController`
+(`src/game/study.ts`) records each game and samples a per-turn piece trace, then
+`transcript.ts` / `analysis.ts` produce a compact per-game transcript (including
+a board per turn) and flag gameplay gaps (pieces that held under fire, never
+moved, oscillation, focus fire, no-progress turns). Each transcript names the
+human policy, so a reader can tell a policy artifact from a rule problem.
 **Copy analysis prompt** reuses the shared `LLM_GAME_RULES` preamble and the same
 per-game body as the live "copy history for LLM" bundle, then prepends a batch
 summary, a generated piece/weapon stat table and each game's flagged analysis; a
