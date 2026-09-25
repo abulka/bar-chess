@@ -23,7 +23,7 @@ export interface TranscriptInput {
   study?: { policy: string; piecesPerTurn: number; attackChance: number }
 }
 
-const ACTIVITY_TYPES = new Set(['shot', 'damage', 'kill', 'advance', 'warn'])
+const ACTIVITY_TYPES = new Set(['shot', 'damage', 'kill', 'advance', 'promote', 'warn'])
 
 function renderGrid(pieces: PieceTrace[], size: number, terrain?: number[]): string {
   return renderAsciiGrid(pieces, size, size, (x, y) =>
@@ -140,7 +140,9 @@ export function formatTranscript(input: TranscriptInput): string {
   lines.push(
     `# rules autoPreserve=${record.settings.autoPreserve ? 'on' : 'off'} ` +
       `captureAdvance=${record.settings.captureAdvance ? 'on' : 'off'} ` +
-      `chessKills=${record.settings.chessKills ? 'on' : 'off'} playerTeam=${record.playerTeam}`,
+      `chessKills=${record.settings.chessKills ? 'on' : 'off'} ` +
+      `promotion=${record.settings.promotion === false ? 'off' : 'on'} ` +
+      `playerTeam=${record.playerTeam}`,
   )
   if (input.study) {
     const pct = Math.round(input.study.attackChance * 100)

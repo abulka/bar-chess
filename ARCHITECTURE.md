@@ -253,7 +253,8 @@ System order (`createPipeline()` in `src/ecs/systems/index.ts`):
 
 ```
 spawn → targeting → orders → pathfinding → movement → combat
-      → projectile → damage → death → cleanup → advance
+      → projectile → damage → death → cleanup → advance → promotion
+      → healing
 ```
 
 ---
@@ -531,9 +532,15 @@ cell/reservation during movement validation and path planning.
   turn move allowance and the AI move budget. The hop is re-validated against
   live occupancy and geometry (blocked line, occupied destination or a dead
   killer cancels it), capped at one step per killer per tick, and exposed by the
-  persisted **capture advance** toolbar toggle (default off). It is an
+  persisted **capture advance** toolbar toggle (default on). It is an
   **Attack-mode** behaviour only: a passive (`none`/`move`) piece never
   capture-advances, so a kill can never pull it off a safe or healing square.
+  For a pawn this is its chess capture: straight movement, diagonal step onto a
+  piece it shot down.
+- **promotion** — a pawn that reaches the enemy back rank becomes a queen (keeps
+  current HP, gains the queen's max/weapon/glyph, clears its orders and updates
+  the team's living counts). Exposed by the persisted **promotion** toolbar
+  toggle (default on), so a won pawn endgame can convert.
 - **healing** — king aura regeneration: same-team pieces within two Chebyshev
   cells of their living king (excluding the king itself, which is the aura source
   and never regenerates) regain 5% of max HP per second, or 3× that for
@@ -653,7 +660,7 @@ terrainVersion editorMode editorBrush editorDirty canEdit mapName`.
 
 | Component | Responsibility |
 | --------- | -------------- |
-| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay/fork, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, reset, `New game`, `New from template…`, editor toggle |
+| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay/fork, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, chess kills, promotion, reset, `New game`, `New from template…`, editor toggle |
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle; routes map-editor clicks/drags (stamp, continuous erase) and exposes `cellAtClient`/`overBoard` for palette drops |
 | `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed — AI, Attack stance or an active attack order — `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. It tells the situation as history / now / pending: the **order / auto changes** list shows the piece's last few transitions with their tick (e.g. `immediate chess kill → e3`, `immediate chess kill lands → e3`, `target at e3 lost — attack abandoned`, `self-preservation: retreating → …`); a parked insta-kill, a latched `safe-hold until <hp> hp` and a "self-preservation overriding the attack order" banner show the pending state; the queue shows what runs next |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane, drag drops the piece on a chosen cell (or arms an editor brush in editor mode) |
@@ -923,12 +930,15 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   it back (used when the editor is cancelled). The record is a replay format, not a
   narrative, so it is only pasted to an LLM as part of the **Copy history for LLM** bundle.
 - **Study mode.** The bottom HUD's **Study** tab (`src/components/StudyPanel.vue`)
-  runs a batch of games **on the live board** so they can be watched. A pure
-  `StudyController` (`src/game/study.ts`) drives the main `Game`: per game it
-  reloads the current template via `loadMap` (falling back to `loadSize` for a
-  different size) with a new seed, resets the `Recorder`, auto-advances turns with
-  `queueTurn()`, and applies an optional scripted "human" policy (`advance`,
-  `focus`, `turtle`) before each turn. It samples a per-turn **piece trace**
+  runs a batch of games **on the live board** so they can be watched, or in
+  **Fast** speed where each UI refresh drains whole turns without waiting for
+  animation (identical recordings, just no delay). A pure `StudyController`
+  (`src/game/study.ts`) drives the main `Game`: per game it reloads the current
+  template via `loadMap` (falling back to `loadSize` for a different size) with a
+  new seed, resets the `Recorder`, auto-advances turns with `queueTurn()`, and
+  optionally applies the gentle **random human** policy before each turn (it
+  orders a few random pieces to make short moves or reachable attacks, using its
+  own RNG so replay stays exact). It samples a per-turn **piece trace**
   (`src/game/trace.ts`) and collects the event stream. `Stop game` keeps the
   current (partial) recording and moves to the next seed; `Cancel all` discards
   everything. The trace makes behaviour that leaves no event — a piece that
@@ -1193,6 +1203,7 @@ src/
       death.ts                 FX + bookkeeping
       cleanup.ts               destroy queue + FX ageing
       advance.ts               idle-killer chess capture step
+      promotion.ts             pawn reaching the back rank becomes a queen
   game/
     types.ts                   TeamId, Vec2, Geometry, dirs, resolveGeometry
     constants.ts               FIXED_DT, budgets, teams, timings

@@ -21,6 +21,7 @@ import {
   COVER_RADIUS,
   coverageThreats,
   escapeGoal,
+  homeCell,
   inHealingAura,
   isValuable,
   nearestHealingCell,
@@ -122,9 +123,19 @@ function pursue(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'
   return plan.inRange ? null : plan.cell
 }
 
+/**
+ * Where an AI piece with no target heads: the enemy king's square while it is
+ * alive, so the army always converges on the win condition, falling back to the
+ * enemy lane midpoint when the king is already gone. This is endgame-biased by
+ * construction: any live field enemy within vision still wins acquisition, so
+ * pieces keep fighting the army first and only march on the king once nothing
+ * else is in reach.
+ */
 function rally(ctx: SimContext, team: 'red' | 'blue'): { x: number; y: number } | null {
   const enemy = team === 'red' ? 'blue' : 'red'
-  return ctx.board.laneMidpoint(enemy)
+  const king = kingOf(ctx.world, enemy)
+  const kc = king !== null ? ctx.world.get(king, Cell) : null
+  return kc ? { x: kc.x, y: kc.y } : ctx.board.laneMidpoint(enemy)
 }
 
 const system: System = {
@@ -136,6 +147,16 @@ const system: System = {
     const kingThreatMemo: ThreatMemo = new Map()
     const pieceThreatMemo: ThreatMemo = new Map()
     const kings = { red: kingOf(ctx.world, 'red'), blue: kingOf(ctx.world, 'blue') }
+    // Living non-king pieces per team. Once a team is down to its king alone,
+    // self-preservation is switched off for the pieces hunting it — the endgame
+    // finish. Without this a wounded valuable piece can latch a safe-hold in its
+    // own aura and never take the shot that would end the game.
+    const fieldCount: Record<TeamId, number> = { red: 0, blue: 0 }
+    for (const o of ctx.world.query(PieceType, Team, Health)) {
+      if (ctx.world.require(o, PieceType).kind === 'king') continue
+      if (ctx.world.require(o, Health).cur <= 0) continue
+      fieldCount[ctx.world.require(o, Team)]++
+    }
     // Squares already earmarked for screening this turn, so guards spread out.
     const claimed = new Set<number>()
 
@@ -203,9 +224,15 @@ const system: System = {
       // Whether this piece was preserving last tick, so the retreat is logged as
       // one episode (start / end) rather than on every goal re-evaluation.
       const wasPreserve = motion.intent === 'preserve'
+      // The enemy is down to its king and this piece has it targeted: press the
+      // finish instead of yielding to self-preservation.
+      const enemyTeam: TeamId = team === 'red' ? 'blue' : 'red'
+      const enemyKing = kings[enemyTeam]
+      const finish = enemyKing !== null && target.entity === enemyKing && fieldCount[enemyTeam] === 0
       if (
         ctx.autoPreserve &&
         !instaKill &&
+        !finish &&
         kind &&
         !(ctx.teams[team].controller === 'ai' && kind === 'king') &&
         (valuable || underFire || hpRatio < preserve || holding)
@@ -413,6 +440,17 @@ const system: System = {
 
       // The AI king defends its post instead of charging with the army.
       if (controller === 'ai' && ctx.world.get(e, PieceType)?.kind === 'king') {
+        // A lone king stops kiting and holds its post. It cannot win by running
+        // and it is faster than every attacker (move cooldown 1s), so dodging
+        // forever turned material wins into turn-cap draws. Standing lets the
+        // enemy take the shot.
+        if (fieldCount[team] === 0) {
+          const home = homeCell(ctx, team)
+          const alreadyHome = home !== null && vecEquals(cell, home)
+          motion.goal = alreadyHome ? null : home
+          motion.intent = alreadyHome ? 'none' : 'defense'
+          continue
+        }
         motion.goal = aiKingGoal(ctx, e, team, kingThreats(ctx, e, team, kingThreatMemo))
         motion.intent = motion.goal === null ? 'none' : 'defense'
         continue

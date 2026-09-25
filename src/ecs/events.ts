@@ -12,6 +12,7 @@ export type EventType =
   | 'path'
   | 'move'
   | 'advance'
+  | 'promote'
   | 'shot'
   | 'hit'
   | 'miss'

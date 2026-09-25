@@ -26,6 +26,7 @@ const emit = defineEmits<{
   (e: 'toggle-auto-preserve'): void
   (e: 'toggle-capture-advance'): void
   (e: 'toggle-chess-kills'): void
+  (e: 'toggle-promotion'): void
 }>()
 
 const speeds = SPEEDS
@@ -191,6 +192,11 @@ function onSoundChange(event: Event): void {
     <label class="toggle" title="Insta-kill: ordering a move or attack kills instantly (next tick, pressed even when wounded) when the target is already within chess capture range">
       <input type="checkbox" :checked="props.snapshot.chessKills" @change="emit('toggle-chess-kills')" />
       chess kills
+    </label>
+
+    <label class="toggle" title="A pawn that reaches the enemy back rank becomes a queen">
+      <input type="checkbox" :checked="props.snapshot.promotion" @change="emit('toggle-promotion')" />
+      promotion
     </label>
 
     <button class="ctl" @click="emit('toggle-hud')">{{ props.snapshot.hudVisible ? 'Hide HUD' : 'Show HUD' }}</button>

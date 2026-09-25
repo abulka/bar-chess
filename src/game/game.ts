@@ -325,6 +325,8 @@ export interface GameSnapshot {
   captureAdvance: boolean
   /** Ordered moves/attacks kill instantly when the target is already in chess capture range. */
   chessKills: boolean
+  /** A pawn reaching the enemy back rank promotes to a queen. */
+  promotion: boolean
   /** Whether combat sound effects are enabled. */
   soundEnabled: boolean
   /** Whether the left/right side rails (games/turns, piece/info) are shown. */
@@ -451,9 +453,11 @@ export class Game {
   /** Hurt pieces step out of fire on their own, even without orders. */
   autoPreserve = true
   /** An idle killer steps onto the square of a piece it just killed. */
-  captureAdvance = false
+  captureAdvance = true
   /** Ordered moves/attacks kill instantly when the target is already in chess capture range. */
   chessKills = false
+  /** A pawn reaching the enemy back rank promotes to a queen. */
+  promotion = true
   /** Transient BAR-style command awaiting the next left-click. */
   pendingCommand: StanceMode = 'none'
   /**
@@ -638,6 +642,7 @@ export class Game {
       turnActive: this.turnActive,
       autoPreserve: this.autoPreserve,
       captureAdvance: this.captureAdvance,
+      promotion: this.promotion,
     }
   }
 
@@ -1080,6 +1085,7 @@ export class Game {
     this.autoPreserve = settings.autoPreserve
     this.captureAdvance = settings.captureAdvance
     this.chessKills = settings.chessKills
+    this.promotion = settings.promotion ?? true
   }
 
   /** Re-apply commands that were pending at a recorded turn's start. */
@@ -1218,6 +1224,7 @@ export class Game {
       autoPreserve: this.autoPreserve,
       captureAdvance: this.captureAdvance,
       chessKills: this.chessKills,
+      promotion: this.promotion,
     }
   }
 
@@ -1263,6 +1270,7 @@ export class Game {
       autoPreserve: this.autoPreserve,
       captureAdvance: this.captureAdvance,
       chessKills: this.chessKills,
+      promotion: this.promotion,
       soundEnabled: this.soundEnabled,
       bottomFraction: this.bottomFraction,
       leftRailFraction: this.leftRailFraction,
@@ -1297,6 +1305,7 @@ export class Game {
     if (typeof settings.autoPreserve === 'boolean') this.autoPreserve = settings.autoPreserve
     if (typeof settings.captureAdvance === 'boolean') this.captureAdvance = settings.captureAdvance
     if (typeof settings.chessKills === 'boolean') this.chessKills = settings.chessKills
+    if (typeof settings.promotion === 'boolean') this.promotion = settings.promotion
     if (typeof settings.soundEnabled === 'boolean') this.soundEnabled = settings.soundEnabled
     if (
       typeof settings.bottomFraction === 'number' &&
@@ -1345,6 +1354,13 @@ export class Game {
     this.liveEdit(() => {
       this.chessKills = value
       this.bus.emit('info', `chess kills ${value ? 'on' : 'off'}`)
+    })
+  }
+
+  setPromotion(value: boolean): void {
+    this.liveEdit(() => {
+      this.promotion = value
+      this.bus.emit('info', `promotion ${value ? 'on' : 'off'}`)
     })
   }
 
@@ -1407,6 +1423,7 @@ export class Game {
     // take effect immediately rather than only after a reset/import.
     this.ctx.autoPreserve = this.autoPreserve
     this.ctx.captureAdvance = this.captureAdvance
+    this.ctx.promotion = this.promotion
     // A normal replay re-runs a serialized turn, so the one-move-per-turn gate
     // must apply. A mega-turn replay runs exactly like free play (turnActive
     // off) so its parallel movement is reproduced.
@@ -2605,6 +2622,7 @@ export class Game {
       autoPreserve: this.autoPreserve,
       captureAdvance: this.captureAdvance,
       chessKills: this.chessKills,
+      promotion: this.promotion,
       soundEnabled: this.soundEnabled,
       railsVisible: this.railsVisible,
       controlsCollapsed: this.controlsCollapsed,

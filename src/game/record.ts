@@ -219,6 +219,7 @@ export function replayRecord(record: GameRecord, options: ReplayOptions = {}): R
   game.autoPreserve = record.settings.autoPreserve
   game.captureAdvance = record.settings.captureAdvance
   game.chessKills = record.settings.chessKills ?? false
+  game.promotion = record.settings.promotion ?? true
 
   const events: EventRecord[] = []
   if (options.collectEvents) game.bus.subscribe((event) => events.push(event))
@@ -237,6 +238,7 @@ export function replayRecord(record: GameRecord, options: ReplayOptions = {}): R
     game.autoPreserve = rules.autoPreserve
     game.captureAdvance = rules.captureAdvance
     game.chessKills = rules.chessKills ?? false
+    game.promotion = rules.promotion ?? true
     if (entry) applyIntents(game, entry.intents)
     if (entry?.mode === 'mega') {
       // A play burst replays continuously for exactly the ticks it ran.

@@ -17,6 +17,8 @@ export interface SimSettings {
   autoPreserve: boolean
   captureAdvance: boolean
   chessKills: boolean
+  /** Optional for older records; treated as true when absent. */
+  promotion?: boolean
 }
 
 /** UI/session preferences that should survive a reload or a server restart. */
@@ -29,6 +31,7 @@ export interface GameSettings {
   autoPreserve: boolean
   captureAdvance: boolean
   chessKills: boolean
+  promotion: boolean
   soundEnabled: boolean
   /** HUD bottom-panel height as a fraction of the viewport. */
   bottomFraction: number
@@ -53,6 +56,7 @@ export interface SettingsPatch {
   autoPreserve?: boolean
   captureAdvance?: boolean
   chessKills?: boolean
+  promotion?: boolean
   soundEnabled?: boolean
   bottomFraction?: number
   leftRailFraction?: number
@@ -97,6 +101,7 @@ export function loadSettings(): SettingsPatch | null {
   if (typeof parsed.autoPreserve === 'boolean') out.autoPreserve = parsed.autoPreserve
   if (typeof parsed.captureAdvance === 'boolean') out.captureAdvance = parsed.captureAdvance
   if (typeof parsed.chessKills === 'boolean') out.chessKills = parsed.chessKills
+  if (typeof parsed.promotion === 'boolean') out.promotion = parsed.promotion
   if (typeof parsed.speed === 'number' && SPEEDS.includes(parsed.speed)) out.speed = parsed.speed
   if (typeof parsed.gameMode === 'string' && GAME_MODES.some((m) => m.id === parsed.gameMode)) {
     out.gameMode = parsed.gameMode as GameMode

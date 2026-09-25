@@ -1,7 +1,7 @@
 import { firingPositionExists } from '../../game/approach'
 import { ATTACK_LEASH } from '../../game/constants'
 import { coordName } from '../../game/coords'
-import { containsCell, fireCells } from '../../game/geometry'
+import { containsCell, chebyshev, fireCells } from '../../game/geometry'
 import { dist2, healthRatio } from '../../game/math'
 import { buildOccupancy, makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS, weaponVision } from '../../game/pieces'
@@ -48,8 +48,12 @@ function nearestInFireGeometry(
 function acquireAttack(ctx: SimContext, e: Entity, team: 'red' | 'blue', weaponKey: string): Entity | null {
   const cell = ctx.world.require(e, Cell)
   const geometry = WEAPONS[weaponKey].geometry
+  // Notice radius in Chebyshev cells. A range-1 weapon covers its diagonal
+  // neighbours too, so a pawn or a king must be able to acquire them — a plain
+  // circular radius of 1 would reject a diagonal at distance sqrt(2) and leave
+  // those weapons unable to pick the only squares they can actually shoot.
   const vision = Math.min(weaponVision(geometry), ATTACK_LEASH)
-  const maxDist2 = vision * vision
+  const maxGap = Math.ceil(vision)
   const occupied = makeOccupied(ctx.board, ctx.occupancy)
   const target = ctx.world.get(e, Target)
   const underFireAttacker = target && ctx.tick < target.underFireUntil ? target.lastAttacker : null
@@ -60,7 +64,7 @@ function acquireAttack(ctx: SimContext, e: Entity, team: 'red' | 'blue', weaponK
     if (ctx.world.require(other, Team) === team) continue
     const oc = ctx.world.require(other, Cell)
     const d2 = dist2(oc.x, oc.y, cell.x, cell.y)
-    if (d2 > maxDist2) continue
+    if (chebyshev(oc.x, oc.y, cell.x, cell.y) > maxGap) continue
     const hp = ctx.world.get(other, Health)
     const ratio = healthRatio(hp, 1)
     const canHit = containsCell(fireCells(ctx.board, cell, geometry, team, occupied), oc.x, oc.y)

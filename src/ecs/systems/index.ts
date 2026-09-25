@@ -10,6 +10,7 @@ import damage from './damage'
 import death from './death'
 import cleanup from './cleanup'
 import advance from './advance'
+import promotion from './promotion'
 import healing from './healing'
 
 export function createPipeline(): Pipeline {
@@ -25,6 +26,7 @@ export function createPipeline(): Pipeline {
     death,
     cleanup,
     advance,
+    promotion,
     healing,
   ])
 }

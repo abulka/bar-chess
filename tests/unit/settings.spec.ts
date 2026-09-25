@@ -116,11 +116,11 @@ describe('settings persistence', () => {
     expect(game.autoPreserve).toBe(false)
   })
 
-  it('defaults capture advance off and honors an explicit on', () => {
-    expect(new Game(8).captureAdvance).toBe(false)
+  it('defaults capture advance on and honors an explicit off', () => {
+    expect(new Game(8).captureAdvance).toBe(true)
     const game = new Game(8)
-    game.applySettings({ captureAdvance: true })
-    expect(game.captureAdvance).toBe(true)
+    game.applySettings({ captureAdvance: false })
+    expect(game.captureAdvance).toBe(false)
   })
 
   it('defaults chess kills off and honors an explicit on', () => {
@@ -128,6 +128,13 @@ describe('settings persistence', () => {
     const game = new Game(8)
     game.applySettings({ chessKills: true })
     expect(game.chessKills).toBe(true)
+  })
+
+  it('defaults promotion on and honors an explicit off', () => {
+    expect(new Game(8).promotion).toBe(true)
+    const game = new Game(8)
+    game.applySettings({ promotion: false })
+    expect(game.promotion).toBe(false)
   })
 
   it('ignores invalid values in applySettings', () => {

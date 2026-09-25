@@ -671,6 +671,12 @@ function onToggleChessKills(): void {
   refresh()
 }
 
+function onTogglePromotion(): void {
+  game.setPromotion(!game.promotion)
+  persistSettings()
+  refresh()
+}
+
 function onReset(): void {
   game.reset()
   recorder.reset()
@@ -984,6 +990,7 @@ onBeforeUnmount(() => {
       @toggle-auto-preserve="onToggleAutoPreserve"
       @toggle-capture-advance="onToggleCaptureAdvance"
       @toggle-chess-kills="onToggleChessKills"
+      @toggle-promotion="onTogglePromotion"
     />
 
     <div

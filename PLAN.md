@@ -273,13 +273,28 @@ cells. Only automatically acquired targets are
 leashed — an explicit order is followed.
 
 **Capture advance.** A persisted **capture advance** checkbox in the toolbar
-(default off) makes a piece that lands a kill step onto the victim's square, like
+(default on) makes a piece that lands a kill step onto the victim's square, like
 a chess capture. It only applies to an **idle** killer (no active order, queue,
 path or hop; the attack order that just killed this victim does not count), steps
 along the firing ray it killed with (re-checked for a clear line), and is a free
 move — it does not spend the piece's turn move or the AI move budget. This rewards kills with territorial pressure instead of everyone standing
-still and sniping; because it is free, long-range sliders can push aggressively,
-so it is opt-in for balance.
+still and sniping. For a pawn this is its chess capture: it marches straight but
+steps diagonally onto a piece it shot down.
+
+**Promotion.** A persisted **promotion** checkbox (default on) turns a pawn that
+reaches the enemy back rank into a queen: it keeps its current HP, gains the
+queen's maximum and weapon, and its orders are cleared so it replans as a queen.
+This gives a won pawn endgame a way to convert instead of standing on the last
+rank forever.
+
+**Endgame targeting.** An AI piece with no target advances on the **enemy king's
+current square** rather than a fixed map midpoint, so the army converges on the
+win condition once the field clears. Range-1 weapons acquire by Chebyshev
+distance, so a pawn or king notices the diagonal squares its weapon actually
+covers. Once the enemy is down to its king alone, the attacker ignores
+self-preservation to press the finish, and a lone king stops kiting and holds its
+post (it is faster than every attacker, so dodging forever used to turn material
+wins into turn-cap draws).
 
 ## Overlays: seeing what is going on
 

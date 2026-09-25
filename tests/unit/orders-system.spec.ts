@@ -115,9 +115,10 @@ describe('orders system — AI king defense', () => {
     return ctx
   }
 
-  it('steps the king off a distant shooter\'s firing line', () => {
+  it("steps the king off a distant shooter's firing line", () => {
     const ctx = defenseContext()
     const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 4 })
+    createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 0 }) // a field piece, so not a lone king
     createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 0 }) // clear file, 4 cells away
 
     run(ctx)
@@ -125,6 +126,18 @@ describe('orders system — AI king defense', () => {
     const goal = ctx.world.require(king, Motion).goal
     expect(goal).not.toBeNull()
     expect(goal!.x).not.toBe(4)
+  })
+
+  it('holds its post once it is the last piece', () => {
+    const ctx = defenseContext()
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 7 })
+    createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 0 }) // covers the file
+
+    run(ctx)
+
+    // No field pieces left, so the king stops kiting and stands; dodging
+    // forever was turning material wins into turn-cap draws.
+    expect(ctx.world.require(king, Motion).goal).toBeNull()
   })
 
   it('reacts to a last attacker even without a current line', () => {

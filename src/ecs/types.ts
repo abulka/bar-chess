@@ -73,4 +73,6 @@ export interface SimContext {
   autoPreserve: boolean
   /** when true, an idle killer steps onto the square of a piece it just killed */
   captureAdvance: boolean
+  /** when true, a pawn reaching the enemy back rank promotes to a queen */
+  promotion: boolean
 }
