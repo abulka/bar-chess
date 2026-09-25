@@ -135,7 +135,8 @@ export function formatTranscript(input: TranscriptInput): string {
   lines.push(
     `# game ${record.boardId} seed=${record.seed} mode=${record.mode} ` +
       `winner=${result?.winner ?? 'none'} turns=${result?.turns ?? trace.length - 1} ` +
-      `ticks=${result?.ticks ?? '?'}${result?.timedOut ? ' (turn cap)' : ''}`,
+      `ticks=${result?.ticks ?? '?'}` +
+      `${result?.drawn ? ' (draw)' : result?.timedOut ? ' (turn cap)' : ''}`,
   )
   lines.push(
     `# rules autoPreserve=${record.settings.autoPreserve ? 'on' : 'off'} ` +

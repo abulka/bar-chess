@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Cell, Health, Motion, PieceType, Target } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
+import { attackPlan } from '../../src/game/approach'
 import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
+import { chebyshev, NEVER } from '../../src/game/geometry'
 import { PIECES, WEAPONS } from '../../src/game/pieces'
-import { clearComponents } from '../helpers'
+import { isKingOnlyDraw } from '../../src/game/study'
+import { clearComponents, flatBoard } from '../helpers'
 
 function shim(game: Game): SimContext {
   return { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
@@ -52,8 +55,9 @@ describe('endgame king targeting', () => {
     stripArmy(game)
     const pawn = createPiece(shim(game), 'blue', PIECES.pawn, { x: 0, y: 6 }) // a2
     createPiece(shim(game), 'red', PIECES.king, { x: 7, y: 0 }) // h8
+    createPiece(shim(game), 'red', PIECES.pawn, { x: 1, y: 0 }) // still has field pieces
     game.teams.blue.alive = { pawn: 1 }
-    game.teams.red.alive = { king: 1 }
+    game.teams.red.alive = { king: 1, pawn: 1 }
 
     game.runTicks(1)
 
@@ -112,5 +116,61 @@ describe('promotion', () => {
     game.runTicks(1)
 
     expect(game.world.require(pawn, PieceType).kind).toBe('pawn')
+  })
+})
+
+describe('king-adjacent danger', () => {
+  beforeEach(() => clearComponents())
+
+  it('prefers a firing cell outside the enemy king thrash zone', () => {
+    const board = flatBoard(8)
+    const target = { x: 4, y: 0 }
+    // Avoid the enemy king's 3x3 (x3-5, y0-1).
+    const avoid = (x: number, y: number) => x >= 3 && x <= 5 && y <= 1
+    const plan = attackPlan(
+      board,
+      { x: 4, y: 4 },
+      target,
+      PIECES.queen.move,
+      WEAPONS.queenNova.geometry,
+      'blue',
+      NEVER,
+      avoid,
+    )
+    // Without `avoid` the nearest firing cell is d4/d3-adjacent (4,1); with it
+    // the queen must stand at least two squares off the king.
+    expect(chebyshev(plan.cell.x, plan.cell.y, target.x, target.y)).toBeGreaterThan(1)
+  })
+
+  it('still fires from an adjacent cell when no safe line exists', () => {
+    const board = flatBoard(8)
+    const target = { x: 4, y: 0 }
+    // Avoid every approach cell: the planner must fall back rather than stall.
+    const plan = attackPlan(
+      board,
+      { x: 4, y: 4 },
+      target,
+      PIECES.queen.move,
+      WEAPONS.queenNova.geometry,
+      'blue',
+      NEVER,
+      () => true,
+    )
+    expect(plan.cell).toBeTruthy()
+  })
+})
+
+describe('king-only draw classification', () => {
+  beforeEach(() => clearComponents())
+
+  it('is a draw when neither side has a non-king piece', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    stripArmy(game)
+    createPiece(shim(game), 'blue', PIECES.king, { x: 4, y: 7 })
+    createPiece(shim(game), 'red', PIECES.king, { x: 4, y: 0 })
+    expect(isKingOnlyDraw(game)).toBe(true)
+
+    createPiece(shim(game), 'red', PIECES.pawn, { x: 0, y: 0 })
+    expect(isKingOnlyDraw(game)).toBe(false)
   })
 })

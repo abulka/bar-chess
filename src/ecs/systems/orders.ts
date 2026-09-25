@@ -1,4 +1,4 @@
-import { ATTACK_LEASH } from '../../game/constants'
+import { ATTACK_LEASH, TEAM_IDS } from '../../game/constants'
 import { chebyshev } from '../../game/geometry'
 import { healthRatio, vecEquals } from '../../game/math'
 import { makeOccupied } from '../../game/occupancy'
@@ -112,14 +112,20 @@ function inFiringGeometryNow(ctx: SimContext, e: Entity, target: Entity, team: '
  * approach once recovered; `closestEmptyCell` holds on distance ties, so a piece
  * already standing on a closest square parks there instead of shuttling.
  */
-function pursue(ctx: SimContext, e: Entity, target: Entity, team: 'red' | 'blue'): { x: number; y: number } | null {
+function pursue(
+  ctx: SimContext,
+  e: Entity,
+  target: Entity,
+  team: 'red' | 'blue',
+  avoid?: (x: number, y: number) => boolean,
+): { x: number; y: number } | null {
   const def = PIECES[ctx.world.require(e, PieceType).kind]
   if (!def) return null
   const cell = ctx.world.require(e, Cell)
   const tcell = ctx.world.require(target, Cell)
   const occupied = makeOccupied(ctx.board, ctx.occupancy)
   const weaponGeom = WEAPONS[def.weapon].geometry
-  const plan = attackPlan(ctx.board, cell, tcell, def.move, weaponGeom, team, occupied)
+  const plan = attackPlan(ctx.board, cell, tcell, def.move, weaponGeom, team, occupied, avoid)
   return plan.inRange ? null : plan.cell
 }
 
@@ -157,6 +163,23 @@ const system: System = {
       if (ctx.world.require(o, Health).cur <= 0) continue
       fieldCount[ctx.world.require(o, Team)]++
     }
+    // The 3×3 ring around each king, in cell indices. A king's guard hits for
+    // 80% of max HP at range 1, so a piece should treat those squares as a kill
+    // zone and pick a firing position outside it.
+    const kingDanger: Record<TeamId, Set<number>> = { red: new Set(), blue: new Set() }
+    for (const id of TEAM_IDS) {
+      const k = kings[id]
+      const kc = k !== null ? ctx.world.get(k, Cell) : null
+      if (!kc) continue
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue
+          const x = kc.x + dx
+          const y = kc.y + dy
+          if (ctx.board.inBounds(x, y)) kingDanger[id].add(ctx.board.cellIndex(x, y))
+        }
+      }
+    }
     // Squares already earmarked for screening this turn, so guards spread out.
     const claimed = new Set<number>()
 
@@ -167,6 +190,10 @@ const system: System = {
       const cell = ctx.world.require(e, Cell)
       const team = ctx.world.require(e, Team)
       const target = ctx.world.require(e, Target)
+      const enemyTeam: TeamId = team === 'red' ? 'blue' : 'red'
+      // Firing positions inside the enemy king's 3×3 are a kill zone (its guard
+      // hits for 80% of max HP), so pursuit prefers to shoot from outside it.
+      const enemyDanger = (x: number, y: number) => kingDanger[enemyTeam].has(ctx.board.cellIndex(x, y))
 
       // 0a. Consume an insta-kill (immediate chess kill): it was decided when the
       // order was issued and lands here on the next tick. It is the highest
@@ -224,15 +251,14 @@ const system: System = {
       // Whether this piece was preserving last tick, so the retreat is logged as
       // one episode (start / end) rather than on every goal re-evaluation.
       const wasPreserve = motion.intent === 'preserve'
-      // The enemy is down to its king and this piece has it targeted: press the
-      // finish instead of yielding to self-preservation.
-      const enemyTeam: TeamId = team === 'red' ? 'blue' : 'red'
+      // The enemy is down to its king alone: the finishing phase. Attackers hunt
+      // the king directly and ignore self-preservation; the lone king holds.
       const enemyKing = kings[enemyTeam]
-      const finish = enemyKing !== null && target.entity === enemyKing && fieldCount[enemyTeam] === 0
+      const endgame = enemyKing !== null && fieldCount[enemyTeam] === 0
       if (
         ctx.autoPreserve &&
         !instaKill &&
-        !finish &&
+        !endgame &&
         kind &&
         !(ctx.teams[team].controller === 'ai' && kind === 'king') &&
         (valuable || underFire || hpRatio < preserve || holding)
@@ -254,11 +280,19 @@ const system: System = {
         const kc = king !== null ? ctx.world.get(king, Cell) : null
         const inAura = !!kc && chebyshev(cell.x, cell.y, kc.x, kc.y) <= HEAL_RADIUS
         const shouldDodge = inAura ? outgunned(ctx, e, threats) : shooters > 0 || underFire
-        // Act (dodge or hold) while latched, or while wounded/pressured and either
-        // in danger or sitting in the healing aura. Otherwise fall through and let
-        // the order resume — that is what lets a piece continue once it has
-        // recovered to its latch threshold and the danger is gone.
-        const act = holding || ((wounded || pressured) && (shouldDodge || inAura))
+        // Healing trip: a hurt or latched piece outside the aura walks to the
+        // nearest healing square. Computed before the act decision so a merely
+        // wounded piece that is not yet dodging still goes to heal instead of
+        // freezing where it stands.
+        const heal =
+          (holding || wounded) && !inAura && kc && kind !== 'pawn'
+            ? nearestHealingCell(ctx, e, team, kc)
+            : null
+        // Act (heal trip, dodge or hold) while latched, while wounded/pressured
+        // and either in danger or in the aura, or while a healing square is
+        // reachable. Otherwise fall through and let the order resume.
+        const act =
+          holding || heal !== null || ((wounded || pressured) && (shouldDodge || inAura))
         if (act) {
           // A critically wounded piece holds until fully healed.
           if (hp && (wounded || pressured) && hpRatio < CRITICAL_WOUND) motion.holdUntilHp = hp.max
@@ -276,16 +310,6 @@ const system: System = {
             let goal: { x: number; y: number } | null = null
             let intent: MotionIntent = 'none'
             let noSaferStep = false
-            // Healing trip: a latched or merely wounded piece outside the king's
-            // aura walks to the nearest healing square instead of taking one local
-            // step and then resuming a fight it cannot win. That yo-yo — retreat,
-            // heal a tick, walk back into the same fire — is exactly what a long
-            // trip home avoids, and it is how a medium wound actually recovers.
-            // Only a volley that would kill it this tick takes precedence.
-            const heal =
-              (holding || wounded) && !inAura && kc && kind !== 'pawn'
-                ? nearestHealingCell(ctx, e, team, kc)
-                : null
             if (heal) {
               goal = lethal && shouldDodge ? escapeGoal(ctx, e, team, threats, null) ?? heal : heal
               intent = 'preserve'
@@ -456,6 +480,17 @@ const system: System = {
         continue
       }
 
+      // Finishing phase: the enemy has only its king left, so hunt it directly.
+      // This deliberately skips bodyguard duty and self-preservation — a
+      // wounded attacker must still take the shot that ends the game.
+      if (endgame && enemyKing !== null) {
+        target.entity = enemyKing
+        target.retargetAt = ctx.tick + 12
+        motion.goal = pursue(ctx, e, enemyKing, team, enemyDanger)
+        motion.intent = motion.goal === null ? 'none' : 'engage'
+        continue
+      }
+
       // Nearby AI pieces break off to defend the king. Guards within
       // KING_GUARD_RADIUS first try to screen the line of fire, else engage the
       // most dangerous threat; the rest of the army keeps pressing the attack.
@@ -477,7 +512,7 @@ const system: System = {
               ? screenPlan(ctx, e, team, top, kc, makeOccupied(ctx.board, ctx.occupancy), claimed)
               : { onSegment: false, cell: null }
             if (plan.onSegment) motion.goal = null
-            else motion.goal = plan.cell ?? pursue(ctx, e, top.entity, team)
+            else motion.goal = plan.cell ?? pursue(ctx, e, top.entity, team, enemyDanger)
             motion.intent = motion.goal === null ? 'none' : 'defense'
             continue
           }
@@ -486,11 +521,15 @@ const system: System = {
 
       if (targetValid && hpRatio < preserveThreshold(kind ?? '')) {
         // Low HP (auto-preserve off): seek nearby cover, keeping the shot if free.
-        // Pawns cannot retreat, so they hold and fire instead.
+        // Pawns cannot retreat, so they hold and fire instead. Only retreat when
+        // something is actually covering the piece — with no threats, falling
+        // through keeps it fighting instead of parked on the spot.
         const threats = coverageThreats(ctx, e, team, pieceThreatMemo, { proximityRadius: COVER_RADIUS })
-        motion.goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, target.entity as number)
-        motion.intent = motion.goal === null ? 'none' : 'preserve'
-        continue
+        if (threats.length > 0) {
+          motion.goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, target.entity as number)
+          motion.intent = motion.goal === null ? 'none' : 'preserve'
+          continue
+        }
       }
       if (!targetValid) {
         // AI armies advance; a player's Attack stance skirmishes locally.
@@ -504,7 +543,7 @@ const system: System = {
         tcell !== undefined &&
         chebyshev(cell.x, cell.y, tcell.x, tcell.y) > ATTACK_LEASH &&
         !inFiringGeometryNow(ctx, e, target.entity as number, team)
-      motion.goal = beyondLeash ? null : pursue(ctx, e, target.entity as number, team)
+      motion.goal = beyondLeash ? null : pursue(ctx, e, target.entity as number, team, enemyDanger)
       motion.intent = motion.goal === null ? 'none' : 'engage'
     }
   },

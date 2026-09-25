@@ -291,10 +291,22 @@ rank forever.
 current square** rather than a fixed map midpoint, so the army converges on the
 win condition once the field clears. Range-1 weapons acquire by Chebyshev
 distance, so a pawn or king notices the diagonal squares its weapon actually
-covers. Once the enemy is down to its king alone, the attacker ignores
-self-preservation to press the finish, and a lone king stops kiting and holds its
-post (it is faster than every attacker, so dodging forever used to turn material
-wins into turn-cap draws).
+covers. Once the enemy is down to its king alone, the attacker skips
+self-preservation and bodyguard duty to press the finish, and a lone king stops
+kiting and holds its post (it is faster than every attacker, so dodging forever
+used to turn material wins into turn-cap draws).
+
+**Finishing safely.** Pursuit avoids the 3×3 around an enemy king, where the
+king's guard hits for 80% of max HP: `attackPlan`/`previewFiringCell` prefer a
+firing cell outside that ring and fall back to an adjacent one only when no safe
+line exists. A hurt piece that is outside its king's aura now walks home to heal
+even when nothing is currently shooting it, and a low-HP piece with no actual
+threats keeps fighting rather than parking in place — the two paths that used to
+strand surviving rooks and queens.
+
+**Draws.** A stopped study game with no living non-king piece on either side is
+recorded as a draw rather than a timeout. Kings can still be marched in by a
+player, so this is a study label, not an automatic game end.
 
 ## Overlays: seeing what is going on
 

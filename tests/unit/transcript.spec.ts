@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { EventRecord } from '../../src/ecs/events'
-import { analyzeGame, summarizePieces } from '../../src/game/analysis'
+import { analyzeGame, summarizeBatch, summarizePieces } from '../../src/game/analysis'
 import { formatTranscript } from '../../src/game/transcript'
 import type { GameRecord } from '../../src/game/record'
 import type { TurnTrace } from '../../src/game/trace'
@@ -94,5 +94,20 @@ describe('transcript & analysis', () => {
     const text = formatTranscript({ record: record(), events, trace: t })
     expect(text).toContain('rP e2 order: target bP d2 lost — attack abandoned')
     expect(text).not.toContain('rP e2 order: attack ordered')
+  })
+
+  it('marks a drawn result in the header and summary', () => {
+    const drawn = record()
+    drawn.result = { winner: null, turns: 10, ticks: 1200, timedOut: false, drawn: true, partial: false }
+    const text = formatTranscript({ record: drawn, events: [], trace: trace() })
+    expect(text).toContain('winner=none')
+    expect(text).toContain('(draw)')
+    expect(text).not.toContain('(turn cap)')
+
+    const summary = summarizeBatch([
+      { seed: 1, winner: null, turns: 10, partial: false, analysis: analyzeGame(drawn, [], trace()) },
+    ])
+    expect(summary.draws).toBe(1)
+    expect(summary.timeouts).toBe(0)
   })
 })

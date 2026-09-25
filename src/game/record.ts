@@ -44,6 +44,8 @@ export interface GameRecordResult {
   timedOut: boolean
   /** True when copied mid-battle: the outcome is not final. */
   partial?: boolean
+  /** A stopped game with no winning material left (e.g. king versus king). */
+  drawn?: boolean
 }
 
 /**
@@ -148,6 +150,7 @@ export class Recorder {
       ticks: result.ticks ?? this.game.tick,
       timedOut: result.timedOut ?? false,
       partial: result.partial ?? this.game.winner === null,
+      drawn: result.drawn ?? false,
     }
   }
 

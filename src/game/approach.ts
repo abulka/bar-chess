@@ -46,20 +46,28 @@ export function previewFiringCell(
   weaponGeom: Geometry,
   team: TeamId,
   occupied: OccupiedFn,
+  avoid?: OccupiedFn,
 ): Vec2 | null {
   const reach = reachableCells(board, from, moveGeom, team)
   const moves = moveDistances(board, from, moveGeom, team)
-  const scored = attackApproachCells(board, targetCell, weaponGeom, team)
+  const candidates = attackApproachCells(board, targetCell, weaponGeom, team)
     // The piece's own square is never a "move to" candidate (a caller that is
     // already in firing geometry handles the hold itself).
     .filter((c) => !vecEquals(c, from) && !occupied(c.x, c.y) && reach[board.cellIndex(c.x, c.y)])
-    .map((c) => ({
-      c,
-      moves: moves[board.cellIndex(c.x, c.y)],
-      // Euclidean total kept as a tie-break among equally-reachable cells.
-      s: dist2(c.x, c.y, from.x, from.y) + dist2(c.x, c.y, targetCell.x, targetCell.y),
-    }))
-    .sort((a, b) => a.moves - b.moves || a.s - b.s)
+  const rank = (cells: Vec2[]) =>
+    cells
+      .map((c) => ({
+        c,
+        moves: moves[board.cellIndex(c.x, c.y)],
+        // Euclidean total kept as a tie-break among equally-reachable cells.
+        s: dist2(c.x, c.y, from.x, from.y) + dist2(c.x, c.y, targetCell.x, targetCell.y),
+      }))
+      .sort((a, b) => a.moves - b.moves || a.s - b.s)
+  // Prefer a firing cell clear of `avoid` (e.g. the 3×3 around an enemy king,
+  // where the king's guard can one-shot the shooter); fall back to any firing
+  // cell only when every option is inside that danger zone.
+  const safe = avoid ? candidates.filter((c) => !avoid(c.x, c.y)) : candidates
+  const scored = rank(safe.length > 0 ? safe : candidates)
   return scored.length > 0 ? scored[0].c : null
 }
 
@@ -139,11 +147,12 @@ export function attackPlan(
   weaponGeom: Geometry,
   team: TeamId,
   occupied: OccupiedFn,
+  avoid?: OccupiedFn,
 ): AttackPlan {
   const reachable = firingPositionExists(board, from, targetCell, moveGeom, weaponGeom, team)
   const inRange = inFiringGeometry(board, from, targetCell, weaponGeom, team, occupied)
   const cell =
-    previewFiringCell(board, from, targetCell, moveGeom, weaponGeom, team, occupied) ??
+    previewFiringCell(board, from, targetCell, moveGeom, weaponGeom, team, occupied, avoid) ??
     closestEmptyCell(board, from, targetCell, moveGeom, team, occupied) ??
     { x: targetCell.x, y: targetCell.y }
   return { reachable, inRange, cell }

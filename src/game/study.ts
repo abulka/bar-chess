@@ -51,6 +51,22 @@ function enemyOf(team: TeamId): TeamId {
   return team === 'red' ? 'blue' : 'red'
 }
 
+/** Any living non-king piece on the team? False means the side is king-only. */
+function hasFieldPieces(game: Game, team: TeamId): boolean {
+  for (const e of game.world.query(PieceType, Team, Health)) {
+    if (game.world.require(e, Team) !== team) continue
+    if (game.world.require(e, PieceType).kind === 'king') continue
+    if (game.world.require(e, Health).cur <= 0) continue
+    return true
+  }
+  return false
+}
+
+/** True when neither side has a living non-king piece: no winning material left. */
+export function isKingOnlyDraw(game: Game): boolean {
+  return !hasFieldPieces(game, 'red') && !hasFieldPieces(game, 'blue')
+}
+
 /** Pick `count` distinct items at random, in a seeded, reproducible order. */
 function pickSome<T>(items: T[], count: number, rng: Rng): T[] {
   const pool = [...items]
@@ -136,8 +152,7 @@ function gentleMove(game: Game, e: Entity, team: TeamId, rng: Rng): Vec2 | null 
  * attacks an enemy it can genuinely engage. Pieces that are already retreating
  * to heal are left alone.
  */
-export function humanPolicy(game: Game, rng: Rng, tuning: StudyPolicyTuning): void {
-  const team = game.playerTeam
+export function humanPolicy(game: Game, rng: Rng, tuning: StudyPolicyTuning): void {  const team = game.playerTeam
   const idle = piecesOf(game, team).filter((e) => {
     const motion = game.world.get(e, Motion)
     // Leave pieces that are already retreating or holding to heal alone.
@@ -193,6 +208,8 @@ export interface StudyGameResult {
   ticks: number
   /** Stopped early by the user or the turn cap, not a decisive result. */
   partial: boolean
+  /** Stopped with no winning material on either side (king versus king). */
+  drawn: boolean
   record: GameRecord
   events: EventRecord[]
   trace: TurnTrace[]
@@ -349,12 +366,20 @@ export class StudyController {
 
   private finishGame(): void {
     if (!this.options) return
-    const partial = this.game.winner === null
+    const stopped = this.game.winner === null
+    // A stopped game with no winning material left is a draw rather than a
+    // timeout: neither side can make progress, but it is not an unfinished
+    // battle. (A player king can still march in, so this is a study label, not
+    // an automatic game end.)
+    const drawn = stopped && isKingOnlyDraw(this.game)
+    const partial = stopped && !drawn
     const record = structuredClone(
       this.recorder.finish({
         turns: this.game.turn,
         ticks: this.game.tick,
         timedOut: partial,
+        partial,
+        drawn,
       }),
     )
     const { transcript, analysis } = this.log.finish(record, {
@@ -377,6 +402,7 @@ export class StudyController {
       turns: record.result?.turns ?? this.game.turn,
       ticks: record.result?.ticks ?? this.game.tick,
       partial,
+      drawn,
       record,
       events: this.log.eventStream,
       trace: this.log.turnTrace,
