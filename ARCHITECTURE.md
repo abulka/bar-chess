@@ -603,7 +603,8 @@ widths persist as `leftRailFraction`/`rightRailFraction` of the viewport, clampe
 to leave a minimum board width. Each rail opens with a two-button sub-tab bar
 (`.rail-tabs`): the left rail switches between **games** (the **debug** copy
 buttons, **save**/**load** slots and **export** import sections) and **turns**
-(`TurnList`), the right rail between **piece**
+(`TurnList`) — loading a saved slot or importing a game switches it to **turns** —
+the right rail between **piece**
 (`PiecePanel` + the hover readout) and **info**. The tab bodies use `v-show`
 so hidden tabs keep their state (slot input, scroll position). Within the
 right rail's **info** tab the **controls**, **stance**, **legend** and
@@ -638,7 +639,7 @@ terrainVersion editorMode editorBrush editorDirty canEdit mapName`.
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle; routes map-editor clicks/drags (stamp, continuous erase) and exposes `cellAtClient`/`overBoard` for palette drops |
 | `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed, `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. The **order / auto changes** list shows the piece's last few transitions with their tick, so it is clear *why* an order was issued/replaced/completed/abandoned (e.g. `target at e7 lost — attack abandoned`) and includes autonomous self-preservation retreats |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane, drag drops the piece on a chosen cell (or arms an editor brush in editor mode) |
-| `TurnList.vue` | left-rail **turns** tab: newest-first history rows (jump on click, replay per row), inline Fork on the active row, two-step inline confirmation before discarding future turns (warns when `ordersTouched` is false that the same outcome would repeat), backtrack warning and trimmed-history hint below the list (so rows never shift), per-row piece/order/time info |
+| `TurnList.vue` | left-rail **turns** tab: newest-first history rows (jump on click, replay per row), inline Fork on the active row, two-step inline confirmation before discarding future turns (warns when `ordersTouched` is false that the same outcome would repeat), backtrack warning and trimmed-history hint in a sticky footer below the list (so rows never shift and the hint stays visible while the list scrolls), per-row piece/order/time info |
 | `EditorPanel.vue` | floating map-editor controls: map name, save, eraser, blank-board size, `Maps…`, cancel/done |
 | `MapsModal.vue` | saved-map browser: `MapThumbnail` previews with Play / Edit / Rename / Export / Delete, plus New map and Import JSON |
 | `MapThumbnail.vue` | square canvas rendering `drawMapPreview` for a `SavedMap` |

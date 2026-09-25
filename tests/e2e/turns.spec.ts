@@ -28,7 +28,7 @@ test('lists turns, jumps to one, and replays forward without forking', async ({ 
   // Backtrack to the opening: the warning and fork button appear.
   await page.keyboard.press('u')
   await page.keyboard.press('u')
-  await expect(page.locator('.turn-panel .warn')).toBeVisible()
+  await expect(page.locator('.turn-panel .hint')).toBeVisible()
   await expect(page.locator('.turn-panel .row.active .fork')).toBeVisible()
   expect(await page.evaluate(() => (window as any).game.snapshot().historyIndex)).toBe(0)
 
@@ -65,4 +65,16 @@ test('fork discards the redo branch without playing a turn', async ({ page }) =>
   // Space now plays a normal turn from the boundary.
   await page.keyboard.press('Space')
   await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().turnActive)).toBe(true)
+})
+
+test('keeps the backtrack hint pinned in view on a long turn list', async ({ page }) => {
+  await playTurns(page, 14)
+  await page.getByRole('button', { name: 'turns', exact: true }).click()
+  // Backtrack so the hint appears; the active row scrolls near the top, leaving
+  // the hint's natural position far below the fold.
+  await page.keyboard.press('u')
+  const foot = page.locator('.turn-panel .turn-foot')
+  await expect(foot).toBeVisible()
+  await expect(foot).toBeInViewport()
+  await expect(page.locator('.turn-panel .hint')).toContainText('viewing turn')
 })

@@ -805,6 +805,8 @@ function applyLoaded(data: unknown): void {
   boardView.value?.fit()
   recorder.reset()
   liveLog.begin()
+  // A freshly loaded game belongs in the turns tab, ready to replay/step.
+  leftTab.value = 'turns'
   refresh()
 }
 

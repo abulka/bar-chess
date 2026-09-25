@@ -47,6 +47,8 @@ test('loads a saved game together with its undo history', async ({ page }) => {
   await page.getByRole('button', { name: 'Load', exact: true }).click()
   await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().canUndo)).toBe(true)
   expect(await page.evaluate(() => (window as any).game.canReplay)).toBe(true)
+  // Loading a game reveals the turns tab automatically.
+  await expect(page.getByRole('button', { name: 'turns', exact: true })).toHaveClass(/active/)
 })
 
 test('exports the position as a .json download', async ({ page }) => {

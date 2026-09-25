@@ -101,29 +101,68 @@ watch(
       </li>
     </ul>
 
-    <div v-if="backtracked && forkArmed" class="warn fork-confirm">
-      <p class="fork-q">
-        discard {{ dropped }} future turn{{ dropped === 1 ? '' : 's' }}? this cannot be undone.
-      </p>
-      <p v-if="!snapshot.ordersTouched" class="fork-note">
-        your orders are unchanged — the next turn will likely repeat the same outcome.
-      </p>
-      <div class="fork-actions">
-        <button class="ctl small" @click="emit('fork')">Discard</button>
-        <button class="ctl small" @click="emit('cancel-fork')">Cancel</button>
+    <div v-if="backtracked || snapshot.historyTrimmed > 0" class="turn-foot">
+      <div v-if="backtracked && forkArmed" class="warn fork-confirm">
+        <p class="fork-q">
+          Fork game: discard {{ dropped }} future turn{{ dropped === 1 ? '' : 's' }}?
+        </p>
+        <p v-if="!snapshot.ordersTouched" class="fork-note">
+          Note: the orders in this last turn are currently unchanged from when initially recorded, so the
+          next new turn will likely repeat the same outcome. You may want to edit the orders before
+          generating the next turn.
+        </p>
+        <div class="fork-actions">
+          <button class="ctl small" @click="emit('fork')">Discard</button>
+          <button class="ctl small" @click="emit('cancel-fork')">Cancel</button>
+        </div>
       </div>
+      <p v-else-if="backtracked" class="hint">
+        viewing turn {{ current }} of {{ latest }} — <b>space</b> replays forward ·
+        <b>f</b> discards future turns · <b>u</b>/<b>r</b> undo/redo · <b>y</b> replay
+      </p>
+      <p v-if="snapshot.historyTrimmed > 0" class="muted tiny">
+        {{ snapshot.historyTrimmed }} earlier beat{{ snapshot.historyTrimmed === 1 ? '' : 's' }} trimmed (history cap)
+      </p>
     </div>
-    <p v-else-if="backtracked" class="warn">
-      viewing turn {{ current }} of {{ latest }} — <b>space</b> replays forward ·
-      <b>f</b> discards future turns · <b>u</b>/<b>r</b> undo/redo · <b>y</b> replay
-    </p>
-    <p v-if="snapshot.historyTrimmed > 0" class="muted tiny">
-      {{ snapshot.historyTrimmed }} earlier beat{{ snapshot.historyTrimmed === 1 ? '' : 's' }} trimmed (history cap)
-    </p>
   </div>
 </template>
 
 <style scoped>
+/*
+ * Footer hints stay pinned to the bottom of the rail while the (possibly long)
+ * turn list scrolls under them, so they are always visible.
+ */
+.turn-foot {
+  position: sticky;
+  /* Hang into the rail's 8px bottom padding so the opaque strip reaches the edge. */
+  bottom: -8px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px -8px 0;
+  padding: 6px 8px 8px;
+  background: var(--bg);
+}
+
+.turn-foot .warn,
+.turn-foot .hint,
+.turn-foot .tiny {
+  margin: 0;
+}
+
+.hint {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.hint b {
+  color: var(--text);
+}
+
 .warn {
   margin: 6px 0 0;
   padding: 4px 6px;
