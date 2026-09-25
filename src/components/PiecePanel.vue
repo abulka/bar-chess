@@ -178,12 +178,6 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
 </template>
 
 <style scoped>
-.piece-panel {
-  margin-top: 8px;
-  border-top: 1px solid var(--border);
-  padding-top: 6px;
-}
-
 .head {
   display: flex;
   align-items: center;

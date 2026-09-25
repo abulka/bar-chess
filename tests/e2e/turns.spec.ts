@@ -20,6 +20,8 @@ test.beforeEach(async ({ page }) => {
 
 test('lists turns, jumps to one, and replays forward without forking', async ({ page }) => {
   await playTurns(page, 2)
+  // The turn list lives in the left rail's "turns" tab (hidden by default).
+  await page.getByRole('button', { name: 'turns', exact: true }).click()
   const rows = page.locator('.turn-panel .list .row')
   await expect(rows).toHaveCount(3)
 
@@ -48,6 +50,8 @@ test('fork discards the redo branch', async ({ page }) => {
   await page.keyboard.press('u')
   expect(await page.evaluate(() => (window as any).game.snapshot().canRedo)).toBe(true)
 
+  // The fork button lives in the left rail's "turns" tab (hidden by default).
+  await page.getByRole('button', { name: 'turns', exact: true }).click()
   await page.locator('.turn-panel .fork-row button').click()
   await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().canRedo)).toBe(false)
   expect(await page.evaluate(() => (window as any).game.snapshot().turnActive)).toBe(true)

@@ -322,17 +322,14 @@ export interface GameSnapshot {
   chessKills: boolean
   /** Whether combat sound effects are enabled. */
   soundEnabled: boolean
-  /** Whether the left/right side rails (controls, stance, position) are shown. */
+  /** Whether the left/right side rails (games/turns, piece/info) are shown. */
   railsVisible: boolean
-  /** Whether the left "controls" hints and right "stance" legend are collapsed. */
+  /** Whether the right-rail "controls" hints and "stance" legend are collapsed. */
   controlsCollapsed: boolean
   stanceCollapsed: boolean
-  /** Whether the right-rail "turns" list is collapsed. */
-  turnsCollapsed: boolean
-  /** Whether the right-rail legend / firing-lines / copy sections are collapsed. */
+  /** Whether the right-rail legend / firing-lines sections are collapsed. */
   legendCollapsed: boolean
   firingLinesCollapsed: boolean
-  copyCollapsed: boolean
   playerTeam: TeamId
   gameMode: GameMode
   gameModes: Array<{ id: GameMode; label: string }>
@@ -432,11 +429,8 @@ export class Game {
   railsVisible = true
   controlsCollapsed = false
   stanceCollapsed = false
-  /** Whether the right-rail "turns" list section is collapsed. */
-  turnsCollapsed = false
   legendCollapsed = false
   firingLinesCollapsed = false
-  copyCollapsed = false
   soundEnabled = false
   /** HUD bottom-panel height as a fraction of the viewport. */
   bottomFraction = BOTTOM_FRACTION_DEFAULT
@@ -1248,10 +1242,8 @@ export class Game {
       rightRailFraction: this.rightRailFraction,
       controlsCollapsed: this.controlsCollapsed,
       stanceCollapsed: this.stanceCollapsed,
-      turnsCollapsed: this.turnsCollapsed,
       legendCollapsed: this.legendCollapsed,
       firingLinesCollapsed: this.firingLinesCollapsed,
-      copyCollapsed: this.copyCollapsed,
     }
   }
 
@@ -1270,12 +1262,10 @@ export class Game {
     if (typeof settings.railsVisible === 'boolean') this.railsVisible = settings.railsVisible
     if (typeof settings.controlsCollapsed === 'boolean') this.controlsCollapsed = settings.controlsCollapsed
     if (typeof settings.stanceCollapsed === 'boolean') this.stanceCollapsed = settings.stanceCollapsed
-    if (typeof settings.turnsCollapsed === 'boolean') this.turnsCollapsed = settings.turnsCollapsed
     if (typeof settings.legendCollapsed === 'boolean') this.legendCollapsed = settings.legendCollapsed
     if (typeof settings.firingLinesCollapsed === 'boolean') {
       this.firingLinesCollapsed = settings.firingLinesCollapsed
     }
-    if (typeof settings.copyCollapsed === 'boolean') this.copyCollapsed = settings.copyCollapsed
     if (typeof settings.speed === 'number' && SPEEDS.includes(settings.speed)) this.speed = settings.speed
     if (typeof settings.autoPreserve === 'boolean') this.autoPreserve = settings.autoPreserve
     if (typeof settings.captureAdvance === 'boolean') this.captureAdvance = settings.captureAdvance
@@ -2573,10 +2563,8 @@ export class Game {
       railsVisible: this.railsVisible,
       controlsCollapsed: this.controlsCollapsed,
       stanceCollapsed: this.stanceCollapsed,
-      turnsCollapsed: this.turnsCollapsed,
       legendCollapsed: this.legendCollapsed,
       firingLinesCollapsed: this.firingLinesCollapsed,
-      copyCollapsed: this.copyCollapsed,
       playerTeam: this.playerTeam,
       gameMode: this.gameMode,
       gameModes: GAME_MODES,

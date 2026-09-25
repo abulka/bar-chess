@@ -211,7 +211,7 @@ requestAnimationFrame(frame):
 - `history` is a bounded list of `HistoryEntry` (cap `HISTORY_LIMIT = 100`);
   `historyTrimmed` counts beats dropped off the front, and `snapshot().turns`
   lazily exposes per-boundary `TurnSummary` metadata (turn, mega, ticks, piece
-  counts, active orders, moves/kills/losses) for the right-rail **turns** list.
+  counts, active orders, moves/kills/losses) for the left-rail **turns** tab.
   The list is rebuilt whenever the history changes and is restored on import
   (the trimmed count rides along in `SavedPosition.trimmed`).
 - `togglePause()` starts a mega turn when idle (Play) and closes the running one
@@ -575,8 +575,9 @@ large displays. `zoomAt` is cursor-anchored; wheel zoom is exponential on
 `App.vue` constructs one `Game` (which starts **paused**), starts the frame loop,
 and copies `game.snapshot()` into a `shallowRef` every
 `SNAPSHOT_INTERVAL_MS = 120`. The simulation never depends on Vue reactivity.
-Control hints + the piece panel + hover readout live in side rails (left/right),
-independent of the HUD toggle, so they never cover the board. The HUD starts
+The side rails hold the game I/O (left: **games**/**turns** tabs) and the
+piece info + help sections (right: **piece**/**info** tabs), independent of the
+HUD toggle, so they never cover the board. The HUD starts
 hidden; `h` toggles it, and `tab` toggles the side rails (`railsVisible`). The
 stage grid adapts to which of the two side stacks (rails, reinforcement rosters)
 are shown, giving the board the full width when both are hidden. Toggling either
@@ -595,13 +596,18 @@ flex row with a `.splitter.vertical` on its inner edge, and `.stage`'s inline
 `gridTemplateColumns` (from local `leftWidth`/`rightWidth` refs) sizes the
 columns. Dragging sets the width from the pointer, double-click resets, and the
 widths persist as `leftRailFraction`/`rightRailFraction` of the viewport, clamped
-to leave a minimum board width. Within the left rail the **controls** hints list,
-and within the right rail the **stance**, **legend**, **firing lines** and
-**copy** sections, are wrapped in `CollapsibleSection.vue` — a clickable
+to leave a minimum board width. Each rail opens with a two-button sub-tab bar
+(`.rail-tabs`): the left rail switches between **games** (the copy/save/export-
+import section) and **turns** (`TurnList`), the right rail between **piece**
+(`PiecePanel` + the hover readout) and **info**. The tab bodies use `v-show`
+so hidden tabs keep their state (slot input, scroll position). Within the
+right rail's **info** tab the **controls**, **stance**, **legend** and
+**firing lines** sections are wrapped in `CollapsibleSection.vue` — a clickable
 rail-title header with a caret that hides its body and persists its state as
-`controlsCollapsed`/`stanceCollapsed`/`legendCollapsed`/`firingLinesCollapsed`/
-`copyCollapsed`. The **hover** readout sits between the firing-lines and copy
-sections and is not collapsible. The right-rail legend draws its swatches with
+`controlsCollapsed`/`stanceCollapsed`/`legendCollapsed`/
+`firingLinesCollapsed`. The **hover** readout sits under the piece panel in
+the right rail's **piece** tab and is not collapsible. The right-rail legend
+draws its swatches with
 `LegendIcon.vue` (inline SVG coloured from `src/render/palette.ts`), so the
 legend can never drift from what the canvas actually paints.
 
@@ -616,7 +622,7 @@ leak a hidden plan.
 boardId boardSize boardSizes teams timings events eventCount shots kills
 warnings selected selectedLines counts winner overlays hudVisible autoPreserve
 captureAdvance soundEnabled railsVisible controlsCollapsed stanceCollapsed
-legendCollapsed firingLinesCollapsed copyCollapsed hover
+legendCollapsed firingLinesCollapsed hover
 playerTeam turnActive queuedTurns canReplay canUndo canRedo replaying
 barProgress pendingCommand selectionCount stanceSummary pieceInfo
 terrainVersion editorMode editorBrush editorDirty canEdit mapName`.
@@ -627,7 +633,7 @@ terrainVersion editorMode editorBrush editorDirty canEdit mapName`.
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle; routes map-editor clicks/drags (stamp, continuous erase) and exposes `cellAtClient`/`overBoard` for palette drops |
 | `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed, `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. The **order / auto changes** list shows the piece's last few transitions with their tick, so it is clear *why* an order was issued/replaced/completed/abandoned (e.g. `target at e7 lost — attack abandoned`) and includes autonomous self-preservation retreats |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane, drag drops the piece on a chosen cell (or arms an editor brush in editor mode) |
-| `TurnList.vue` | right-rail **turns** section: newest-first history rows (jump on click, replay per row), backtrack warning + explicit Fork, trimmed-history hint, per-row piece/order/time info |
+| `TurnList.vue` | left-rail **turns** tab: newest-first history rows (jump on click, replay per row), backtrack warning + explicit Fork, trimmed-history hint, per-row piece/order/time info |
 | `EditorPanel.vue` | floating map-editor controls: map name, save, eraser, blank-board size, `Maps…`, cancel/done |
 | `MapsModal.vue` | saved-map browser: `MapThumbnail` previews with Play / Edit / Rename / Export / Delete, plus New map and Import JSON |
 | `MapThumbnail.vue` | square canvas rendering `drawMapPreview` for a `SavedMap` |
@@ -801,9 +807,9 @@ UI/session preferences survive a reload (and a dev-server restart) via
 applies a validated patch. Stored under `bar-chess.settings`:
 `overlays` (all flags), `hudVisible`, `railsVisible`, `speed`, `gameMode`,
 `soundEnabled`, `bottomFraction` (the HUD splitter height),
-`leftRailFraction`/`rightRailFraction` (side-rail widths) and the section
+`leftRailFraction`/`rightRailFraction` (side-rail widths) and the info-tab section
 collapse flags `controlsCollapsed`/`stanceCollapsed`/`legendCollapsed`/
-`firingLinesCollapsed`/`copyCollapsed` (per-piece stance lives in the world, not
+`firingLinesCollapsed` (per-piece stance lives in the world, not
 here). `loadSettings`
 drops malformed or out-of-range fields (unknown
 overlay keys, non-boolean flags, speeds outside `SPEEDS`, unknown modes,

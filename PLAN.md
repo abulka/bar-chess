@@ -51,7 +51,7 @@ autonomous movement, firing, projectile flight and destruction play out.
 Two distinct concepts:
 
 **Stance** is a piece's persistent autonomous policy, shown as a badge and set
-from the **piece panel** (left rail), which applies to the whole selection:
+from the **piece panel** (right rail), which applies to the whole selection:
 
 - **None** (default, no badge) — stand ground and fire only at enemies already in
   range, so the opening board stays clean.
@@ -297,9 +297,10 @@ order (goto on an empty square, attack on an enemy; repeat or Shift to queue).
 **`m`/`a` then left-click** forces a move/attack command (Shift keeps the prefix
 armed to queue more). Hover shows a per-piece order preview (faint ghosts) and
 the square name. The board is labelled with chess coordinates; the control hints
-and the **piece panel** (properties + stance buttons) live in the left rail, and
-the target legend in the right rail (both always visible, even with the HUD
-hidden). A **Copy position JSON** button captures the full situation.
+and legends live in the right rail's **info** tab, and the **piece panel**
+(properties + stance buttons) in its **piece** tab (both always visible, even
+with the HUD hidden). A **Copy position JSON** button in the left rail's
+games tab captures the full situation.
 
 Keyboard summary: `m`/`a` arm move/attack, `space` turn / pause play,
 `shift+space` play, `p` play/pause, `s` step, `u`/`r` undo/redo, `y` replay,

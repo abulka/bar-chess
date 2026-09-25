@@ -290,6 +290,40 @@ input {
   font-size: 11px;
 }
 
+/* Sub-tab bar at the top of each rail (left: games/turns, right: piece/info). */
+.rail-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.rail-tab {
+  flex: 1;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.rail-tab:hover {
+  color: var(--text);
+  border-color: var(--heading);
+}
+
+.rail-tab.active {
+  color: var(--text);
+  background: var(--panel-2);
+  border-color: var(--accent);
+}
+
+.rail-tab-body {
+  min-height: 0;
+}
+
 .rail-title {
   color: var(--heading);
   font-size: 15px;

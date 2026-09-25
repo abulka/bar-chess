@@ -35,15 +35,12 @@ export interface GameSettings {
   /** Left/right side-rail widths as a fraction of the viewport. */
   leftRailFraction: number
   rightRailFraction: number
-  /** Whether the left "controls" hints and right "stance" legend are collapsed. */
+  /** Whether the right-rail "controls" hints and "stance" legend are collapsed. */
   controlsCollapsed: boolean
   stanceCollapsed: boolean
-  /** Whether the right-rail "turns" list is collapsed. */
-  turnsCollapsed: boolean
-  /** Whether the right-rail legend / firing-lines / copy sections are collapsed. */
+  /** Whether the right-rail legend / firing-lines sections are collapsed. */
   legendCollapsed: boolean
   firingLinesCollapsed: boolean
-  copyCollapsed: boolean
 }
 
 /** A validated subset of settings to apply, as read from storage. */
@@ -62,10 +59,8 @@ export interface SettingsPatch {
   rightRailFraction?: number
   controlsCollapsed?: boolean
   stanceCollapsed?: boolean
-  turnsCollapsed?: boolean
   legendCollapsed?: boolean
   firingLinesCollapsed?: boolean
-  copyCollapsed?: boolean
 }
 
 const SETTINGS_KEY = 'bar-chess.settings'
@@ -118,12 +113,10 @@ export function loadSettings(): SettingsPatch | null {
   }
   if (typeof parsed.controlsCollapsed === 'boolean') out.controlsCollapsed = parsed.controlsCollapsed
   if (typeof parsed.stanceCollapsed === 'boolean') out.stanceCollapsed = parsed.stanceCollapsed
-  if (typeof parsed.turnsCollapsed === 'boolean') out.turnsCollapsed = parsed.turnsCollapsed
   if (typeof parsed.legendCollapsed === 'boolean') out.legendCollapsed = parsed.legendCollapsed
   if (typeof parsed.firingLinesCollapsed === 'boolean') {
     out.firingLinesCollapsed = parsed.firingLinesCollapsed
   }
-  if (typeof parsed.copyCollapsed === 'boolean') out.copyCollapsed = parsed.copyCollapsed
   return out
 }
 

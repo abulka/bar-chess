@@ -188,7 +188,9 @@ test('the rail splitter resizes a side rail and persists', async ({ page }) => {
 })
 
 test('the rail info sections collapse and persist', async ({ page }) => {
-  const hints = page.locator('.rail.left .hints')
+  // The right rail's "info" tab holds the controls/stance/legend/firing-lines sections.
+  await page.getByRole('button', { name: 'info', exact: true }).click()
+  const hints = page.locator('.rail.right .hints')
   const stanceLegend = page.locator('.rail.right .legend').first()
   await expect(hints).toBeVisible()
   await expect(stanceLegend).toBeVisible()
@@ -197,22 +199,23 @@ test('the rail info sections collapse and persist', async ({ page }) => {
   await page.getByRole('button', { name: 'stance', exact: true }).click()
   await page.getByRole('button', { name: 'legend', exact: true }).click()
   await page.getByRole('button', { name: 'firing lines', exact: true }).click()
-  await page.getByRole('button', { name: 'copy', exact: true }).click()
 
   await expect(hints).toBeHidden()
   await expect(stanceLegend).toBeHidden()
   await expect(page.locator('.rail.right .legend').nth(1)).toBeHidden()
   await expect(page.locator('.rail.right .legend').nth(2)).toBeHidden()
-  await expect(page.getByRole('button', { name: 'Copy history for LLM' })).toBeHidden()
+
+  // The left rail's "games" tab holds the copy buttons (a tab, not a collapsible).
+  await page.getByRole('button', { name: 'games', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Copy history for LLM' })).toBeVisible()
 
   await page.reload()
   await page.waitForFunction(() => Boolean((window as any).game && (window as any).__renderer))
-  await expect(page.locator('.rail.left .hints')).toBeHidden()
+  await page.getByRole('button', { name: 'info', exact: true }).click()
+  await expect(page.locator('.rail.right .hints')).toBeHidden()
   await expect(page.locator('.rail.right .legend').first()).toBeHidden()
   await expect(page.locator('.rail.right .legend').nth(1)).toBeHidden()
   await expect(page.locator('.rail.right .legend').nth(2)).toBeHidden()
-  await expect(page.getByRole('button', { name: 'Copy history for LLM' })).toBeHidden()
-  await expect(page.getByRole('button', { name: 'copy', exact: true })).toHaveAttribute('aria-expanded', 'false')
 })
 
 test('the hover readout names the hovered piece and its side', async ({ page }) => {

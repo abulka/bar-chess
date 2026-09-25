@@ -102,6 +102,10 @@ const bottomHeight = ref(clampBottomPx(game.bottomFraction * window.innerHeight)
 const leftWidth = ref(clampRailPx(game.leftRailFraction * window.innerWidth, 0))
 const rightWidth = ref(clampRailPx(game.rightRailFraction * window.innerWidth, leftWidth.value))
 
+/** Active sub-tab in each side rail (left: games/turns, right: piece/info). */
+const leftTab = ref<'games' | 'turns'>('games')
+const rightTab = ref<'piece' | 'info'>('piece')
+
 const gridRows = computed(() =>
   snapshot.value.hudVisible
     ? `auto auto minmax(${MIN_STAGE_PX}px, 1fr) ${SPLITTER_PX}px ${bottomHeight.value}px`
@@ -636,12 +640,6 @@ function onToggleStance(): void {
   refresh()
 }
 
-function onToggleTurns(): void {
-  game.turnsCollapsed = !game.turnsCollapsed
-  persistSettings()
-  refresh()
-}
-
 function onToggleLegend(): void {
   game.legendCollapsed = !game.legendCollapsed
   persistSettings()
@@ -650,12 +648,6 @@ function onToggleLegend(): void {
 
 function onToggleFiringLines(): void {
   game.firingLinesCollapsed = !game.firingLinesCollapsed
-  persistSettings()
-  refresh()
-}
-
-function onToggleCopy(): void {
-  game.copyCollapsed = !game.copyCollapsed
   persistSettings()
   refresh()
 }
@@ -1015,28 +1007,77 @@ onBeforeUnmount(() => {
             @toggle-erase="onToggleErase"
           />
           <template v-else>
-            <CollapsibleSection
-              title="controls"
-              :open="!snapshot.controlsCollapsed"
-              @toggle="onToggleControls"
-            >
-              <ul class="hints">
-                <li><b>left-click</b> select · <b>shift-click</b> add · <b>drag</b> box</li>
-                <li><b>right-click</b> empty → move · enemy → attack</li>
-                <li><b>right-click</b> again (or shift) → queue next step</li>
-                <li><b>m</b>/<b>a</b> then left-click → move / attack · shift to queue</li>
-                <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
-                <li><b>space</b> next turn / replay forward · <b>shift+space</b> play · <b>s</b> step</li>
-                <li><b>u</b> undo · <b>r</b> redo · <b>y</b> replay · <b>f</b> fork (discards redo)</li>
-                <li><b>c</b>/<b>Backspace</b> clear orders · <b>o</b> my orders · <b>e</b> enemy</li>
-                <li><b>h</b> HUD · <b>tab</b> panels · <b>esc</b> cancel</li>
+            <div class="rail-tabs">
+              <button
+                type="button"
+                class="rail-tab"
+                :class="{ active: leftTab === 'games' }"
+                @click="leftTab = 'games'"
+              >
+                games
+              </button>
+              <button
+                type="button"
+                class="rail-tab"
+                :class="{ active: leftTab === 'turns' }"
+                @click="leftTab = 'turns'"
+              >
+                turns
+              </button>
+            </div>
+
+            <div v-show="leftTab === 'games'" class="rail-tab-body">
+              <button class="ctl copy-btn" @click="copyLlm">
+                {{ copied === 'llm' ? 'Copied!' : 'Copy history for LLM' }}
+              </button>
+              <button class="ctl copy-btn" @click="copySnapshot">
+                {{ copied === 'snapshot' ? 'Copied!' : 'Copy snapshot for LLM' }}
+              </button>
+              <button class="ctl copy-btn" @click="copyJson">
+                {{ copied === 'json' ? 'Copied!' : 'Copy state (JSON)' }}
+              </button>
+              <div class="save-row">
+                <input
+                  v-model="slotName"
+                  class="slot-input"
+                  type="text"
+                  placeholder="slot name"
+                  @keydown.enter="onSaveSlot"
+                />
+                <button class="ctl" @click="onSaveSlot">Save</button>
+              </div>
+              <ul v-if="slots.length" class="slots">
+                <li v-for="slot in slots" :key="slot.id">
+                  <span class="slot-name" :title="new Date(slot.savedAt).toLocaleString()">
+                    {{ slot.name }}<template v-if="slot.turns"> · {{ slot.turns }} turns</template>
+                  </span>
+                  <button class="ctl small" @click="onLoadSlot(slot.id)">Load</button>
+                  <button class="ctl small" @click="onDeleteSlot(slot.id)">Del</button>
+                </li>
               </ul>
-            </CollapsibleSection>
-            <PiecePanel
-              :snapshot="snapshot"
-              @set-stance="onSetPieceStance"
-              @clear-orders="onClearOrders"
-            />
+              <div class="io-row">
+                <button class="ctl" @click="onExport">Export JSON</button>
+                <button class="ctl" @click="onImportClick">Import JSON</button>
+              </div>
+              <input
+                ref="fileInput"
+                id="position-file"
+                class="hidden-file"
+                type="file"
+                accept="application/json,.json"
+                @change="onImportFile"
+              />
+              <p v-if="ioMessage" class="io-msg">{{ ioMessage }}</p>
+            </div>
+
+            <div v-show="leftTab === 'turns'" class="rail-tab-body">
+              <TurnList
+                :snapshot="snapshot"
+                @jump="onJumpTurn"
+                @play="onPlayTurn"
+                @fork="onFork"
+              />
+            </div>
           </template>
         </aside>
         <div
@@ -1088,129 +1129,115 @@ onBeforeUnmount(() => {
           @dblclick="onRailReset('right')"
         ></div>
         <aside class="rail right">
-          <CollapsibleSection
-            title="stance"
-            :open="!snapshot.stanceCollapsed"
-            @toggle="onToggleStance"
-          >
-            <ul class="legend">
-              <li><LegendIcon kind="badge-m" /><b>M</b> Move — travel, return fire only</li>
-              <li><LegendIcon kind="badge-a" /><b>A</b> Attack — engage nearby, flee when low</li>
-              <li><LegendIcon kind="badge-none" /><b>no order</b> — stand &amp; fire in range</li>
-              <li><LegendIcon kind="ring-red" /><b>ordered</b> attack target</li>
-              <li><LegendIcon kind="ring-amber" /><b>auto-acquired</b> / retaliation target</li>
-            </ul>
-          </CollapsibleSection>
-
-          <CollapsibleSection
-            title="legend"
-            :open="!snapshot.legendCollapsed"
-            @toggle="onToggleLegend"
-          >
-            <ul class="legend">
-              <li><LegendIcon kind="move-cell" /> move cells</li>
-              <li><LegendIcon kind="attack-cell" /> attack cells</li>
-              <li><LegendIcon kind="range-arc" /> range arc (selected)</li>
-              <li><LegendIcon kind="route" /> route <span class="muted">(orange = partial / blocked)</span></li>
-              <li><LegendIcon kind="objective" /> objective destination</li>
-              <li><LegendIcon kind="preserve" /> self-preservation retreat</li>
-              <li><LegendIcon kind="waypoint" /> queued waypoints</li>
-              <li><LegendIcon kind="select-ring" /> selected piece</li>
-              <li><LegendIcon kind="bar-health" /> health (green→red)</li>
-              <li><LegendIcon kind="bar-reload" /> recharge (teal)</li>
-            </ul>
-          </CollapsibleSection>
-
-          <CollapsibleSection
-            title="firing lines"
-            :open="!snapshot.firingLinesCollapsed"
-            @toggle="onToggleFiringLines"
-          >
-            <ul class="legend">
-              <li><LegendIcon kind="line-clear" /> clear shot</li>
-              <li><LegendIcon kind="line-blocked" /> firing shot blocked</li>
-              <li><LegendIcon kind="line-unreachable" /> out of reach</li>
-              <li><LegendIcon kind="line-engage" /> engaging (auto-acquired)</li>
-              <li><LegendIcon kind="line-potshot" /> pot shot (in range only)</li>
-            </ul>
-          </CollapsibleSection>
-
-          <div class="rail-title">hover</div>
-          <div class="hover-readout">
-            <template v-if="hover?.piece">
-              <span class="hover-glyph" :style="{ color: hover.piece.color }">{{ hover.piece.glyph }}</span>
-              <b>{{ hover.piece.name }}</b>
-              <span class="muted">· {{ hover.kind }}</span>
-              <span v-if="hover.piece.redacted" class="muted">· intent hidden</span>
-              <span v-else class="hover-intent">· {{ hoverIntent(hover) }}</span>
-              <span v-if="hover.piece.targetCoord" class="muted">→ {{ hover.piece.targetCoord }}</span>
-            </template>
-            <template v-else>
-              <span>{{ hover?.coord ?? '—' }}</span>
-              <span v-if="hover" class="muted">· {{ hover.kind }}</span>
-            </template>
+          <div class="rail-tabs">
+            <button
+              type="button"
+              class="rail-tab"
+              :class="{ active: rightTab === 'piece' }"
+              @click="rightTab = 'piece'"
+            >
+              piece
+            </button>
+            <button
+              type="button"
+              class="rail-tab"
+              :class="{ active: rightTab === 'info' }"
+              @click="rightTab = 'info'"
+            >
+              info
+            </button>
           </div>
 
-          <CollapsibleSection
-            title="copy"
-            :open="!snapshot.copyCollapsed"
-            @toggle="onToggleCopy"
-          >
-            <button class="ctl copy-btn" @click="copyLlm">
-              {{ copied === 'llm' ? 'Copied!' : 'Copy history for LLM' }}
-            </button>
-            <button class="ctl copy-btn" @click="copySnapshot">
-              {{ copied === 'snapshot' ? 'Copied!' : 'Copy snapshot for LLM' }}
-            </button>
-            <button class="ctl copy-btn" @click="copyJson">
-              {{ copied === 'json' ? 'Copied!' : 'Copy state (JSON)' }}
-            </button>
-            <div class="save-row">
-              <input
-                v-model="slotName"
-                class="slot-input"
-                type="text"
-                placeholder="slot name"
-                @keydown.enter="onSaveSlot"
-              />
-              <button class="ctl" @click="onSaveSlot">Save</button>
-            </div>
-            <ul v-if="slots.length" class="slots">
-              <li v-for="slot in slots" :key="slot.id">
-                <span class="slot-name" :title="new Date(slot.savedAt).toLocaleString()">
-                  {{ slot.name }}<template v-if="slot.turns"> · {{ slot.turns }} turns</template>
-                </span>
-                <button class="ctl small" @click="onLoadSlot(slot.id)">Load</button>
-                <button class="ctl small" @click="onDeleteSlot(slot.id)">Del</button>
-              </li>
-            </ul>
-            <div class="io-row">
-              <button class="ctl" @click="onExport">Export JSON</button>
-              <button class="ctl" @click="onImportClick">Import JSON</button>
-            </div>
-            <input
-              ref="fileInput"
-              id="position-file"
-              class="hidden-file"
-              type="file"
-              accept="application/json,.json"
-              @change="onImportFile"
-            />
-            <p v-if="ioMessage" class="io-msg">{{ ioMessage }}</p>
-          </CollapsibleSection>
-
-          <CollapsibleSection
-            title="turns"
-            :open="!snapshot.turnsCollapsed"
-            @toggle="onToggleTurns"
-          >
-            <TurnList
+          <div v-show="rightTab === 'piece'" class="rail-tab-body">
+            <PiecePanel
               :snapshot="snapshot"
-              @jump="onJumpTurn"
-              @play="onPlayTurn"
-              @fork="onFork"
+              @set-stance="onSetPieceStance"
+              @clear-orders="onClearOrders"
             />
-          </CollapsibleSection>
+
+            <div class="rail-title">hover</div>
+            <div class="hover-readout">
+              <template v-if="hover?.piece">
+                <span class="hover-glyph" :style="{ color: hover.piece.color }">{{ hover.piece.glyph }}</span>
+                <b>{{ hover.piece.name }}</b>
+                <span class="muted">· {{ hover.kind }}</span>
+                <span v-if="hover.piece.redacted" class="muted">· intent hidden</span>
+                <span v-else class="hover-intent">· {{ hoverIntent(hover) }}</span>
+                <span v-if="hover.piece.targetCoord" class="muted">→ {{ hover.piece.targetCoord }}</span>
+              </template>
+              <template v-else>
+                <span>{{ hover?.coord ?? '—' }}</span>
+                <span v-if="hover" class="muted">· {{ hover.kind }}</span>
+              </template>
+            </div>
+          </div>
+
+          <div v-show="rightTab === 'info'" class="rail-tab-body">
+            <CollapsibleSection
+              title="controls"
+              :open="!snapshot.controlsCollapsed"
+              @toggle="onToggleControls"
+            >
+              <ul class="hints">
+                <li><b>left-click</b> select · <b>shift-click</b> add · <b>drag</b> box</li>
+                <li><b>right-click</b> empty → move · enemy → attack</li>
+                <li><b>right-click</b> again (or shift) → queue next step</li>
+                <li><b>m</b>/<b>a</b> then left-click → move / attack · shift to queue</li>
+                <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
+                <li><b>space</b> next turn / replay forward · <b>shift+space</b> play · <b>s</b> step</li>
+                <li><b>u</b> undo · <b>r</b> redo · <b>y</b> replay · <b>f</b> fork (discards redo)</li>
+                <li><b>c</b>/<b>Backspace</b> clear orders · <b>o</b> my orders · <b>e</b> enemy</li>
+                <li><b>h</b> HUD · <b>tab</b> panels · <b>esc</b> cancel</li>
+              </ul>
+            </CollapsibleSection>
+
+            <CollapsibleSection
+              title="stance"
+              :open="!snapshot.stanceCollapsed"
+              @toggle="onToggleStance"
+            >
+              <ul class="legend">
+                <li><LegendIcon kind="badge-m" /><b>M</b> Move — travel, return fire only</li>
+                <li><LegendIcon kind="badge-a" /><b>A</b> Attack — engage nearby, flee when low</li>
+                <li><LegendIcon kind="badge-none" /><b>no order</b> — stand &amp; fire in range</li>
+                <li><LegendIcon kind="ring-red" /><b>ordered</b> attack target</li>
+                <li><LegendIcon kind="ring-amber" /><b>auto-acquired</b> / retaliation target</li>
+              </ul>
+            </CollapsibleSection>
+
+            <CollapsibleSection
+              title="legend"
+              :open="!snapshot.legendCollapsed"
+              @toggle="onToggleLegend"
+            >
+              <ul class="legend">
+                <li><LegendIcon kind="move-cell" /> move cells</li>
+                <li><LegendIcon kind="attack-cell" /> attack cells</li>
+                <li><LegendIcon kind="range-arc" /> range arc (selected)</li>
+                <li><LegendIcon kind="route" /> route <span class="muted">(orange = partial / blocked)</span></li>
+                <li><LegendIcon kind="objective" /> objective destination</li>
+                <li><LegendIcon kind="preserve" /> self-preservation retreat</li>
+                <li><LegendIcon kind="waypoint" /> queued waypoints</li>
+                <li><LegendIcon kind="select-ring" /> selected piece</li>
+                <li><LegendIcon kind="bar-health" /> health (green→red)</li>
+                <li><LegendIcon kind="bar-reload" /> recharge (teal)</li>
+              </ul>
+            </CollapsibleSection>
+
+            <CollapsibleSection
+              title="firing lines"
+              :open="!snapshot.firingLinesCollapsed"
+              @toggle="onToggleFiringLines"
+            >
+              <ul class="legend">
+                <li><LegendIcon kind="line-clear" /> clear shot</li>
+                <li><LegendIcon kind="line-blocked" /> firing shot blocked</li>
+                <li><LegendIcon kind="line-unreachable" /> out of reach</li>
+                <li><LegendIcon kind="line-engage" /> engaging (auto-acquired)</li>
+                <li><LegendIcon kind="line-potshot" /> pot shot (in range only)</li>
+              </ul>
+            </CollapsibleSection>
+          </div>
         </aside>
       </div>
     </div>
