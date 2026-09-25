@@ -28,8 +28,8 @@ import {
 } from './preservation'
 import type { ThreatMemo } from './preservation'
 
-/** Flat HP fraction at or below which a piece is "badly wounded": it latches a
- * safe-hold and will not advance its order until fully healed. */
+/** Flat HP fraction at or below which a piece is "critically wounded": it latches
+ * a safe-hold to full health and will not advance its order until then. */
 const CRITICAL_WOUND = 0.2
 
 /** HP ratio at which a piece starts saving itself, scaled by how costly it is. */
@@ -46,6 +46,16 @@ function preserveThreshold(kind: string): number {
     default:
       return 0.3
   }
+}
+
+/**
+ * HP ratio a wounded piece heals to before resuming, above the retreat trigger:
+ * about one more hit absorbed (queen/king 0.70, rook 0.65, bishop/knight 0.60).
+ * Without this hysteresis the heal trip is wasted — a piece crossing back over
+ * the trigger immediately stops preserving and walks into the same fire again.
+ */
+function recoverThreshold(kind: string): number {
+  return Math.min(0.8, preserveThreshold(kind) + 0.2)
 }
 
 /** A piece's def, cell and team, or null when any of them is missing. */
@@ -165,10 +175,11 @@ const system: System = {
       }
 
       // 0. Self-preservation: a hurt or outgunned piece retreats on its own, even
-      // while it is moving or pursuing a standing attack order. A badly wounded
-      // piece (below CRITICAL_WOUND) latches a safe-hold and stays put until fully
-      // healed; a medium wound only retreats while the danger is present, then
-      // resumes its order. A new order clears the hold. The one exception is an
+      // while it is moving or pursuing a standing attack order. A wounded piece
+      // outside the king's aura walks home to heal and latches a recovery hold
+      // until it is back above `recoverThreshold`; a critical wound (below
+      // CRITICAL_WOUND) latches until fully healed. A new order clears the hold.
+      // The one exception is an
       // insta-kill (immediate chess kill): it is pressed regardless of wounds —
       // a suicide kill is allowed — and it still lands because 0a queued the
       // lethal damage before this pass.
@@ -185,7 +196,8 @@ const system: System = {
       // Valuable pieces scan every tick so they can bail *before* taking damage;
       // cheap pieces only bother once hurt or actually under fire.
       const valuable = kind !== undefined && isValuable(kind)
-      // Release a latched safe-hold once the piece is back to full health.
+      // Release a latched safe-hold once the piece reaches its latch HP (full
+      // health for a critical wound, the recovery threshold for a lesser one).
       if (motion.holdUntilHp > 0 && hp && hp.cur >= motion.holdUntilHp) motion.holdUntilHp = 0
       const holding = motion.holdUntilHp > 0
       // Whether this piece was preserving last tick, so the retreat is logged as
@@ -217,13 +229,14 @@ const system: System = {
         const shouldDodge = inAura ? outgunned(ctx, e, threats) : shooters > 0 || underFire
         // Act (dodge or hold) while latched, or while wounded/pressured and either
         // in danger or sitting in the healing aura. Otherwise fall through and let
-        // the order resume — that is what lets a medium wound continue once safe.
+        // the order resume — that is what lets a piece continue once it has
+        // recovered to its latch threshold and the danger is gone.
         const act = holding || ((wounded || pressured) && (shouldDodge || inAura))
         if (act) {
-          // A badly wounded piece holds until fully healed.
+          // A critically wounded piece holds until fully healed.
           if (hp && (wounded || pressured) && hpRatio < CRITICAL_WOUND) motion.holdUntilHp = hp.max
           const lethal = outgunned(ctx, e, threats)
-          // Healing-aware hold: a latched, badly wounded piece outside the aura
+          // Healing-aware hold: a latched piece outside the aura
           // walks to the nearest healing square so it can regenerate and release
           // the hold, instead of parking where it can never heal. An explicit move
           // order that already ends inside the aura is left to run, and only a
@@ -268,6 +281,18 @@ const system: System = {
             // Safe or healing with no step: hold rather than drift (intent none).
             motion.goal = goal
             motion.intent = intent
+            // Recovery latch: a wounded piece in this preserve pass that can
+            // actually heal (in the aura, or with an aura square within reach)
+            // stays in preserve until it has healed to `recoverThreshold` —
+            // roughly one more hit absorbed — rather than leaving the moment it
+            // crosses the retreat trigger and walking straight back into the same
+            // fire. A critical wound already latched to full health above, and
+            // `Math.max` keeps that. Pieces with no aura to reach do not latch, so
+            // they can never park waiting for a heal that cannot come.
+            const canHeal = inAura || heal !== null
+            if (wounded && canHeal && hp && kind !== 'pawn') {
+              motion.holdUntilHp = Math.max(motion.holdUntilHp, hp.max * recoverThreshold(kind))
+            }
             // Record the retreat as an episode — one entry when it starts, one
             // when it ends. Intra-episode goal re-evaluations are not logged, so a
             // goal abandoned before it is ever pursued can never leave a false

@@ -119,13 +119,14 @@ describe('Game integration', () => {
     game.runTicks(1)
 
     // The standing attack is impossible, so it is not pursued. The wound sends
-    // the bishop home to the king's aura instead of taking one step and then
-    // walking back to the h-file.
+    // the bishop home to the king's aura with a recovery latch (60% of 75) so it
+    // does not walk back to the h-file the moment it crosses 40%.
     const motion = game.world.require(bishop, Motion)
     expect(motion.intent).toBe('preserve')
     expect(motion.goal).not.toBeNull()
     expect(motion.goal).not.toEqual({ x: 7, y: 1 })
     expect(Math.max(Math.abs(motion.goal!.x - 4), Math.abs(motion.goal!.y - 7))).toBeLessThanOrEqual(2)
+    expect(motion.holdUntilHp).toBeCloseTo(45, 6)
   })
 
   it('clears the reported under-fire once the piece leaves the attacker line', () => {

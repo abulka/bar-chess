@@ -98,7 +98,8 @@ export interface MotionData {
   /** source of the current goal (drives overlay colour + panel label) */
   intent: MotionIntent
   /** While `Health.cur < holdUntilHp` the piece stays in a self-preservation
-   * safe-hold and does not advance its order. 0 = no hold. */
+   * safe-hold and does not advance its order. Full health for a critical wound,
+   * `recoverThreshold` (about one more hit absorbed) for a lesser one. 0 = no hold. */
   holdUntilHp: number
   /** cell currently being entered; occupancy reserves it until arrival */
   reserved: Vec2 | null

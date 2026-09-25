@@ -102,7 +102,7 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Order` | `{ kind, dest, target, targetCell, chessKill, reachable, resumeTarget, resumeTurn, queue, log }` | active step is one-shot `none` / `goto` / `attack`; `targetCell` is the target's last known cell (order-log notes); `chessKill` parks an **insta-kill** victim (immediate chess kill, human-only, active-order-only — see `src/game/instaKill.ts`), consumed on the next tick (kept on the order so it is part of the turn snapshot); `reachable` marks an attack target that is positionally attainable; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence (`resumeTarget`/`resumeTurn` are retained for save compatibility but unused — a move now replaces an attack); `log` is a bounded list of recent order transitions (`noteOrder`) so the panel can explain why an order was issued, replaced, completed or abandoned |
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping. `underFireUntil` is a raw ~3 s latch (the AI keeps treating the recent attacker as a threat); **reporting** goes through `underFireAttacker` (`src/game/underFire.ts`), which also requires the attacker to still cover the square |
 | `Weapon` | `{ left }` | seconds until next shot |
-| `Motion` | `{ goal, intent, holdUntilHp, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn, ease?, freeAdvance? }` | grid movement + render interpolation; `intent` is the goal's source (`order`/`preserve`/`defense`/`engage`/`rally`); `holdUntilHp` is a latched safe-hold until that HP; `reserved` is the cell being entered; `ease`/`freeAdvance` mark a capture-advance glide (eased, no post-arrival cooldown) |
+| `Motion` | `{ goal, intent, holdUntilHp, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn, ease?, freeAdvance? }` | grid movement + render interpolation; `intent` is the goal's source (`order`/`preserve`/`defense`/`engage`/`rally`); `holdUntilHp` is a latched safe-hold until that HP (full health for a critical wound, the recovery threshold otherwise); `reserved` is the cell being entered; `ease`/`freeAdvance` mark a capture-advance glide (eased, no post-arrival cooldown) |
 | `Projectile` | `{ team, damage, ttl, trajectory, splash, radius, size, shape, spin, color, target, owner, waypoints, waypointIndex }` | |
 | `Fx` | `{ ttl, maxTtl, radius, color, capture? }` | render-only impact/explosion; `capture` selects the small red triple pulse used for chess kills |
 | `Dead` | `true` | marker processed by the death system |
@@ -408,9 +408,16 @@ cell/reservation during movement validation and path planning.
   the nearest reachable aura square (`nearestHealingCell`) rather than taking one
   local cover step and then resuming the fight — the one-step-then-resume cycle
   made a hurt piece yo-yo between cover and the same fire, healing only the sliver
-  that let it resume. Only a volley that would kill it this tick breaks the trip
-  for a local dodge. A **badly wounded** piece
-  (below `CRITICAL_WOUND = 0.2`) latches a safe-hold (`Motion.holdUntilHp = max`)
+  that let it resume. It then **latches a recovery hold** at
+  `recoverThreshold(kind) = min(0.8, preserveThreshold + 0.2)` — queen/king 0.70,
+  rook 0.65, bishop/knight 0.60, roughly one more hit absorbed — so it leaves only
+  after actually healing, not the moment it crosses the retreat trigger. The latch
+  is set only when healing is possible (in the aura, or an aura square reachable);
+  a piece with no aura to reach never latches and can never park waiting for a heal
+  that cannot come. Only a volley that would kill it this tick breaks the trip
+  for a local dodge. A **critically wounded** piece
+  (below `CRITICAL_WOUND = 0.2`) latches to full health instead
+  (`Motion.holdUntilHp = max`)
   and will not advance its order until it is **fully healed** — a new player order
   clears the hold. Because healing only happens inside the aura, the hold is
   **healing-aware**: a latched piece outside its king's aura walks to the nearest

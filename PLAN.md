@@ -226,8 +226,11 @@ still under fire it steps off the firing line on its own — even with an
 explicit **standing attack order**, which it interrupts and resumes after
 healing. A hurt piece outside its king's healing aura walks home to the nearest
 aura square rather than taking one local cover step and resuming (that one-step
-cycle made it yo-yo between cover and the same fire); only a volley that would
-kill it this tick forces a local dodge first, and a badly wounded piece
+cycle made it yo-yo between cover and the same fire); it then holds in the aura
+until it has recovered to about one hit above its retreat threshold
+(`recoverThreshold`: queen/king 70%, rook 65%, bishop/knight 60%), so it does
+not walk back out the instant it crosses the trigger. Only a volley that would
+kill it this tick forces a local dodge first, and a critically wounded piece
 safe-holds until fully healed. It judges the escape
 against **every** shooter covering it (not just the last one), and a damaged
 piece already inside the aura holds there, firing when it can, rather than

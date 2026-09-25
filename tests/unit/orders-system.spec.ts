@@ -432,8 +432,10 @@ describe('orders system — automatic self-preservation', () => {
     fireOn(ctx, queen, rook)
 
     run(ctx)
-    // Danger present: it dodges instead of walking the route.
+    // Danger present: it dodges instead of walking the route. With no king aura
+    // anywhere it does not latch a recovery hold (it could never heal it off).
     expect(ctx.world.require(queen, Motion).intent).toBe('preserve')
+    expect(ctx.world.require(queen, Motion).holdUntilHp).toBe(0)
     expect(ctx.world.require(queen, Motion).goal).not.toEqual({ x: 7, y: 4 })
 
     // Danger gone (medium wound, no full-heal hold): it resumes the move.
@@ -607,10 +609,40 @@ describe('orders system — automatic self-preservation', () => {
 
     const motion = ctx.world.require(knight, Motion)
     // Every knight step is covered, so it does not stand in the fire: it heads
-    // for the king's aura to heal instead of holding with no goal.
+    // for the king's aura to heal, latching a recovery hold (60% of 95) so it
+    // does not walk straight back out the moment it crosses its retreat trigger.
     expect(motion.intent).toBe('preserve')
     expect(motion.goal).not.toBeNull()
     expect(Math.max(Math.abs(motion.goal!.x - 4), Math.abs(motion.goal!.y - 7))).toBeLessThanOrEqual(2)
+    expect(motion.holdUntilHp).toBeCloseTo(57, 6)
+  })
+
+  it('holds in the aura until recovered, then resumes the order', () => {
+    const ctx = auraContext()
+    const rook = createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 6 }) // e2, inside the aura
+    const hp = ctx.world.require(rook, Health)
+    hp.cur = 60 // 43%, wounded but above the critical latch
+    const order = ctx.world.require(rook, Order)
+    order.kind = 'goto'
+    order.dest = { x: 7, y: 7 } // h1, far outside the aura
+
+    run(ctx)
+    const motion = ctx.world.require(rook, Motion)
+    // Already in the aura: it holds and latches recovery at 65% of 140.
+    expect(motion.goal).toBeNull()
+    expect(motion.holdUntilHp).toBeCloseTo(91, 6)
+
+    // Above the retreat trigger but below the recovery latch: still holding.
+    hp.cur = 80
+    run(ctx)
+    expect(motion.holdUntilHp).toBeCloseTo(91, 6)
+    expect(motion.goal).toBeNull()
+
+    // Recovered to the latch: the hold releases and the move resumes.
+    hp.cur = 91
+    run(ctx)
+    expect(motion.holdUntilHp).toBe(0)
+    expect(motion.goal).toEqual({ x: 7, y: 7 })
   })
 
   it('sends a wounded piece home to heal instead of a one-step dodge', () => {

@@ -33,7 +33,7 @@ const FORMAT_LEGEND =
   'tgt=#id(cell) current target; ' +
   'fire=#id under retaliation; goal=<cell> path end; path=hop>hop (A* move hops); blk=route blocked; ' +
   'intent=<preserve|rally|defense|engage> why the goal was chosen (absent = explicit order or none); ' +
-  'hold=<hp> badly wounded: safe-hold latched until that HP is reached; ' +
+  'hold=<hp> wounded: holds in healing until this HP before resuming (full heal when critical); ' +
   'moving=mid-hop; res=<cell> reserved next cell; ' +
   'q=step>step queued steps after the active order (cell=goto, atk#id(cell)=attack); ' +
   'note="..." why the order/behaviour last changed (issued/replaced/completed/abandoned); ' +
@@ -66,7 +66,8 @@ Reading a position block:
   goal=<cell>            current motion goal (where the planned path ends)
   intent=<kind>          why the goal was chosen: preserve (self-preservation retreat),
                          rally / defense / engage; absent = explicit order or no goal
-  hold=<hp>              badly wounded: a latched safe-hold that persists until this HP
+  hold=<hp>              wounded: holds in healing until this HP before resuming (recovery is about
+                         one more hit absorbed; a critical wound heals to full)
   path=a>b>c             planned route waypoints; each is one move hop, not every traversed square
   blk / moving / res     route blocked and waiting / mid-hop / reserved destination cell
   w=<seconds>            weapon reload remaining
