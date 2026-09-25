@@ -53,6 +53,7 @@ import type { OrderKind, StanceMode, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { destReachable, findPath } from './pathfind'
 import { anchorFor, clearMotion, clearOrder, noteOrder, planStep } from './queue'
+import { instaKillOrderedNote } from './instaKill'
 import {
   buildBoard,
   buildWorldSnapshot,
@@ -143,6 +144,8 @@ export interface PieceInfo {
     destCoord: string | null
     target: PieceRef | null
     reachable: boolean
+    /** Pending insta-kill (immediate chess kill) victim, set only while parked. */
+    instaKill: PieceRef | null
     regrouping: boolean
     parked: PieceRef | null
     queue: Array<{ kind: OrderStep['kind']; label: string; source: 'manual'; reachable: boolean }>
@@ -158,6 +161,8 @@ export interface PieceInfo {
     blocked: boolean
     moving: boolean
     movedThisTurn: boolean
+    /** Latched safe-hold target HP (0 = no hold) — pending self-preservation. */
+    holdUntilHp: number
   }
 }
 
@@ -1885,7 +1890,9 @@ export class Game {
       // order still making progress (or merely blocked by friends) keeps its
       // queue as before.
       const settled = !activeEmpty && this.orderSettled(e)
-
+      // Whether this click started/replaced the active order. Only then can it
+      // park an insta-kill: a queued step must not kill before it actually runs.
+      let started = false
       if (activeEmpty || settled) {
         if (settled) {
           noteOrder(order, this.tick, 'replaced settled order')
@@ -1898,14 +1905,17 @@ export class Game {
         }
         if (attacking) this.startAttack(e, order, motion, occupant as Entity)
         else this.startGoto(e, order, motion, cell, occ, team)
+        started = true
       } else if (order.kind === 'attack' && order.queue.length === 0 && !attacking) {
         // A move on an attacking piece replaces the attack (no parked target).
         this.startGoto(e, order, motion, cell, occ, team)
+        started = true
       } else {
         this.appendStep(e, order, motion, cell, attacking ? (occupant as Entity) : null, team)
       }
-      // Chess kill: an order against a piece already in capture range kills it now.
-      if (enemyOccupied && occupant !== undefined) this.maybeChessKill(e, occupant, order, occ)
+      // Insta-kill: an active order against a piece already in capture range
+      // kills it on the next tick.
+      if (started && enemyOccupied && occupant !== undefined) this.maybeInstaKill(e, occupant, order, occ)
       const from = this.world.get(e, Cell)
       if (from) {
         this.onCommand?.({ t: 'order', from: { x: from.x, y: from.y }, to: { x: cell.x, y: cell.y }, command })
@@ -1925,15 +1935,20 @@ export class Game {
   }
 
   /**
-   * Chess kills: when an order is issued to attack a piece (or move onto its
-   * square) and that piece already sits inside the ordered piece's chess capture
-   * pattern, it dies immediately instead of being worn down by projectiles. The
-   * capture pattern is the weapon's firing geometry, which already mirrors chess
-   * captures (pawn diagonals only, knight leaps, sliders blocked by the first
-   * piece). Checked only when the order is issued; a target that walks into range
-   * afterwards is fought normally. No-op unless `chessKills` is enabled.
+   * Park an insta-kill (immediate chess kill) on the order. When a human orders
+   * an attack (or a move onto an enemy's square) while `chessKills` is on and
+   * the victim already sits inside the ordered piece's chess capture pattern,
+   * the victim is parked on `order.chessKill`. The `orders` system consumes it
+   * on the next tick as direct lethal damage: immediate, highest priority (it
+   * overrides self-preservation, so a badly wounded piece still presses — a
+   * suicide kill), human-only, and active-order-only (queued steps never park
+   * one). The capture pattern is the weapon's firing geometry, which already
+   * mirrors chess captures (pawn diagonals only, knight leaps, sliders blocked
+   * by the first piece). Checked only when the order is issued; a target that
+   * walks into range afterwards is fought normally. No-op unless `chessKills` is
+   * enabled.
    */
-  private maybeChessKill(e: Entity, victim: Entity, order: OrderData, occ: Occupancy): void {
+  private maybeInstaKill(e: Entity, victim: Entity, order: OrderData, occ: Occupancy): void {
     if (!this.chessKills) return
     const cell = this.world.get(e, Cell)
     const vcell = this.world.get(victim, Cell)
@@ -1947,7 +1962,7 @@ export class Game {
     // Parked on the order so the kill is part of the world state and replays
     // deterministically (a raw command queue would not survive a turn snapshot).
     order.chessKill = victim
-    noteOrder(order, this.tick, `chess kill → ${coordName(vcell.x, vcell.y, this.board.height)}`)
+    noteOrder(order, this.tick, instaKillOrderedNote(coordName(vcell.x, vcell.y, this.board.height)))
   }
 
   private startAttack(e: Entity, order: OrderData, motion: MotionData, target: Entity): void {
@@ -2752,6 +2767,7 @@ export class Game {
             : order?.kind === 'goto'
               ? gotoReachable(order.dest)
               : true,
+        instaKill: order?.chessKill != null ? this.pieceRef(order.chessKill) : null,
         regrouping: (order?.resumeTarget ?? null) !== null && (order?.resumeTurn ?? -1) >= 0,
         parked: order?.resumeTarget != null ? this.pieceRef(order.resumeTarget) : null,
         queue,
@@ -2765,6 +2781,7 @@ export class Game {
         blocked: motion?.blocked ?? false,
         moving: motion?.moving ?? false,
         movedThisTurn: motion?.movedThisTurn ?? false,
+        holdUntilHp: motion?.holdUntilHp ?? 0,
       },
     }
   }

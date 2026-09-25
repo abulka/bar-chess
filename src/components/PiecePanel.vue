@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { GameSnapshot } from '../game/game'
 import type { StanceMode } from '../game/types'
 import { INTENT_LABELS } from '../game/intent'
+import { INSTA_KILL_NAME } from '../game/instaKill'
 import { PRESERVE_COLOR, healthColor } from '../render/palette'
 
 const props = defineProps<{
@@ -32,15 +33,26 @@ const intentLabel = computed(() => INTENT_LABELS[intent.value] ?? intent.value)
 const isAuto = computed(() => intent.value !== 'none' && intent.value !== 'order')
 const orderIdle = computed(() => !info.value || info.value.order.kind === 'none')
 /**
- * A committed piece will pursue its target: an AI controller always does, and a
- * human piece does in Attack stance. A None/Move piece only fires at whatever is
- * already in range and never follows it — a stationary "pot shot".
+ * A committed piece will pursue its target: an AI controller always does, a
+ * human piece in Attack stance does, and so does any piece with an active
+ * attack order (a standing chase). A None/Move piece with only an auto-acquired
+ * target fires at whatever is already in range and never follows it — a
+ * stationary "pot shot".
  */
-const committed = computed(() =>
-  info.value ? !info.value.commandable || info.value.stance === 'attack' : true,
-)
+const committed = computed(() => {
+  const i = info.value
+  if (!i) return true
+  if (!i.commandable) return true
+  return i.stance === 'attack' || i.order.kind === 'attack'
+})
 const targetHeading = computed(() =>
   info.value?.target ? (committed.value ? 'engaging' : 'pot shot') : 'target',
+)
+/** Player-facing name for the parked insta-kill (immediate chess kill). */
+const instaKillName = INSTA_KILL_NAME
+/** A standing attack order that self-preservation is currently interrupting. */
+const preserveOverride = computed(
+  () => info.value?.order.kind === 'attack' && intent.value === 'preserve',
 )
 
 function pct(ratio: number): string {
@@ -129,6 +141,16 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
         <span v-if="info.order.kind !== 'none'" class="muted"> · manual</span>
         <span v-if="info.order.kind !== 'none' && !info.order.reachable" class="unreachable"> (unreachable)</span>
       </p>
+      <p
+        v-if="info.order.instaKill"
+        class="line insta-kill"
+        title="Immediate chess kill — pressed next tick regardless of wounds"
+      >
+        <b>insta-kill</b> · {{ instaKillName }} · target {{ info.order.instaKill.coord }}
+      </p>
+      <p v-if="preserveOverride" class="line warn">
+        self-preservation overriding the attack order — resumes when safe/healed
+      </p>
       <p v-if="isAuto && orderIdle" class="line">
         <b>auto</b> ·
         <span class="intent" :style="intent === 'preserve' ? { color: PRESERVE_COLOR } : undefined">
@@ -149,12 +171,15 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
       <div class="sub">movement</div>
       <p class="line">
         <span v-if="info.motion.goalCoord">goal {{ info.motion.goalCoord }} · </span>
-        <span v-else>{{ info.target && !committed ? 'holding position' : 'no goal' }} · </span>
+        <span v-else>{{ intent === 'preserve' || (info.target && !committed) ? 'holding position' : 'no goal' }} · </span>
         <span
           v-if="intentLabel"
           class="intent"
           :style="intent === 'preserve' ? { color: PRESERVE_COLOR } : undefined"
         >{{ intentLabel }} · </span>
+        <span v-if="info.motion.holdUntilHp > 0" class="hold">
+          safe-hold until {{ hp(info.motion.holdUntilHp) }} hp ·
+        </span>
         path {{ info.motion.pathLength }}
         <span v-if="info.motion.blocked"> · blocked</span>
         <span v-if="info.motion.moving"> · moving</span>
@@ -257,6 +282,15 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
 }
 
 .line.warn {
+  color: #ff9f43;
+}
+
+/* Insta-kill (immediate chess kill): red like the ordered-target reticle. */
+.line.insta-kill {
+  color: #ff5a46;
+}
+
+.line .hold {
   color: #ff9f43;
 }
 

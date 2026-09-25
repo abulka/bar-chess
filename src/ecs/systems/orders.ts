@@ -9,6 +9,7 @@ import { PIECES, WEAPONS } from '../../game/pieces'
 import type { PieceDef } from '../../game/pieces'
 import { destReachable as canReach } from '../../game/pathfind'
 import { noteOrder, clearMotion, clearOrder, promoteNext, rechainQueue } from '../../game/queue'
+import { hasInstaKill, instaKillLandedNote } from '../../game/instaKill'
 import { Cell, Health, Motion, Order, PieceType, Stance, Target, Team, hasLiveCell } from '../components'
 import type { MotionIntent, OrderData } from '../components'
 import type { Entity } from '../world'
@@ -128,13 +129,21 @@ const system: System = {
       const team = ctx.world.require(e, Team)
       const target = ctx.world.require(e, Target)
 
-      // 0a. Consume an order-time chess kill: it was decided when the order was
-      // issued and lands here on the next tick. The command queue is not part of
-      // the turn snapshot, but the pending victim (on the order) is.
+      // 0a. Consume an insta-kill (immediate chess kill): it was decided when the
+      // order was issued and lands here on the next tick. It is the highest
+      // priority order in the game — it overrides self-preservation below, so a
+      // suicide kill is allowed — so capture that fact before the victim is
+      // cleared. The command queue is not part of the turn snapshot, but the
+      // pending victim (on the order) is.
+      const instaKill = hasInstaKill(order)
       if (order.chessKill !== null) {
         const victim = order.chessKill
         order.chessKill = null
         if (ctx.world.isAlive(victim)) {
+          const vcell = ctx.world.get(victim, Cell)
+          if (vcell) {
+            noteOrder(order, ctx.tick, instaKillLandedNote(coordName(vcell.x, vcell.y, ctx.board.height)))
+          }
           const hp = ctx.world.get(victim, Health)
           ctx.cmds.damage.push({
             target: victim,
@@ -148,11 +157,13 @@ const system: System = {
       }
 
       // 0. Self-preservation: a hurt or outgunned piece retreats on its own, even
-      // while it is moving. A badly wounded piece (below CRITICAL_WOUND) latches a
-      // safe-hold and stays put until fully healed; a medium wound only retreats
-      // while the danger is present, then resumes its order. A new order clears
-      // the hold. An explicit attack (kill) order takes priority: the piece presses
-      // the attack instead of retreating, however exposed it is.
+      // while it is moving or pursuing a standing attack order. A badly wounded
+      // piece (below CRITICAL_WOUND) latches a safe-hold and stays put until fully
+      // healed; a medium wound only retreats while the danger is present, then
+      // resumes its order. A new order clears the hold. The one exception is an
+      // insta-kill (immediate chess kill): it is pressed regardless of wounds —
+      // a suicide kill is allowed — and it still lands because 0a queued the
+      // lethal damage before this pass.
       const hp = ctx.world.get(e, Health)
       const hpRatio = healthRatio(hp, 1)
       const attacker = target.lastAttacker
@@ -172,10 +183,9 @@ const system: System = {
       // Whether this piece was preserving last tick, so the retreat is logged as
       // one episode (start / end) rather than on every goal re-evaluation.
       const wasPreserve = motion.intent === 'preserve'
-      const killOrder = order.kind === 'attack'
       if (
         ctx.autoPreserve &&
-        !killOrder &&
+        !instaKill &&
         kind &&
         !(ctx.teams[team].controller === 'ai' && kind === 'king') &&
         (valuable || underFire || hpRatio < preserve || holding)

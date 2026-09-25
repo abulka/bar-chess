@@ -16,6 +16,7 @@ import { TERRAIN_DEFS } from './board'
 import { coordName } from './coords'
 import { byTeamThenCell, renderAsciiGrid, TERRAIN_CHAR } from './grid'
 import { buildOccupancy } from './occupancy'
+import { hasInstaKill } from './instaKill'
 import { underFireAttacker } from './underFire'
 import type { Game } from './game'
 import type { Entity } from '../ecs/world'
@@ -27,7 +28,9 @@ const MAX_TERRAIN = 256
 
 const FORMAT_LEGEND =
   '# fmt: r|b + piece(PNBRQK) + cell; hp=cur/max; @M=move @A=attack stance; goto=<cell>; ' +
-  'atk=#id(cell)[!]=attack order (! positionally unreachable); tgt=#id(cell) current target; ' +
+  'atk=#id(cell)[!]=attack order (! positionally unreachable); ' +
+  'kill=#id(cell)=parked insta-kill (immediate chess kill, lands next tick, outranks self-preservation); ' +
+  'tgt=#id(cell) current target; ' +
   'fire=#id under retaliation; goal=<cell> path end; path=hop>hop (A* move hops); blk=route blocked; ' +
   'intent=<preserve|rally|defense|engage> why the goal was chosen (absent = explicit order or none); ' +
   'hold=<hp> badly wounded: safe-hold latched until that HP is reached; ' +
@@ -55,6 +58,8 @@ Reading a position block:
   @M | @A                stance: M=move (return fire only), A=attack (auto-engage nearby)
   goto=<cell>            standing move order
   atk=#id(cell)          standing attack order ('!' = target positionally unreachable, e.g. wrong colour)
+  kill=#id(cell)         parked insta-kill (immediate chess kill, human-only): lands next tick and
+                         is pressed even if wounded (suicide allowed); active order only, never queued
   q=a>b>atk#id(cell)     queued steps after the active order (cell=goto, atk#id=attack), run in sequence
   note="..."             why the order/behaviour last changed (issued/replaced/completed/abandoned)
   tgt=#id(cell)          current auto-acquired or retaliated target
@@ -144,6 +149,9 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
       flags.push(`goto=${order.dest ? cellName(height, order.dest) : '?'}`)
     } else if (order.kind === 'attack' && order.target !== null) {
       flags.push(`atk=${refName(game, height, order.target)}${order.reachable ? '' : '!'}`)
+    }
+    if (hasInstaKill(order)) {
+      flags.push(`kill=${refName(game, height, order.chessKill)}`)
     }
     if (order.queue.length > 0) {
       const steps = order.queue

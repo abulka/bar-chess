@@ -3,6 +3,7 @@ import { Cell, Health, Order, Projectile, Target, Weapon } from '../../src/ecs/c
 import type { SimContext } from '../../src/ecs/types'
 import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
+import { hasInstaKill } from '../../src/game/instaKill'
 import { PIECES } from '../../src/game/pieces'
 import combat from '../../src/ecs/systems/combat'
 import damage from '../../src/ecs/systems/damage'
@@ -30,8 +31,8 @@ describe('traditional chess kills', () => {
 
     // The pending kill lives on the order (world state), not the command queue.
     expect(game.world.require(queen, Order).chessKill).toBe(pawn)
-    // Order history names the square, never the entity id.
-    expect(game.world.require(queen, Order).log.map((n) => n.text)).toContain('chess kill → e3')
+    // Order history names the square and the immediate (insta-kill) nature.
+    expect(game.world.require(queen, Order).log.map((n) => n.text)).toContain('immediate chess kill → e3')
 
     game.runTicks(1)
     expect(game.world.has(pawn, Cell)).toBe(false)
@@ -39,8 +40,42 @@ describe('traditional chess kills', () => {
 
     game.runTicks(1)
     const notes = game.world.require(queen, Order).log.map((n) => n.text)
+    expect(notes).toContain('immediate chess kill lands → e3')
     expect(notes).toContain('target at e3 lost — attack abandoned')
     expect(notes.every((t) => !/#\d+/.test(t))).toBe(true)
+  })
+
+  it('reifies the insta-kill concept via hasInstaKill', () => {
+    const { game, shim } = emptyGame()
+    const queen = createPiece(shim, 'blue', PIECES.queen, { x: 4, y: 4 })
+    createPiece(shim, 'red', PIECES.pawn, { x: 4, y: 5 })
+    const order = game.world.require(queen, Order)
+    expect(hasInstaKill(order)).toBe(false)
+
+    game.chessKills = true
+    game.selected = [queen]
+    game.orderAt({ x: 4, y: 5 })
+    expect(hasInstaKill(order)).toBe(true)
+
+    // Consumed on the next tick: it is a one-shot, immediate concept.
+    game.runTicks(1)
+    expect(hasInstaKill(order)).toBe(false)
+  })
+
+  it('does not park an insta-kill for a queued attack behind an active order', () => {
+    const { game, shim } = emptyGame()
+    const queen = createPiece(shim, 'blue', PIECES.queen, { x: 4, y: 4 })
+    createPiece(shim, 'red', PIECES.pawn, { x: 4, y: 5 })
+    game.chessKills = true
+    game.selected = [queen]
+
+    // The move starts the active order, so the attack click is only queued.
+    game.orderAt({ x: 0, y: 4 }, 'move')
+    game.orderAt({ x: 4, y: 5 })
+
+    const order = game.world.require(queen, Order)
+    expect(order.chessKill).toBeNull()
+    expect(order.queue).toHaveLength(1)
   })
 
   it('replays an order-time chess kill from the turn snapshot', () => {

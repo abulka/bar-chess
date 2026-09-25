@@ -55,6 +55,16 @@ describe('closestEmptyCell', () => {
     expect(cell).not.toBeNull()
     expect(cell).not.toEqual({ x: 4, y: 0 })
   })
+
+  it('holds on the current square when it already ties for closest', () => {
+    const board = flatBoard()
+    // The reported g6↔h7 shuttle: a bishop chasing an opposite-colour target on
+    // h6 has two equidistant nearest squares. From either one it must hold, not
+    // hop to the tied twin.
+    const occ = occupiedCells([])
+    expect(closestEmptyCell(board, { x: 6, y: 2 }, { x: 7, y: 2 }, bishopMove, 'blue', occ)).toEqual({ x: 6, y: 2 })
+    expect(closestEmptyCell(board, { x: 7, y: 1 }, { x: 7, y: 2 }, bishopMove, 'blue', occ)).toEqual({ x: 7, y: 1 })
+  })
 })
 
 describe('inFiringGeometry', () => {
@@ -96,5 +106,15 @@ describe('attackPlan', () => {
     expect(plan.inRange).toBe(false)
     expect(plan.cell).not.toEqual({ x: 1, y: 0 })
     expect(plan.cell).not.toBeNull()
+  })
+
+  it('parks on the spot when an unreachable target is already as close as possible', () => {
+    const board = flatBoard()
+    // Bishop on g6, target on the opposite-colour h6: g6 is already a nearest
+    // square, so the goal is the piece's own cell (hold) rather than h7.
+    const plan = attackPlan(board, { x: 6, y: 2 }, { x: 7, y: 2 }, bishopMove, bishopWeapon, 'blue', occupiedCells([]))
+    expect(plan.reachable).toBe(false)
+    expect(plan.inRange).toBe(false)
+    expect(plan.cell).toEqual({ x: 6, y: 2 })
   })
 })

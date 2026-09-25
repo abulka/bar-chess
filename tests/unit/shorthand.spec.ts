@@ -68,6 +68,15 @@ describe('position shorthand', () => {
     expect(game.shorthand()).toMatch(/note="self-preservation: retreating → c5"/)
   })
 
+  it('flags a parked insta-kill with kill=', () => {
+    const { game, attacker } = duelSetup()
+    game.chessKills = true
+    game.selected = [attacker]
+    game.orderAt({ x: 4, y: 5 })
+    expect(game.shorthand()).toMatch(/kill=#\d+\(e3\)/)
+    expect(game.shorthand()).toMatch(/note="immediate chess kill → e3"/)
+  })
+
   it('prefixes the preamble for the LLM variant', () => {
     const game = new Game(8)
     const text = game.llmShorthand()

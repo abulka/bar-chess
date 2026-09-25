@@ -382,7 +382,7 @@ describe('orders system — automatic self-preservation', () => {
     expect(goal!.x).not.toBe(goal!.y)
   })
 
-  it('does not let self-preservation override an explicit attack order', () => {
+  it('overrides a standing attack order when badly hurt', () => {
     const ctx = hurtContext(true)
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
     const knight = createPiece(ctx, 'red', PIECES.knight, { x: 5, y: 6 })
@@ -394,14 +394,14 @@ describe('orders system — automatic self-preservation', () => {
 
     run(ctx)
 
-    // It pursues the ordered kill instead of retreating from the attacker.
-    const motion = ctx.world.require(queen, Motion)
-    expect(motion.intent).toBe('order')
-    expect(motion.goal).not.toBeNull()
-    expect(motion.holdUntilHp).toBe(0)
+    const goal = ctx.world.require(queen, Motion).goal
+    expect(goal).not.toBeNull()
+    // It retreats from the attacker rather than charging it.
+    const before = Math.hypot(4 - 5, 4 - 6)
+    expect(Math.hypot(goal!.x - 5, goal!.y - 6)).toBeGreaterThan(before)
   })
 
-  it('keeps attacking when focused by several shooters (c6 knight)', () => {
+  it('disengages an attack order when focused by several shooters (c6 knight)', () => {
     const ctx = makeContext()
     const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 2, y: 2 }) // c6
     const queen = createPiece(ctx, 'red', PIECES.queen, { x: 3, y: 0 }) // d8
@@ -415,9 +415,10 @@ describe('orders system — automatic self-preservation', () => {
 
     run(ctx)
 
-    // Three shooters cover c6, but the kill order wins: no retreat.
+    // Three shooters cover c6, so it breaks off instead of charging the queen.
     const motion = ctx.world.require(knight, Motion)
-    expect(motion.intent).not.toBe('preserve')
+    expect(motion.intent).toBe('preserve')
+    expect(motion.goal).not.toBeNull()
   })
 
   it('retreats a moving piece while in danger, then resumes the move when safe', () => {
@@ -468,7 +469,7 @@ describe('orders system — automatic self-preservation', () => {
     expect(ctx.world.require(queen, Motion).goal).toEqual({ x: 7, y: 4 })
   })
 
-  it('keeps a badly wounded attacker pressing the attack instead of holding', () => {
+  it('holds a badly wounded attacker until fully healed, then resumes the attack', () => {
     const ctx = hurtContext(true)
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
     // Target out of the queen's lines so it cannot itself keep her in danger.
@@ -482,14 +483,41 @@ describe('orders system — automatic self-preservation', () => {
     fireOn(ctx, queen, rook)
 
     run(ctx)
-    const motion = ctx.world.require(queen, Motion)
-    expect(motion.intent).toBe('order')
-    expect(motion.holdUntilHp).toBe(0)
+    expect(ctx.world.require(queen, Motion).intent).toBe('preserve')
 
-    // Danger clears: still no safe-hold while the kill order stands.
+    // Still wounded after the danger clears: the attack does not auto-resume.
     ctx.world.destroy(rook)
     run(ctx)
-    expect(ctx.world.require(queen, Motion).intent).toBe('order')
+    expect(ctx.world.require(queen, Motion).goal).toBeNull()
+
+    // Fully healed: it resumes pursuing the ordered target.
+    hp.cur = hp.max
+    run(ctx)
+    expect(ctx.world.require(queen, Motion).goal).not.toBeNull()
+  })
+
+  it('presses an insta-kill even when badly wounded (suicide kill allowed)', () => {
+    const ctx = hurtContext(true)
+    const bishop = createPiece(ctx, 'blue', PIECES.bishop, { x: 4, y: 4 })
+    const pawn = createPiece(ctx, 'red', PIECES.pawn, { x: 5, y: 5 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
+    const hp = ctx.world.require(bishop, Health)
+    hp.cur = Math.floor(hp.max * 0.1) // below CRITICAL_WOUND
+    const order = ctx.world.require(bishop, Order)
+    order.kind = 'attack'
+    order.target = pawn
+    order.chessKill = pawn
+    fireOn(ctx, bishop, rook)
+
+    run(ctx)
+
+    // The insta-kill outranks self-preservation: no retreat, no safe-hold, and
+    // the lethal damage is queued in the same pass.
+    const motion = ctx.world.require(bishop, Motion)
+    expect(motion.intent).not.toBe('preserve')
+    expect(motion.holdUntilHp).toBe(0)
+    expect(order.chessKill).toBeNull()
+    expect(ctx.cmds.damage.some((d) => d.target === pawn && d.lethal)).toBe(true)
   })
 
   /** A context with a blue king on e1 so a healing goal can be computed. */

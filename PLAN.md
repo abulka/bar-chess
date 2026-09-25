@@ -223,8 +223,10 @@ autonomously.
 
 **Self-preservation** runs for every piece, human or AI: once it is badly hurt
 and still under fire it steps off the firing line on its own — even with an
-explicit order, which resumes when it is safe. It judges the escape against
-**every** shooter covering it (not just the last one); if nothing covers it while
+explicit **standing attack order**, which it interrupts and resumes when it is
+safe (a badly wounded piece safe-holds until fully healed). It judges the escape
+against **every** shooter covering it (not just the last one); if nothing covers
+it while
 it is hurt, it seeks cover from any nearby enemy and holds, firing when it can,
 rather than chasing or blindly fleeing its target. Valuable pieces
 (queen/rook/bishop/knight) watch for crossfire every moment and back off before
@@ -235,13 +237,23 @@ never retreat: they can only step forward, so a "flee" would walk them into the
 enemy and drop the shot, so they hold and fire instead. A persisted
 **auto-preserve** checkbox in the toolbar turns the behaviour off.
 
+**Insta-kill.** The one thing that outranks self-preservation is an **immediate
+chess kill** (`chess kills` rule on, human-only, victim already in the ordered
+piece's capture pattern). It is parked at order-issue time and lands on the next
+tick as direct lethal damage, so a badly wounded piece still presses — a suicide
+kill is allowed. Only an order that starts/replaces the active order can park
+one (a queued attack step never does). A standing attack order is the opposite:
+chasing over several moves and yielding to safety. See `src/game/instaKill.ts`.
+
 **Attack leash.** Autonomous Attack only acquires targets within `ATTACK_LEASH`
 (8 squares) instead of a slider's board-wide vision, so pieces fight locally
 rather than wandering across the map to an out-of-range enemy. An attack order on
 a **positionally impossible** target (e.g. a bishop ordered onto the opposite
 colour square) is still approached best-effort: the route ends on the closest
 reachable square and the overlay draws it followed by the dashed "unreachable"
-firing line, both recomputed each move. Only automatically acquired targets are
+firing line, both recomputed each move. Once it stands on a closest square it
+holds there rather than hopping between two equidistant cells. Only automatically
+acquired targets are
 leashed — an explicit order is followed.
 
 **Capture advance.** A persisted **capture advance** checkbox in the toolbar

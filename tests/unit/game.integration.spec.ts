@@ -77,7 +77,7 @@ describe('Game integration', () => {
     expect(game.replaying).toBe(false)
   })
 
-  it('keeps a badly hurt piece on its attack order instead of disengaging', () => {
+  it('lets a badly hurt piece disengage from its standing attack order', () => {
     const game = new Game(8)
     for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
     const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
@@ -94,9 +94,36 @@ describe('Game integration', () => {
 
     game.runTicks(1)
 
-    // An explicit kill order takes priority over self-preservation.
-    expect(game.world.require(knight, Motion).intent).not.toBe('preserve')
+    // A standing attack order yields to self-preservation.
+    expect(game.world.require(knight, Motion).intent).toBe('preserve')
     expect(game.world.isAlive(knight)).toBe(true)
+  })
+
+  it('retreats a wounded bishop from an impossible attack instead of shuttling (g6 reporter)', () => {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    const bishop = createPiece(shim, 'blue', PIECES.bishop, { x: 6, y: 2 }) // g6
+    const rook = createPiece(shim, 'red', PIECES.rook, { x: 7, y: 2 }) // h6, opposite colour
+    const shooter = createPiece(shim, 'red', PIECES.rook, { x: 6, y: 0 }) // g8, covers g6
+    createPiece(shim, 'blue', PIECES.king, { x: 4, y: 7 }) // e1, healing aura
+    game.world.require(bishop, Health).cur = 14
+    const target = game.world.require(bishop, Target)
+    target.lastAttacker = shooter
+    target.underFireUntil = game.tick + 90
+    const order = game.world.require(bishop, Order)
+    order.kind = 'attack'
+    order.target = rook
+    order.reachable = false
+
+    game.runTicks(1)
+
+    // The standing attack (impossibly chasing h6) yields to self-preservation:
+    // no g6→h7 hop, and a critical wound latches a safe-hold until fully healed.
+    const motion = game.world.require(bishop, Motion)
+    expect(motion.intent).toBe('preserve')
+    expect(motion.holdUntilHp).toBe(75)
+    expect(motion.goal).not.toEqual({ x: 7, y: 1 })
   })
 
   it('clears the reported under-fire once the piece leaves the attacker line', () => {
@@ -405,8 +432,28 @@ describe('Game integration', () => {
     expect(info!.motion.intent).toBe('order')
     expect(info!.order.queue).toHaveLength(1)
     expect(info!.order.queue[0].source).toBe('manual')
+    expect(info!.order.instaKill).toBeNull()
+    expect(info!.motion.holdUntilHp).toBe(0)
     expect(info!.health.max).toBeGreaterThan(0)
     expect(game.snapshot().selectionCount).toBe(1)
+  })
+
+  it('shows a pending insta-kill and a latched safe-hold in piece info', () => {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    const queen = createPiece(shim, 'blue', PIECES.queen, { x: 4, y: 4 })
+    const pawn = createPiece(shim, 'red', PIECES.pawn, { x: 4, y: 5 })
+    game.chessKills = true
+    game.selected = [queen]
+    game.orderAt({ x: 4, y: 5 })
+
+    const pending = game.snapshot().pieceInfo
+    expect(pending!.order.instaKill?.entity).toBe(pawn)
+    expect(pending!.order.instaKill?.coord).toBe('e3')
+
+    game.world.require(queen, Motion).holdUntilHp = PIECES.queen.hp
+    expect(game.snapshot().pieceInfo!.motion.holdUntilHp).toBe(PIECES.queen.hp)
   })
 
   it('tracks a pending BAR-style command', () => {

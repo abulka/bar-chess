@@ -99,7 +99,7 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Render` | `{ glyph, tint, size }` | unicode glyph + team tint |
 | `Health` | `{ cur, max }` | |
 | `Stance` | `{ mode }` | persistent policy: `none` / `move` / `attack` (`none` stands ground and fires in range, with no badge) |
-| `Order` | `{ kind, dest, target, targetCell, chessKill, reachable, resumeTarget, resumeTurn, queue, log }` | active step is one-shot `none` / `goto` / `attack`; `targetCell` is the target's last known cell (order-log notes); `chessKill` is a victim selected by the order-time chess-kill rule, consumed on the next tick (kept on the order so it is part of the turn snapshot); `reachable` marks an attack target that is positionally attainable; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence (`resumeTarget`/`resumeTurn` are retained for save compatibility but unused — a move now replaces an attack); `log` is a bounded list of recent order transitions (`noteOrder`) so the panel can explain why an order was issued, replaced, completed or abandoned |
+| `Order` | `{ kind, dest, target, targetCell, chessKill, reachable, resumeTarget, resumeTurn, queue, log }` | active step is one-shot `none` / `goto` / `attack`; `targetCell` is the target's last known cell (order-log notes); `chessKill` parks an **insta-kill** victim (immediate chess kill, human-only, active-order-only — see `src/game/instaKill.ts`), consumed on the next tick (kept on the order so it is part of the turn snapshot); `reachable` marks an attack target that is positionally attainable; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence (`resumeTarget`/`resumeTurn` are retained for save compatibility but unused — a move now replaces an attack); `log` is a bounded list of recent order transitions (`noteOrder`) so the panel can explain why an order was issued, replaced, completed or abandoned |
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping. `underFireUntil` is a raw ~3 s latch (the AI keeps treating the recent attacker as a threat); **reporting** goes through `underFireAttacker` (`src/game/underFire.ts`), which also requires the attacker to still cover the square |
 | `Weapon` | `{ left }` | seconds until next shot |
 | `Motion` | `{ goal, intent, holdUntilHp, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn, ease?, freeAdvance? }` | grid movement + render interpolation; `intent` is the goal's source (`order`/`preserve`/`defense`/`engage`/`rally`); `holdUntilHp` is a latched safe-hold until that HP; `reserved` is the cell being entered; `ease`/`freeAdvance` mark a capture-advance glide (eased, no post-arrival cooldown) |
@@ -340,7 +340,9 @@ cell/reservation during movement validation and path planning.
   ends on the closest reachable empty square, and the overlay draws that route
   followed by a dashed "unreachable" firing line, both recomputed each tick as the
   piece and target move (the `reachable` flag only classifies the firing line; it
-  no longer freezes the piece);
+  no longer freezes the piece). `closestEmptyCell` breaks distance ties toward the
+  piece's current square, so once it stands on a closest square it holds there
+  instead of shuttling between two equidistant cells (the bishop g6↔h7 case);
   a `goto` order advances toward the objective (best effort); autonomous `attack`
   pursues in a leash, and rallies only for AI teams; a low-HP piece retreats via
   `preservation.ts` (escape the shooters that actually cover it, else seek nearby
@@ -391,13 +393,17 @@ cell/reservation during movement validation and path planning.
   them into the enemy and give up the shot, so they hold and fire instead. Valuable
   pieces run this scan every tick so they can bail before taking damage; cheap
   pieces only scan once hurt or actually under fire, and `coverageThreats` skips
-  any enemy beyond its weapon's reach, keeping the cost bounded. It runs for
-  **every piece** — idle, moving, or pursuing an attack order. It repositions only
-  for **real, current danger** — an enemy covering the piece's square now
-  (`shooters > 0`) or a recent attacker still under fire — so a piece with only
-  distant, non-shooting enemies nearby holds instead of drifting. An explicit
-  **attack (kill) order takes priority**: the piece presses the kill and never
-  self-preserves, while a move order still yields to safety. A
+  any enemy beyond its weapon's reach, keeping the cost bounded.   It runs for
+  **every piece** — idle, moving, or pursuing a **standing** attack order. It
+  repositions only for **real, current danger** — an enemy covering the piece's
+  square now (`shooters > 0`) or a recent attacker still under fire — so a piece
+  with only distant, non-shooting enemies nearby holds instead of drifting. A
+  standing **attack order is not sacred**: a hurt attacker disengages rather than
+  charging in, and resumes the attack once safe (or at full health after a
+  safe-hold). The one exception is the **insta-kill** (immediate chess kill —
+  `src/game/instaKill.ts`): `hasInstaKill` suppresses preserve for its single
+  lethal tick, so a badly wounded piece still presses and a suicide kill is
+  allowed. A
   **medium wound** retreats only while the danger is present and then resumes the
   interrupted order (move continues, attack resumes). A **badly wounded** piece
   (below `CRITICAL_WOUND = 0.2`) latches a safe-hold (`Motion.holdUntilHp = max`)
@@ -426,7 +432,7 @@ cell/reservation during movement validation and path planning.
   necessary dodge, so it otherwise goes exactly where it is ordered and holds.
   Every goal records a `Motion.intent` (`order` / `preserve` /
   `defense` / `engage` / `rally`), so the renderer can colour a self-preservation
-  retreat bright yellow and the properties panel can label each goal's source;
+  retreat bright cyan and the properties panel can label each goal's source;
   the shorthand export carries it as `intent=<kind>` (and `hold=<hp>` while a
   safe-hold is latched).
   A self-preservation retreat is also written to the piece's `Order.log` as one
@@ -637,7 +643,7 @@ terrainVersion editorMode editorBrush editorDirty canEdit mapName`.
 | --------- | -------------- |
 | `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay/fork, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, reset, `New game`, `New from template…`, editor toggle |
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle; routes map-editor clicks/drags (stamp, continuous erase) and exposes `cellAtClient`/`overBoard` for palette drops |
-| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed, `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. The **order / auto changes** list shows the piece's last few transitions with their tick, so it is clear *why* an order was issued/replaced/completed/abandoned (e.g. `target at e7 lost — attack abandoned`) and includes autonomous self-preservation retreats |
+| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed — AI, Attack stance or an active attack order — `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. It tells the situation as history / now / pending: the **order / auto changes** list shows the piece's last few transitions with their tick (e.g. `immediate chess kill → e3`, `immediate chess kill lands → e3`, `target at e3 lost — attack abandoned`, `self-preservation: retreating → …`); a parked insta-kill, a latched `safe-hold until <hp> hp` and a "self-preservation overriding the attack order" banner show the pending state; the queue shows what runs next |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane, drag drops the piece on a chosen cell (or arms an editor brush in editor mode) |
 | `TurnList.vue` | left-rail **turns** tab: newest-first history rows (jump on click, replay per row), inline Fork on the active row, two-step inline confirmation before discarding future turns (warns when `ordersTouched` is false that the same outcome would repeat), backtrack warning and trimmed-history hint in a sticky footer below the list (so rows never shift and the hint stays visible while the list scrolls), per-row piece/order/time info |
 | `EditorPanel.vue` | floating map-editor controls: map name, save, eraser, blank-board size, `Maps…`, cancel/done |
@@ -663,12 +669,13 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
 - **Path** — dashed gold route; **destination** a hollow diamond (orange and
   dashed when blocked). The diamond shape keeps the destination distinct from the
   target reticle (circle + cross). A **self-preservation** retreat
-  (`Motion.intent === 'preserve'`) draws the route in bright yellow
-  (`PRESERVE_COLOR`) so an automatic dodge is never mistaken for an order. When it
+  (`Motion.intent === 'preserve'`) draws the route in bright cyan
+  (`PRESERVE_COLOR`) so an automatic dodge is never mistaken for the gold/orange
+  order route. When it
   overrides an ordered attack the ordered-attack branch returns early, so only the
-  yellow dashed retreat route is drawn (no destination diamond); a standalone
-  preserve goal still draws the yellow diamond. The right-rail legend shows the
-  yellow dashed line only, matching the common override case.
+  cyan dashed retreat route is drawn (no destination diamond); a standalone
+  preserve goal still draws the cyan diamond. The right-rail legend shows the
+  cyan dashed line only, matching the common override case.
 - **Target** — an ordered attack (`order.kind === 'attack'`) draws a red firing
   line + reticle and rings the victim red. An auto-acquired target is drawn two
   ways: a **committed** piece (AI controller, or Attack stance) will pursue it, so
@@ -681,9 +688,12 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   ordered attack), in which case it is previewed from the end of the planned path;
   a self-preservation override (`intent === 'preserve'`) therefore never draws the
   line from a retreat square. The piece panel mirrors this: its target heading
-  reads `engaging` for a committed piece and `pot shot` otherwise, with an
+  reads `engaging` for a committed piece — AI, Attack stance, **or an active
+  attack order** — and `pot shot` otherwise, with an
   "in range only — …" note that adds "holding position" when the piece has no
-  goal.
+  goal. It also surfaces the pending state directly: a parked insta-kill line, a
+  latched `safe-hold until <hp> hp`, and a "self-preservation overriding the
+  attack order" banner while a standing attack is interrupted.
 - **Healing** (`show healing`, off by default) — a pulsing green aura around each
   living king, a dashed ring at the two-square boundary, and wavy tendrils to the
   damaged same-team pieces inside it. This toggle is display-only: the
@@ -723,18 +733,29 @@ Ordering is BAR-style and **context-sensitive** — there is no global order mod
   The prefix is consumed by the click unless **Shift** is held (kept armed to
   queue several); a plain left-click selects and clears it. `a` on an empty or
   friendly square is a no-op (a warning is emitted).
-- **Chess kills** (persisted toolbar toggle, default off): when an order is issued
-  against an enemy that already sits inside the ordered piece's chess capture
-  pattern — its weapon's `fireCells`, which mirror chess (pawn diagonals only,
-  knight leaps, sliders blocked by the first piece) — `orderAt` parks the victim
-  on `Order.chessKill`. The `orders` system consumes it on the next tick and
-  queues a `lethal` damage command, killing the target at once instead of wearing
-  it down with projectiles. Keeping the pending victim on the order (rather than
-  in the command queue) makes it part of the turn snapshot, so undo/redo and
-  **replay** reproduce the kill and its red pulse exactly. Applies to an explicit
-  attack or a move onto the enemy's square; checked only at **order-issue** time
-  (a target that walks into range later is fought normally), and only for
-  explicitly ordered pieces (AI autonomous stance is unaffected).
+- **Insta-kills** (immediate chess kills; persisted toolbar toggle `chessKills`,
+  default off): when a human orders an attack against an enemy that already sits
+  inside the ordered piece's chess capture pattern — its weapon's `fireCells`,
+  which mirror chess (pawn diagonals only, knight leaps, sliders blocked by the
+  first piece) — and the click starts/replaces the **active** order,
+  `maybeInstaKill` parks the victim on `Order.chessKill`. The `orders` system
+  consumes it on the next tick and queues a `lethal` damage command, killing the
+  target at once instead of wearing it down with projectiles. The concept is
+  reified in `src/game/instaKill.ts` (`hasInstaKill`, `instaKillOrderedNote`,
+  `instaKillLandedNote`) and its properties are: **immediate** (one tick, no
+  projectile, no chase), **highest priority** (self-preservation is suppressed
+  for that tick, so a badly wounded piece still presses — a deliberate suicide
+  kill is allowed), **human-only** (AI issues no orders, so it can never park
+  one) and **active-order-only** (a queued attack step never carries one). A
+  **standing attack order** is the opposite: it chases the target over several
+  moves and yields to self-preservation (retreat while danger is current,
+  safe-hold when badly wounded, resume when safe/healed). Keeping the pending
+  victim on the order (rather than in the command queue) makes it part of the
+  turn snapshot, so undo/redo and **replay** reproduce the kill and its red pulse
+  exactly. Applies to an explicit attack or a move onto the enemy's square;
+  checked only at **order-issue** time (a target that walks into range later is
+  fought normally), and only for explicitly ordered pieces (AI autonomous stance
+  is unaffected).
 - The queued remainder is drawn by the renderer as a dim dashed chain with
   numbered waypoint markers (`queueMarkers`), and a queued attack shows a dim
   threat line to its target.
@@ -832,7 +853,8 @@ into an LLM. `formatShorthand(game)` (`src/game/shorthand.ts`) emits a compact,
 line-oriented dump instead: a header (map/size/tick/turn/mode/you/winner), team
 totals, sparse non-floor terrain, an ASCII grid for boards up to 16×16, one line
 per piece with only non-default attributes (`hp`, `@M`/`@A` stance, `goto`/`atk`
-orders with `#id(cell)` references, `q` queued steps, `tgt`, `goal`, `path`
+orders with `#id(cell)` references, `kill=#id(cell)` for a parked insta-kill,
+`q` queued steps, `tgt`, `goal`, `path`
 hops, `blk`, `moving`, `w` reload, …), selection ids and in-flight projectiles.
 Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
 

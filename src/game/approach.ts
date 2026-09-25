@@ -68,6 +68,11 @@ export function previewFiringCell(
  * reach (walls block, other pieces are assumed to move). Used for the
  * theoretical navigation when the target is positionally out of reach, so the
  * route stops on a real square instead of under a piece beside the target.
+ *
+ * Holds on ties: if the piece's own square is already as close to the target as
+ * any reachable square, it returns that square. Stepping to an equally-close one
+ * would only shuttle between two cells (the bishop g6↔h7 case when chasing an
+ * opposite-colour target), so "as close as it can get" means standing still.
  */
 export function closestEmptyCell(
   board: Board,
@@ -78,6 +83,7 @@ export function closestEmptyCell(
   occupied: OccupiedFn,
 ): Vec2 | null {
   const reach = reachableCells(board, from, moveGeom, team)
+  const here = dist2(from.x, from.y, targetCell.x, targetCell.y)
   const candidates: Array<{ c: Vec2; d: number }> = []
   for (let y = 0; y < board.height; y++) {
     for (let x = 0; x < board.width; x++) {
@@ -88,7 +94,10 @@ export function closestEmptyCell(
     }
   }
   candidates.sort((a, b) => a.d - b.d)
-  return candidates.length > 0 ? candidates[0].c : null
+  const best = candidates[0]
+  if (!best) return null
+  if (here <= best.d) return { x: from.x, y: from.y }
+  return best.c
 }
 
 /** True when `targetCell` is inside the weapon geometry fired from `from`. */

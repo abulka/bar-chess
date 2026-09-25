@@ -188,7 +188,7 @@ function onSoundChange(event: Event): void {
       capture advance
     </label>
 
-    <label class="toggle" title="Ordering a move or attack kills instantly when the target is already within chess capture range">
+    <label class="toggle" title="Insta-kill: ordering a move or attack kills instantly (next tick, pressed even when wounded) when the target is already within chess capture range">
       <input type="checkbox" :checked="props.snapshot.chessKills" @change="emit('toggle-chess-kills')" />
       chess kills
     </label>

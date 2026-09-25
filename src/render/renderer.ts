@@ -232,7 +232,7 @@ export class Renderer {
     if (order && order.queue.length > 0) this.drawQueuedRoute(ctx, game, e, pos, cell, full)
 
     // A gold route for goto/autonomous moves; a self-preservation retreat is
-    // drawn in bright yellow so it reads as an automatic dodge, not an order.
+    // drawn in bright cyan so it reads as an automatic dodge, not an order.
     // Attack orders draw their own red route below so the two do not overlap.
     if (motion && motion.path.length > 0 && order?.kind !== 'attack') {
       const preserve = motion.intent === 'preserve'
@@ -260,7 +260,7 @@ export class Renderer {
         // Movement route (same gold "route" style as a move order), so it reads
         // separately from the red/grey firing line that follows it. When
         // self-preservation has overridden the attack the path is a retreat, so
-        // it takes the bright-yellow preserve colour, not the order gold.
+        // it takes the bright-cyan preserve colour, not the order gold.
         if (motion && motion.path.length > 0) {
           const preserve = motion.intent === 'preserve'
           this.drawRoute(ctx, board, pos, motion.path, full, preserve ? PRESERVE_COLOR : undefined)

@@ -51,9 +51,12 @@ export interface OrderData {
   /** Last known cell of the active attack target, for order-log notes. */
   targetCell: Vec2 | null
   /**
-   * Victim of an order-time chess kill, consumed by the `orders` system on the
-   * next tick. Kept on the order (not in `cmds`) so it is part of the turn
-   * snapshot and replays deterministically.
+   * Victim of a parked insta-kill (immediate chess kill), consumed by the
+   * `orders` system on the next tick. It outranks self-preservation for that
+   * tick (a suicide kill is allowed) and can only be set by a human order that
+   * started the active order — see `src/game/instaKill.ts`. Kept on the order
+   * (not in `cmds`) so it is part of the turn snapshot and replays
+   * deterministically.
    */
   chessKill: Entity | null
   /** For an attack order: whether the target is positionally reachable at all. */
