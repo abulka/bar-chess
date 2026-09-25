@@ -351,6 +351,8 @@ export interface GameSnapshot {
   canReplay: boolean
   canUndo: boolean
   canRedo: boolean
+  /** True when orders/stances/deploys changed since the boundary in view. */
+  ordersTouched: boolean
   replaying: boolean
   /** Unified turn/replay bar fill (0..1); holds at 1 until the next action. */
   barProgress: number
@@ -449,6 +451,12 @@ export class Game {
   chessKills = false
   /** Transient BAR-style command awaiting the next left-click. */
   pendingCommand: StanceMode = 'none'
+  /**
+   * True when the player has changed orders/stances/deploys since landing on the
+   * boundary in view. Forking with an unchanged plan would replay the same
+   * deterministic outcome, so the UI warns about it before discarding the future.
+   */
+  ordersTouched = false
 
   /** The saved map this battle was loaded from, if any (used to re-run study). */
   currentMap: SavedMap | null = null
@@ -777,8 +785,10 @@ export class Game {
   }
 
   /**
-   * Explicitly abandon the redo branch and start a new turn from the boundary
-   * being viewed. This is the only way to fork the timeline ('f' / Fork button).
+   * Explicitly abandon (discard) the redo branch at the boundary being viewed,
+   * leaving the game paused there so the player can change orders first. This is
+   * the only way to fork the timeline ('f' / Fork button); the next space press
+   * then plays a fresh turn (shift+space starts a mega turn).
    */
   forkTurn(): void {
     if (this.winner || this.turnActive || this.replaying) return
@@ -788,13 +798,21 @@ export class Game {
     this.queuedPlay = false
     this.queuedForward = 0
     this.forwardPlay = false
-    if (this.cursor < this.history.length - 1) {
-      const dropped = this.history.length - 1 - this.cursor
-      this.history.length = this.cursor + 1
-      this.summaries = null
-      this.bus.emit('info', `forked at turn ${this.turn} \u2014 ${dropped} redone beat(s) discarded`)
-    }
-    this.beginTurn()
+    // Nothing to fork when already at the tip: forking no longer plays a turn,
+    // so this would otherwise be a silent no-op that consumes the keypress.
+    if (this.cursor >= this.history.length - 1) return
+    const dropped = this.history.length - 1 - this.cursor
+    this.history.length = this.cursor + 1
+    this.summaries = null
+    // Land paused on the boundary like an undo, so the player can change orders
+    // before space commits a fresh turn (or shift+space starts a mega turn).
+    this.paused = true
+    this.barProgress = 0
+    this.ordersTouched = false
+    this.bus.emit(
+      'info',
+      `discarded ${dropped} future beat(s) \u2014 edit orders, then space plays a new turn`,
+    )
   }
 
   /**
@@ -870,6 +888,8 @@ export class Game {
     }
     this.cursor = this.history.length - 1
     this.summaries = null
+    // A completed beat is the new boundary; its orders are the baseline now.
+    this.ordersTouched = false
   }
 
   /** Start any buffered beat once the current turn/replay/mega turn finishes. */
@@ -1218,6 +1238,8 @@ export class Game {
     this.cmds.deploy.length = 0
     this.cmds.destroy.length = 0
     this.cmds.advance.length = 0
+    // We are back at a recorded boundary: the plan matches its orders again.
+    this.ordersTouched = false
   }
 
   setSpeed(speed: number): void {
@@ -1528,6 +1550,7 @@ export class Game {
     this.editorBrush = null
     this.editorBackup = null
     this.editorDirty = false
+    this.ordersTouched = false
     this.ctx = this.buildContext()
     this.placeArmy(army)
     this.history = [this.boundary()]
@@ -1545,6 +1568,7 @@ export class Game {
   deploy(team: TeamId, key: string): void {
     this.liveEdit(() => {
       this.cmds.deploy.push({ team, key })
+      this.ordersTouched = true
       this.onCommand?.({ t: 'deploy', team, key })
     })
   }
@@ -1746,6 +1770,7 @@ export class Game {
         if (cell) this.onCommand?.({ t: 'stance', from: { x: cell.x, y: cell.y }, mode })
         n++
       })
+      if (n > 0) this.ordersTouched = true
       this.bus.emit('info', `${n} piece(s) stance: ${mode}`)
     })
   }
@@ -1891,6 +1916,7 @@ export class Game {
       this.bus.emit('warn', 'attack needs an enemy target')
       return
     }
+    if (n > 0) this.ordersTouched = true
     if (occupant !== undefined && this.world.get(occupant, Team) !== undefined) {
       this.bus.emit('info', `orders: ${n} at ${coordName(cell.x, cell.y, this.board.height)}`)
     } else {
@@ -2047,6 +2073,7 @@ export class Game {
         if (cell) this.onCommand?.({ t: 'clear', from: { x: cell.x, y: cell.y } })
         n++
       })
+      if (n > 0) this.ordersTouched = true
       this.bus.emit('info', `${n} piece(s) order${n === 1 ? '' : 's'} cleared`)
     })
   }
@@ -2217,6 +2244,7 @@ export class Game {
   /** Rebuild the undo/redo history from a save (empty for position-only saves). */
   private restoreHistory(saved: SavedPosition): void {
     this.summaries = null
+    this.ordersTouched = false
     if (!saved.history || saved.history.length === 0) {
       this.history = [this.boundary()]
       this.cursor = 0
@@ -2585,6 +2613,7 @@ export class Game {
         !this.replaying,
       canUndo: (this.cursor > 0 || this.megaActive) && !this.turnActive && !this.replaying,
       canRedo: this.cursor < this.history.length - 1 && !this.turnActive && !this.replaying,
+      ordersTouched: this.ordersTouched,
       replaying: this.replaying,
       barProgress: this.barProgress,
       pendingCommand: this.pendingCommand,

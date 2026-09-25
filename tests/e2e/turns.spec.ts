@@ -45,14 +45,24 @@ test('lists turns, jumps to one, and replays forward without forking', async ({ 
   await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().historyIndex)).toBe(2)
 })
 
-test('fork discards the redo branch', async ({ page }) => {
+test('fork discards the redo branch without playing a turn', async ({ page }) => {
   await playTurns(page, 2)
   await page.keyboard.press('u')
   expect(await page.evaluate(() => (window as any).game.snapshot().canRedo)).toBe(true)
 
   // The fork button lives in the left rail's "turns" tab (hidden by default).
   await page.getByRole('button', { name: 'turns', exact: true }).click()
+  // First click only arms the inline confirmation; the branch is still intact.
   await page.locator('.turn-panel .row.active .fork').click()
+  await expect(page.locator('.turn-panel .fork-confirm')).toBeVisible()
+  expect(await page.evaluate(() => (window as any).game.snapshot().canRedo)).toBe(true)
+
+  // Confirming discards the future but does not start a turn.
+  await page.locator('.turn-panel .fork-actions button', { hasText: 'Discard' }).click()
   await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().canRedo)).toBe(false)
-  expect(await page.evaluate(() => (window as any).game.snapshot().turnActive)).toBe(true)
+  expect(await page.evaluate(() => (window as any).game.snapshot().turnActive)).toBe(false)
+
+  // Space now plays a normal turn from the boundary.
+  await page.keyboard.press('Space')
+  await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().turnActive)).toBe(true)
 })

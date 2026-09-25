@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import BoardView from './components/BoardView.vue'
 import CollapsibleSection from './components/CollapsibleSection.vue'
 import EditorPanel from './components/EditorPanel.vue'
@@ -58,6 +58,7 @@ const barHeld = computed(
     barProgress.value >= 1,
 )
 const copied = ref('')
+const forkArmed = ref(false)
 const boardView = ref<InstanceType<typeof BoardView> | null>(null)
 const slots = ref<SlotMeta[]>([])
 const slotName = ref('')
@@ -246,7 +247,7 @@ const turnLabel = computed(() => {
   if (snapshot.value.turnActive) return `${turn}${queued}${playQueued}`
   if (snapshot.value.replaying) return `${turn} · REPLAY${queued}${playQueued}${forward}`
   if (behind) {
-    return `${turn} · VIEWING ${snapshot.value.historyIndex}/${last} — space replays forward · f forks`
+    return `${turn} · VIEWING ${snapshot.value.historyIndex}/${last} — space replays forward · f discards future turns`
   }
   return snapshot.value.canReplay
     ? `${turn} · READY — space for next turn`
@@ -697,10 +698,38 @@ function onPlayControl(): void {
 }
 
 function onFork(): void {
+  if (!snapshot.value.canRedo) return
+  // Two-step guard: the first f/Fork arms an inline confirmation so the
+  // irreversible discard of future turns is always deliberate.
+  if (!forkArmed.value) {
+    forkArmed.value = true
+    return
+  }
+  confirmFork()
+}
+
+function confirmFork(): void {
   game.forkTurn()
+  forkArmed.value = false
   liveLog.rewind(game.turn)
   refresh()
 }
+
+function cancelFork(): void {
+  forkArmed.value = false
+}
+
+// Any timeline move or order edit invalidates a pending fork confirmation.
+watch(
+  [
+    () => snapshot.value.historyIndex,
+    () => snapshot.value.historyLength,
+    () => snapshot.value.ordersTouched,
+  ],
+  () => {
+    forkArmed.value = false
+  },
+)
 
 function onJumpTurn(index: number): void {
   game.jumpToTurn(index)
@@ -883,7 +912,8 @@ function onKey(event: KeyboardEvent): void {
   } else if (event.key === 'e') {
     onToggleOverlay('enemyPlans')
   } else if (event.key === 'Escape') {
-    if (game.pendingCommand !== 'none') game.clearPendingCommand()
+    if (forkArmed.value) cancelFork()
+    else if (game.pendingCommand !== 'none') game.clearPendingCommand()
     else game.clearSelection()
     refresh()
   } else if (event.key === 'm') {
@@ -963,8 +993,8 @@ onBeforeUnmount(() => {
           : snapshot.turnActive
             ? 'turn in progress (space)'
             : snapshot.historyIndex < snapshot.turns.length - 1
-              ? 'viewing an earlier turn — space replays forward, f forks (discards redo)'
-              : 'press space for a turn, shift+space to play, u/r to undo/redo, y to replay, f to fork'
+              ? 'viewing an earlier turn — space replays forward, f discards the future turns'
+              : 'press space for a turn, shift+space to play, u/r to undo/redo, y to replay'
       "
     >
       <div
@@ -1077,9 +1107,11 @@ onBeforeUnmount(() => {
             <div v-show="leftTab === 'turns'" class="rail-tab-body">
               <TurnList
                 :snapshot="snapshot"
+                :fork-armed="forkArmed"
                 @jump="onJumpTurn"
                 @play="onPlayTurn"
                 @fork="onFork"
+                @cancel-fork="cancelFork"
               />
             </div>
           </template>
@@ -1189,7 +1221,7 @@ onBeforeUnmount(() => {
                 <li><b>m</b>/<b>a</b> then left-click → move / attack · shift to queue</li>
                 <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
                 <li><b>space</b> next turn / replay forward · <b>shift+space</b> play · <b>s</b> step</li>
-                <li><b>u</b> undo · <b>r</b> redo · <b>y</b> replay · <b>f</b> fork (discards redo)</li>
+                <li><b>u</b> undo · <b>r</b> redo · <b>y</b> replay · <b>f</b> discard future turns</li>
                 <li><b>c</b>/<b>Backspace</b> clear orders · <b>o</b> my orders · <b>e</b> enemy</li>
                 <li><b>h</b> HUD · <b>tab</b> panels · <b>esc</b> cancel</li>
               </ul>

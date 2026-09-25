@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell } from '../../src/ecs/components'
+import { Cell, Team } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
 import { clearComponents } from '../helpers'
 
@@ -130,18 +130,43 @@ describe('turn list & history navigation', () => {
     expect(game.snapshot().queuedTurns).toBe(1)
   })
 
-  it('explicitly forks and discards the redo branch', () => {
+  it('explicitly forks and discards the redo branch without playing a turn', () => {
     const game = new Game(8, 'ai-vs-ai', 55)
     runTurn(game)
     runTurn(game)
     game.undoTurn()
     expect(game.snapshot().canRedo).toBe(true)
 
+    // Fork only prunes the future; it leaves the game paused at the boundary.
     game.forkTurn()
+    expect(game.turnActive).toBe(false)
+    expect(game.snapshot().canRedo).toBe(false)
+    expect(game.snapshot().historyIndex).toBe(game.snapshot().historyLength - 1)
+
+    // Space is now the commit action: it plays a normal turn from the boundary.
+    game.advance()
     expect(game.turnActive).toBe(true)
     runUntil(game, () => !game.turnActive)
     expect(game.snapshot().canRedo).toBe(false)
     expect(game.snapshot().historyIndex).toBe(game.snapshot().historyLength - 1)
+  })
+
+  it('tracks whether orders changed since the boundary (fork warning)', () => {
+    const game = new Game(8, 'human-vs-ai', 55)
+    runTurn(game)
+    runTurn(game)
+    game.undoTurn()
+    expect(game.snapshot().ordersTouched).toBe(false)
+
+    const blue = [...game.world.query(Cell)].find((e) => game.world.get(e, Team) === 'blue')
+    expect(blue).toBeDefined()
+    game.selected = [blue as number]
+    game.setPieceStance('move')
+    expect(game.snapshot().ordersTouched).toBe(true)
+
+    // Returning to a recorded boundary resets the baseline.
+    game.redoTurn()
+    expect(game.snapshot().ordersTouched).toBe(false)
   })
 
   it('play-forward runs the recorded beats then continues live at the tip', () => {

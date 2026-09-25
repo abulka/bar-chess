@@ -4,12 +4,15 @@ import type { GameSnapshot, TurnSummary } from '../game/game'
 
 const props = defineProps<{
   snapshot: GameSnapshot
+  /** True while the two-step fork confirmation is armed. */
+  forkArmed: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'jump', index: number): void
   (e: 'play', index: number): void
   (e: 'fork'): void
+  (e: 'cancel-fork'): void
 }>()
 
 /** Newest boundary first so the active row stays near the top. */
@@ -90,7 +93,7 @@ watch(
           v-if="t.index === current && backtracked"
           class="fork"
           :disabled="busy"
-          :title="`fork here (f) — discards ${dropped} redone beat${dropped === 1 ? '' : 's'}`"
+          :title="`discard ${dropped} future turn${dropped === 1 ? '' : 's'} (f)`"
           @click.stop="emit('fork')"
         >
           ⑂
@@ -98,9 +101,21 @@ watch(
       </li>
     </ul>
 
-    <p v-if="backtracked" class="warn">
+    <div v-if="backtracked && forkArmed" class="warn fork-confirm">
+      <p class="fork-q">
+        discard {{ dropped }} future turn{{ dropped === 1 ? '' : 's' }}? this cannot be undone.
+      </p>
+      <p v-if="!snapshot.ordersTouched" class="fork-note">
+        your orders are unchanged — the next turn will likely repeat the same outcome.
+      </p>
+      <div class="fork-actions">
+        <button class="ctl small" @click="emit('fork')">Discard</button>
+        <button class="ctl small" @click="emit('cancel-fork')">Cancel</button>
+      </div>
+    </div>
+    <p v-else-if="backtracked" class="warn">
       viewing turn {{ current }} of {{ latest }} — <b>space</b> replays forward ·
-      <b>f</b> fork here · <b>u</b>/<b>r</b> undo/redo · <b>y</b> replay
+      <b>f</b> discards future turns · <b>u</b>/<b>r</b> undo/redo · <b>y</b> replay
     </p>
     <p v-if="snapshot.historyTrimmed > 0" class="muted tiny">
       {{ snapshot.historyTrimmed }} earlier beat{{ snapshot.historyTrimmed === 1 ? '' : 's' }} trimmed (history cap)
@@ -120,6 +135,29 @@ watch(
 
 .warn b {
   color: #ffd8a0;
+}
+
+.fork-confirm p {
+  margin: 0;
+}
+
+.fork-confirm .fork-q {
+  color: #ffd8a0;
+}
+
+.fork-confirm .fork-note {
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.fork-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.fork-actions .ctl {
+  flex: 1;
 }
 
 .muted {

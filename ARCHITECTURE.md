@@ -206,8 +206,12 @@ requestAnimationFrame(frame):
   beats and only then continues into a live mega turn, so a play request can
   never discard a redo branch. Extra presses while a replay runs buffer
   `queuedForward` beats (`advance`) or `forwardPlay` (`requestPlay`).
-  Forking the timeline is explicit: `forkTurn()` (`f` / Fork button) truncates
-  the redo branch at the cursor and starts a new turn there.
+  Forking the timeline is explicit: `forkTurn()` (`f` / Fork button, behind a
+  two-step inline confirmation) discards the redo branch at the cursor and
+  leaves the game paused there so orders can still be changed; `space` then
+  plays a fresh turn. The confirmation warns via `ordersTouched` when no order
+  was changed since the boundary, since the deterministic sim would repeat the
+  same outcome.
 - `history` is a bounded list of `HistoryEntry` (cap `HISTORY_LIMIT = 100`);
   `historyTrimmed` counts beats dropped off the front, and `snapshot().turns`
   lazily exposes per-boundary `TurnSummary` metadata (turn, mega, ticks, piece
@@ -624,7 +628,7 @@ boardId boardSize boardSizes teams timings events eventCount shots kills
 warnings selected selectedLines counts winner overlays hudVisible autoPreserve
 captureAdvance soundEnabled railsVisible controlsCollapsed stanceCollapsed
 legendCollapsed firingLinesCollapsed hover
-playerTeam turnActive queuedTurns canReplay canUndo canRedo replaying
+playerTeam turnActive queuedTurns canReplay canUndo canRedo ordersTouched replaying
 barProgress pendingCommand selectionCount stanceSummary pieceInfo
 terrainVersion editorMode editorBrush editorDirty canEdit mapName`.
 
@@ -634,7 +638,7 @@ terrainVersion editorMode editorBrush editorDirty canEdit mapName`.
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle; routes map-editor clicks/drags (stamp, continuous erase) and exposes `cellAtClient`/`overBoard` for palette drops |
 | `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed, `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. The **order / auto changes** list shows the piece's last few transitions with their tick, so it is clear *why* an order was issued/replaced/completed/abandoned (e.g. `target at e7 lost — attack abandoned`) and includes autonomous self-preservation retreats |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane, drag drops the piece on a chosen cell (or arms an editor brush in editor mode) |
-| `TurnList.vue` | left-rail **turns** tab: newest-first history rows (jump on click, replay per row), inline Fork on the active row, backtrack warning and trimmed-history hint below the list (so rows never shift), per-row piece/order/time info |
+| `TurnList.vue` | left-rail **turns** tab: newest-first history rows (jump on click, replay per row), inline Fork on the active row, two-step inline confirmation before discarding future turns (warns when `ordersTouched` is false that the same outcome would repeat), backtrack warning and trimmed-history hint below the list (so rows never shift), per-row piece/order/time info |
 | `EditorPanel.vue` | floating map-editor controls: map name, save, eraser, blank-board size, `Maps…`, cancel/done |
 | `MapsModal.vue` | saved-map browser: `MapThumbnail` previews with Play / Edit / Rename / Export / Delete, plus New map and Import JSON |
 | `MapThumbnail.vue` | square canvas rendering `drawMapPreview` for a `SavedMap` |
@@ -905,7 +909,7 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
 
 Keyboard: `m`/`a` arm a move/attack command (then left-click; Shift keeps it
 armed), `space` next turn / replay forward, `shift+space` play forward then live,
-`p` pause, `s` step, `u`/`r` undo/redo, `y` replay, `f` fork (discards redo),
+`p` pause, `s` step, `u`/`r` undo/redo, `y` replay, `f` discard future turns,
 `c`/`Backspace` clear orders, `o` my orders, `e` enemy plans, `h` HUD, `tab`
 side rails, `Esc` cancel the pending command else clear the selection. `Game.orderAt(cell,
 command?)` resolves the intent: an explicit `move` always gotos, an explicit
@@ -928,7 +932,8 @@ paused) against a fresh occupancy map. Left/right clicks never change the
 selection. `space` pressed while a turn/replay is running is buffered (up to 3) and runs
 after it rather than being dropped; while viewing an earlier turn `space`
 replays forward instead of forking (see **Forward playback** above), and `f`
-forks explicitly. `u`/`r` undo/redo completed turns.
+discards the future turns (paused; `space` then plays). `u`/`r` undo/redo
+completed turns.
 
 Team colour is Orange vs Blue; **red marks an ordered attack**: the firing chain,
 the Attack stance badge, and the ring around a piece targeted by an explicit
