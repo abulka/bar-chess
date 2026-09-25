@@ -19,6 +19,7 @@ You command your pieces by giving them **intentions** (a destination or a target
 - **Game modes.** Human vs AI, AI vs AI and Human vs Human.
 - **Procedural audio.** WebAudio SFX driven by the event bus, with a synth editor to tweak every cue.
 - **Self-preservation, bodyguards and capture-advance** make fights feel tactical rather than static.
+- **Who's-winning bar.** A thin full-width advantage bar under the turn bar, centered and filling toward whichever side is ahead. It is a static evaluation (no lookahead) of HP-weighted material, king survivability and pressure on the kings, latched to the turn boundary and smoothly animated one move per turn. Hover it for a specific breakdown (who leads, material totals, which pieces each side has more of, king health and whether a king is under fire). Toggle it with `who's winning`.
 - **King healing aura.** Pieces within two squares of their king slowly regenerate health (3× faster for human-controlled teams), drawn with a green aura and wavy healing lines (`show healing` overlay). The king is the source of the aura and does not heal itself. Badly wounded pieces walk back into the aura on their own to recover.
 
 ## Demo

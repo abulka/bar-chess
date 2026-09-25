@@ -937,6 +937,12 @@ export class Renderer {
   private drawHealing(ctx: CanvasRenderingContext2D, game: Game): void {
     const t = game.board.tile
     const pulse = 0.5 + 0.5 * Math.sin(this.time * 3)
+    // Clip the glow, ring and tendrils to the board, so a king on an edge does
+    // not spill the aura over the border onto the surrounding canvas.
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(0, 0, game.board.pixelWidth, game.board.pixelHeight)
+    ctx.clip()
     for (const team of TEAM_IDS) {
       const field = healingTargets(game.world, team)
       if (!field) continue
@@ -972,6 +978,7 @@ export class Renderer {
         index++
       }
     }
+    ctx.restore()
   }
 
   /** A sine wave from `from` to `to`, pinched at both ends, animated by `phase`. */

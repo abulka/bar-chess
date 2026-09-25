@@ -22,7 +22,7 @@ describe('Camera eased recenter', () => {
     expect(cam.x).not.toBeCloseTo(cam.worldW / 2)
   })
 
-  it('eases to the board centre over frames and settles exactly', () => {
+  it('eases to the top-aligned fit over frames and settles exactly', () => {
     const cam = fitted()
     cam.zoom = cam.maxZoom
     cam.x = 100
@@ -36,7 +36,11 @@ describe('Camera eased recenter', () => {
 
     for (let i = 0; i < 120; i++) cam.update(1 / 60)
     expect(cam.x).toBeCloseTo(cam.worldW / 2)
-    expect(cam.y).toBeCloseTo(cam.worldH / 2)
+    // The board is top-aligned, so its top edge settles near the top of the
+    // viewport rather than the board centre.
+    const top = cam.worldToScreen(0, 0).y
+    expect(top).toBeGreaterThanOrEqual(0)
+    expect(top).toBeLessThan(10)
   })
 
   it('preserves a zoomed-in view when the viewport grows', () => {

@@ -9,6 +9,9 @@
   --red: #ff9f43;
   --blue: #5ab0ff;
   --accent: #ffd166;
+  /* Neutral "time/progress" grey for the turn bar. Deliberately not the amber
+     accent (reads as Orange/selection) nor green (reads as health/healing). */
+  --turnbar: #9aa6b4;
   /* Section headers, kept off the warm accent so they never read as enemy orange. */
   --heading: #d6ccf2;
 }
@@ -48,6 +51,10 @@ input {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
+.topbars {
+  border-bottom: 1px solid var(--border);
+}
+
 .turnbar {
   position: relative;
   height: 16px;
@@ -56,7 +63,6 @@ input {
   justify-content: center;
   overflow: hidden;
   background: var(--panel);
-  border-bottom: 1px solid var(--border);
 }
 
 .turnbar-fill {
@@ -64,7 +70,7 @@ input {
   inset: 0 auto 0 0;
   width: 0;
   opacity: 0.5;
-  background: linear-gradient(90deg, #ffb347, #ffd166);
+  background: linear-gradient(90deg, #6f7b8a, var(--turnbar));
 }
 
 .turnbar-fill.complete {
@@ -96,11 +102,11 @@ input {
 
 .turnbar.active .turnbar-label,
 .turnbar.replay .turnbar-label {
-  color: var(--accent);
+  color: var(--turnbar);
 }
 
 .turnbar.playing .turnbar-label {
-  color: var(--accent);
+  color: var(--turnbar);
 }
 
 .turnbar.playing .turnbar-fill {

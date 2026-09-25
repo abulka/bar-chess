@@ -45,6 +45,7 @@ import { containsCell, fireCells, NEVER } from './geometry'
 import type { OccupiedFn } from './geometry'
 import { dist2, healthRatio, vecEquals } from './math'
 import { attackPlan } from './approach'
+import { advantageDetail, describeAdvantage } from './advantage'
 import { createPiece } from './factory'
 import { buildOccupancy, makeOccupied, occupiedExcept } from './occupancy'
 import type { Occupancy } from './occupancy'
@@ -209,6 +210,8 @@ export interface OverlayFlags {
   reload: boolean
   /** Draw the king's green healing aura and tendrils to healed pieces. */
   healing: boolean
+  /** Show the "who is winning" advantage bar over the top of the board. */
+  advantage: boolean
 }
 
 /** What the map editor stamps on the next board click. */
@@ -319,6 +322,10 @@ export interface GameSnapshot {
   selectedLines: Array<{ entity: Entity; kind: string; lines: ComponentLine[] }>
   counts: { entities: number; pieces: number; projectiles: number; fx: number }
   winner: TeamId | null
+  /** Signed static evaluation in pawn points; positive means red is ahead. */
+  advantage: number
+  /** Specific breakdown of the evaluation, for the advantage-bar tooltip. */
+  advantageTooltip: string
   overlays: OverlayFlags
   hudVisible: boolean
   autoPreserve: boolean
@@ -485,6 +492,7 @@ export class Game {
     rangeArcs: false,
     reload: true,
     healing: false,
+    advantage: true,
   }
 
   selected: Entity[] = []
@@ -2560,6 +2568,9 @@ export class Game {
     const pieces = this.world.query(Position, Cell).length
     const projectiles = this.world.query(Projectile, Position).length
     const fx = this.world.query(Fx).length
+    const adv = advantageDetail(this)
+    const advantage = adv.score
+    const advantageTooltip = describeAdvantage(adv)
 
     const stanceSummary = this.stanceSummary()
     const focused = this.selected.find((e) => this.world.isAlive(e))
@@ -2617,6 +2628,8 @@ export class Game {
       })),
       counts: { entities: this.world.count, pieces, projectiles, fx },
       winner: this.winner,
+      advantage,
+      advantageTooltip,
       overlays: { ...this.overlays },
       hudVisible: this.hudVisible,
       autoPreserve: this.autoPreserve,

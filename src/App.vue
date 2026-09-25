@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import BoardView from './components/BoardView.vue'
+import AdvantageBar from './components/AdvantageBar.vue'
 import CollapsibleSection from './components/CollapsibleSection.vue'
 import EditorPanel from './components/EditorPanel.vue'
 import EventLog from './components/EventLog.vue'
@@ -993,33 +994,37 @@ onBeforeUnmount(() => {
       @toggle-promotion="onTogglePromotion"
     />
 
-    <div
-      class="turnbar"
-      :class="{ active: snapshot.turnActive, replay: snapshot.replaying, playing: snapshot.playing }"
-      :title="
-        snapshot.playing
-          ? 'playing — space to pause (makes a mega turn)'
-          : snapshot.turnActive
-            ? 'turn in progress (space)'
-            : snapshot.historyIndex < snapshot.turns.length - 1
-              ? 'viewing an earlier turn — space replays forward, f discards the future turns'
-              : 'press space for a turn, shift+space to play, u/r to undo/redo, y to replay'
-      "
-    >
+    <div class="topbars">
       <div
-        class="turnbar-fill"
-        :class="{ complete: barHeld }"
-        :style="{ width: barProgress * 100 + '%' }"
-      ></div>
-      <span class="turnbar-label">{{ turnLabel }}</span>
-      <span
-        v-if="snapshot.pendingCommand !== 'none'"
-        class="pending-command"
-        :class="snapshot.pendingCommand"
+        class="turnbar"
+        :class="{ active: snapshot.turnActive, replay: snapshot.replaying, playing: snapshot.playing }"
+        :title="
+          snapshot.playing
+            ? 'playing — space to pause (makes a mega turn)'
+            : snapshot.turnActive
+              ? 'turn in progress (space)'
+              : snapshot.historyIndex < snapshot.turns.length - 1
+                ? 'viewing an earlier turn — space replays forward, f discards the future turns'
+                : 'press space for a turn, shift+space to play, u/r to undo/redo, y to replay'
+        "
       >
-        {{ snapshot.pendingCommand === 'attack' ? 'ATTACK — left-click a target' : 'MOVE — left-click a square' }}
-        · shift to queue · esc to cancel
-      </span>
+        <div
+          class="turnbar-fill"
+          :class="{ complete: barHeld }"
+          :style="{ width: barProgress * 100 + '%' }"
+        ></div>
+        <span class="turnbar-label">{{ turnLabel }}</span>
+        <span
+          v-if="snapshot.pendingCommand !== 'none'"
+          class="pending-command"
+          :class="snapshot.pendingCommand"
+        >
+          {{ snapshot.pendingCommand === 'attack' ? 'ATTACK — left-click a target' : 'MOVE — left-click a square' }}
+          · shift to queue · esc to cancel
+        </span>
+      </div>
+
+      <AdvantageBar v-if="snapshot.overlays.advantage" :snapshot="snapshot" />
     </div>
 
     <div

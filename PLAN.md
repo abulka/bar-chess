@@ -308,6 +308,19 @@ strand surviving rooks and queens.
 recorded as a draw rather than a timeout. Kings can still be marched in by a
 player, so this is a study label, not an automatic game end.
 
+**Advantage bar.** A thin, full-width bar under the turn bar (the `who's winning`
+overlay) shows who is ahead. `advantageDetail` / `describeAdvantage`
+(`src/game/advantage.ts`) produce a static, lookahead-free score in pawn points
+(HP-weighted material, a king-HP term, and immediate king danger) plus a specific
+tooltip: who leads, the material totals, which pieces each side has more of, the
+kings' health and whether a king is under fire. `snapshot.advantage` (positive =
+red) is mapped to a `-1..1` bar fraction with a logistic; the bar fills from its
+centre toward the leader (red left, blue right) over a neutral, uncoloured track.
+It latches the value at each turn boundary and tweens it over ~0.7s, so it makes
+one smooth move per turn instead of twitching with every shot. The board is
+top-aligned when it fits, so there is no blank band above it. The king's healing
+aura is clipped to the board so it no longer spills over the edge.
+
 ## Overlays: seeing what is going on
 
 Scope: the **selection** always shows full detail; `my orders` (`o`) and

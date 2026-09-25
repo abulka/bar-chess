@@ -7,6 +7,14 @@ import { clamp, dist } from '../game/math'
  */
 const FIT_PADDING = 44
 
+/**
+ * Gap left above the board when it is fitted. The board is top-aligned rather
+ * than vertically centred so the space below it (where the HUD/rosters sit) is
+ * used instead of a blank band above the board. Only the vertical placement is
+ * biased; the board stays horizontally centred.
+ */
+const FIT_TOP_GAP = 6
+
 export class Camera {
   x = 0
   y = 0
@@ -52,8 +60,13 @@ export class Camera {
     if (z === null) return
     this.zoom = z
     this.x = worldW / 2
-    this.y = worldH / 2
+    this.y = this.topAlignedY(z)
     this.recenter = null
+  }
+
+  /** Camera world-y that puts the board's top edge `FIT_TOP_GAP` from the top. */
+  private topAlignedY(zoom: number): number {
+    return (this.viewportHeight / 2 - FIT_TOP_GAP) / zoom
   }
 
   /**
@@ -65,6 +78,9 @@ export class Camera {
     const z = this.applyFit(worldW, worldH)
     if (z === null) return
     if (this.zoom < z) this.zoom = z
+    // Keep a fitted board top-aligned as the viewport changes; a user-zoomed
+    // board keeps its own framing.
+    if (this.zoom <= this.minZoom + 1e-6) this.y = this.topAlignedY(this.zoom)
     this.recenter = null
   }
 
@@ -99,7 +115,7 @@ export class Camera {
     // by `update`, so the snap is a smooth glide rather than a jump; zooming
     // back in or panning cancels it.
     if (this.zoom <= this.minZoom + 1e-6 && this.worldW > 0) {
-      this.recenter = { x: this.worldW / 2, y: this.worldH / 2 }
+      this.recenter = { x: this.worldW / 2, y: this.topAlignedY(this.fitZoom) }
     } else {
       this.recenter = null
     }
