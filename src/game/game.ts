@@ -796,6 +796,13 @@ export class Game {
    */
   advance(): void {
     if (this.winner) return
+    // While playing, space/Turn pauses the burst (closing it into an undoable
+    // boundary) rather than ending it into a fresh turn. A second press then
+    // starts a normal turn from the boundary.
+    if (this.megaActive) {
+      this.togglePause()
+      return
+    }
     if (this.turnActive || this.replaying) {
       if (this.cursor < this.history.length - 1) {
         this.queuedForward = Math.min(this.queuedForward + 1, Game.MAX_QUEUED_TURNS)

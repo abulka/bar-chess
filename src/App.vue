@@ -700,8 +700,9 @@ function onTurn(): void {
 }
 
 function onPlayControl(): void {
-  if (snapshot.value.playing || snapshot.value.replaying) {
-    // Pause live play / abort a replay back to its boundary.
+  if (game.playing || game.isReplaying) {
+    // Pause live play / abort a replay back to its boundary. Read the live state
+    // rather than the polled snapshot so the first press is never misrouted.
     game.togglePause()
   } else {
     // Idle: play forward through history, then live (a mega turn).
@@ -905,8 +906,10 @@ function onKey(event: KeyboardEvent): void {
       // viewing an earlier turn, then live from the tip.
       game.requestPlay()
       refresh()
-    } else if (snapshot.value.playing) {
-      // Space during play pauses and closes the mega turn.
+    } else if (game.playing) {
+      // Space during play pauses and closes the mega turn. Read the live state,
+      // not the polled snapshot, so a press right after play starts cannot be
+      // misrouted into starting a turn.
       game.togglePause()
       refresh()
     } else {

@@ -45,6 +45,16 @@ test('lists turns, jumps to one, and replays forward without forking', async ({ 
   await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().historyIndex)).toBe(2)
 })
 
+test('space pauses a play burst instead of starting a turn', async ({ page }) => {
+  await page.keyboard.press('Shift+Space')
+  await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().playing)).toBe(true)
+
+  // Space during play pauses the mega turn; it must not start a normal turn.
+  await page.keyboard.press('Space')
+  await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().playing)).toBe(false)
+  expect(await page.evaluate(() => (window as any).game.snapshot().turnActive)).toBe(false)
+})
+
 test('fork discards the redo branch without playing a turn', async ({ page }) => {
   await playTurns(page, 2)
   await page.keyboard.press('u')

@@ -130,6 +130,23 @@ describe('turn list & history navigation', () => {
     expect(game.snapshot().queuedTurns).toBe(1)
   })
 
+  it('pauses the play burst instead of starting a turn', () => {
+    const game = new Game(8, 'ai-vs-ai', 44)
+    game.requestPlay()
+    expect(game.snapshot().playing).toBe(true)
+
+    // Space/Turn while playing closes the mega turn and pauses; it must not
+    // silently start a normal turn.
+    game.advance()
+    expect(game.snapshot().playing).toBe(false)
+    expect(game.snapshot().turnActive).toBe(false)
+    expect(game.paused).toBe(true)
+    // The burst is an undoable boundary; a second press starts a real turn.
+    expect(game.snapshot().canUndo).toBe(true)
+    game.advance()
+    expect(game.snapshot().turnActive).toBe(true)
+  })
+
   it('explicitly forks and discards the redo branch without playing a turn', () => {
     const game = new Game(8, 'ai-vs-ai', 55)
     runTurn(game)
