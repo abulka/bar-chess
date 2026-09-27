@@ -375,16 +375,26 @@ on, AI king duels now resolve rather than sitting at their posts.
 
 **Advantage bar.** A thin, full-width bar under the turn bar (the `who's winning`
 overlay) shows who is ahead. `advantageDetail` / `describeAdvantage`
-(`src/game/advantage.ts`) produce a static, lookahead-free score in pawn points
-(HP-weighted material, a king-HP term, and immediate king danger) plus a specific
-tooltip: who leads, the material totals, which pieces each side has more of, the
-kings' health and whether a king is under fire. `snapshot.advantage` (positive =
-red) is mapped to a `-1..1` bar fraction with a logistic; the bar fills from its
-centre toward the leader (red left, blue right) over a neutral, uncoloured track.
-It latches the value at each turn boundary and tweens it over ~0.7s, so it makes
-one smooth move per turn instead of twitching with every shot. The board is
-top-aligned when it fits, so there is no blank band above it. The king's healing
-aura is clipped to the board so it no longer spills over the edge.
+(`src/game/advantage.ts`) produce a static, lookahead-free score in pawn points:
+HP-weighted material; a **crisis-weighted king term**
+(`KING_WEIGHT·h − KING_CRISIS·(1−h)²`) so a near-dead king collapses the score
+instead of only losing a few points; **lethality-aware king danger**, where each
+attacker that can hit the enemy king is weighted by the share of the king's
+*remaining* life it would remove (a ready queen on a 22-HP king counts far more
+than the same queen on a full king; reload phase is ignored and the total is
+capped, so a momentary line of fire cannot flip the lead); and a **decisive
+trapped-king term** — a king in check with no legal square (checkmate under the
+no-check rule) pins the bar to its opponent regardless of material. The bar
+**damps across turns** (35% per turn) so a knife-edge position settles near
+centre instead of slamming end to end. The tooltip names the leader, the
+material totals, which pieces each side has more of, the kings' health, whether
+a king is under fire, one hit from death, or trapped. `snapshot.advantage`
+(positive = red) is mapped to a `-1..1` bar fraction with a logistic; the bar
+fills from its centre toward the leader (red left, blue right) over a neutral,
+uncoloured track. It latches the value at each turn boundary and tweens it over
+~0.7s, so it makes one smooth move per turn instead of twitching with every shot.
+The board is top-aligned when it fits, so there is no blank band above it. The
+king's healing aura is clipped to the board so it no longer spills over the edge.
 
 ## Overlays: seeing what is going on
 

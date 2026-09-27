@@ -7,6 +7,7 @@ import {
   advantageLabel,
   describeAdvantage,
   evaluatePosition,
+  smoothScore,
 } from '../../src/game/advantage'
 import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
@@ -74,6 +75,93 @@ describe('position evaluation', () => {
     const offLine = evaluatePosition(game)
 
     expect(inLine).toBeLessThan(offLine)
+  })
+
+  it('lets a nearly dead king outweigh a whole queen', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    stripArmy(game)
+    place(game, 'king', 'red', 4, 0)
+    const blueKing = place(game, 'king', 'blue', 4, 7)
+    place(game, 'queen', 'blue', 0, 7) // pure material edge, no line to the red king
+
+    const healthy = evaluatePosition(game)
+    expect(healthy).toBeLessThan(0) // blue's queen is worth more than a healthy king
+
+    game.world.require(blueKing, Health).cur = 22 // 9%: one hit from death
+    const wounded = evaluatePosition(game)
+    expect(wounded).toBeGreaterThan(0)
+    // The crisis term should move the score by well over a queen.
+    expect(wounded - healthy).toBeGreaterThan(10)
+  })
+
+  it('counts a threat by the share of the king’s remaining life it removes', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    stripArmy(game)
+    const redKing = place(game, 'king', 'red', 4, 0)
+    place(game, 'king', 'blue', 4, 7)
+    place(game, 'rook', 'blue', 4, 4) // covers the red king's file
+
+    const full = advantageDetail(game).pressure.blue
+    game.world.require(redKing, Health).cur = 15
+    const low = advantageDetail(game).pressure.blue
+
+    expect(low).toBeGreaterThan(full)
+    expect(advantageDetail(game).kingInLethal.red).toBe(true)
+  })
+
+  it('treats a trapped king as decisive whatever the material', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    stripArmy(game)
+    place(game, 'king', 'red', 0, 0) // a8
+    place(game, 'king', 'blue', 7, 7)
+    place(game, 'queen', 'blue', 1, 1) // b7: checks a8 and covers every escape
+
+    const detail = advantageDetail(game)
+    expect(detail.lost.red).toBe(true)
+    expect(detail.score).toBeLessThan(-50)
+    expect(describeAdvantage(detail)).toContain("Orange's king is trapped — checkmate")
+  })
+
+  it('does not treat a safe king with blocked squares as lost', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    stripArmy(game)
+    place(game, 'king', 'red', 0, 0) // a8
+    place(game, 'king', 'blue', 7, 7)
+    place(game, 'queen', 'blue', 2, 1) // c7: does not check a8
+
+    expect(advantageDetail(game).lost.red).toBe(false)
+  })
+
+  it('does not let weapon reload phase flip the evaluation', () => {
+    const game = new Game(8, 'ai-vs-ai')
+    stripArmy(game)
+    const redKing = place(game, 'king', 'red', 3, 0)
+    const blueKing = place(game, 'king', 'blue', 4, 7)
+    const redRook = place(game, 'rook', 'red', 4, 2) // covers the blue king
+    const blueRook = place(game, 'rook', 'blue', 3, 5) // covers the red king
+    game.world.require(redKing, Health).cur = 60
+    game.world.require(blueKing, Health).cur = 60
+
+    // A reloading weapon is still a threat: swapping whose weapon is ready must
+    // not move the score (the old readiness factor flipped the bar each turn).
+    game.world.require(redRook, Weapon).left = 0
+    game.world.require(blueRook, Weapon).left = 1.9
+    const redReady = evaluatePosition(game)
+    game.world.require(redRook, Weapon).left = 1.9
+    game.world.require(blueRook, Weapon).left = 0
+    const blueReady = evaluatePosition(game)
+
+    expect(redReady).toBeCloseTo(blueReady, 6)
+    expect(Math.abs(redReady)).toBeLessThan(0.5)
+  })
+
+  it('damps per-turn bar oscillation', () => {
+    expect(smoothScore(0, 8)).toBeCloseTo(2.8, 6)
+    // Alternating end-to-end targets are attenuated to a small wobble around
+    // the centre instead of slamming end to end.
+    let score = 0
+    for (let i = 0; i < 8; i++) score = smoothScore(score, i % 2 === 0 ? 8 : -8)
+    expect(Math.abs(score)).toBeLessThan(2.5)
   })
 })
 

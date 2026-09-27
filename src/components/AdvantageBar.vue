@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { GameSnapshot } from '../game/game'
-import { advantageFraction } from '../game/advantage'
+import { advantageFraction, smoothScore } from '../game/advantage'
 
 const props = defineProps<{ snapshot: GameSnapshot }>()
 
@@ -9,11 +9,14 @@ const props = defineProps<{ snapshot: GameSnapshot }>()
 const DURATION = 700
 
 /**
- * Displayed bar fraction. It is latched to the turn boundary and tweened over
- * `DURATION`, so the bar makes one smooth move per turn instead of twitching
- * with every shot.
+ * Displayed bar fraction and the eased score behind it. The score is damped
+ * across turns (see `smoothScore`) and only then mapped to a fraction, so a
+ * position where the lead flips turn to turn settles around the centre instead
+ * of slamming end to end. The fraction is tweened over `DURATION` so the bar
+ * makes one smooth move per turn rather than twitching with every shot.
  */
 const displayed = ref(0)
+const easedScore = ref(0)
 let raf = 0
 let primed = false
 
@@ -38,13 +41,14 @@ function animateTo(to: number): void {
 watch(
   () => props.snapshot.turn,
   () => {
-    const to = advantageFraction(props.snapshot.advantage)
+    const score = primed ? smoothScore(easedScore.value, props.snapshot.advantage) : props.snapshot.advantage
+    easedScore.value = score
     if (!primed) {
-      displayed.value = to
+      displayed.value = advantageFraction(score)
       primed = true
       return
     }
-    animateTo(to)
+    animateTo(advantageFraction(score))
   },
   { immediate: true },
 )
