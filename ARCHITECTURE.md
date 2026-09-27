@@ -547,7 +547,9 @@ cell/reservation during movement validation and path planning.
   the slide length. An AI team whose opponent is human is also capped by the
   opponent's per-turn `movesThisTurn`, so it cannot out-move the player within a
   turn (with a floor of one move so a passive player cannot freeze it; nothing
-  carries over between turns). The cap is lifted once either side is king-only
+  carries over between turns). The cap also applies during continuous "mega"
+  play, whose beat counters are reset in `beginMegaTurn`, so free play cannot
+  swarm a passive player. The cap is lifted once either side is king-only
   (the finishing phase), so the AI can press the kill and its own king can
   last-stand even against a passive player. A player-issued order
   (`Order.kind !== 'none'`)

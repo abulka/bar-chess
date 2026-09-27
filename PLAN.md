@@ -246,7 +246,9 @@ capture-advance when the victim's square is not in check.
 turn: it may make at most as many moves that turn as the human makes, and always
 at least one, so a passive player cannot freeze the AI. Order two pieces and the
 AI may move two in the same turn; do nothing and it still gets one move. Nothing
-carries over between turns, so a blocked AI never bursts later. AI-vs-AI is
+carries over between turns, so a blocked AI never bursts later. The rule applies
+to **continuous "mega" play (Play mode) too**: each play beat starts a fresh
+budget, so a passive player faces a holding AI rather than a swarm. AI-vs-AI is
 unrestricted. The **finishing phase is exempt**: once either side is down to its
 king, the AI moves freely so it can press the kill (and its own king can
 last-stand) even when the player makes no moves — otherwise the queen would

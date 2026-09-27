@@ -71,8 +71,10 @@ const system: System = {
       // are free. Player-issued orders bypass the budget, so you can command
       // enemy pieces directly. The finishing phase is exempt: once either side is
       // down to its king, the AI must be free to press the kill — and its own
-      // king free to last-stand — even when the player makes no moves.
-      if (ctx.turnActive && ctx.teams[team].controller === 'ai' && order.kind === 'none') {
+      // king free to last-stand — even when the player makes no moves. This runs
+      // in serialized turns *and* continuous "mega" play (Play mode), where the
+      // beat's counters are reset at `beginMegaTurn`, so free play cannot swarm.
+      if (ctx.teams[team].controller === 'ai' && order.kind === 'none') {
         const other = team === 'red' ? 'blue' : 'red'
         const endgame = ctx.teams[team].kingOnlySince >= 0 || ctx.teams[other].kingOnlySince >= 0
         if (!endgame && ctx.teams[other].controller === 'human') {

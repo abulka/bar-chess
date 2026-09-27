@@ -782,6 +782,69 @@ describe('Game integration — AI move budget', () => {
   })
 })
 
+describe('Game integration — free-play (mega) AI move budget', () => {
+  beforeEach(() => clearComponents())
+
+  /** The live entity standing on `cell`. */
+  function pieceAt(game: Game, x: number, y: number): number {
+    for (const e of game.world.query(Cell)) {
+      const c = game.world.require(e, Cell)
+      if (c.x === x && c.y === y) return e
+    }
+    throw new Error(`no piece at ${x},${y}`)
+  }
+
+  /** Command the blue pawn on `from` to step one square to `to`. */
+  function orderPawn(game: Game, from: { x: number; y: number }, to: { x: number; y: number }): void {
+    game.selected = [pieceAt(game, from.x, from.y)]
+    game.orderAt(to, 'move')
+    game.selected = []
+  }
+
+  it('caps a passive AI in free play instead of letting it swarm', () => {
+    const game = new Game(8) // human-vs-ai, you=blue
+    game.beginMegaTurn()
+    expect(game.snapshot().playing).toBe(true)
+
+    game.runTicks(240)
+    game.togglePause()
+
+    // Nothing ordered: the AI gets its floor of one move and holds, and never
+    // out-moves the player in the beat.
+    expect(game.teams.red.movesMade).toBeLessThanOrEqual(Math.max(game.teams.blue.movesMade, 1))
+  })
+
+  it('matches the player move-for-move in free play', () => {
+    const game = new Game(8)
+    orderPawn(game, { x: 3, y: 6 }, { x: 3, y: 5 }) // d2 -> d3
+    orderPawn(game, { x: 4, y: 6 }, { x: 4, y: 5 }) // e2 -> e3
+
+    game.beginMegaTurn()
+    game.runTicks(400)
+    game.togglePause()
+
+    expect(game.teams.blue.movesMade).toBeGreaterThanOrEqual(2)
+    expect(game.teams.red.movesMade).toBeLessThanOrEqual(game.teams.blue.movesMade + 1)
+  })
+
+  it('replays a human-vs-ai free-play burst exactly under the budget', () => {
+    const game = new Game(8, 'human-vs-ai', 5)
+    orderPawn(game, { x: 3, y: 6 }, { x: 3, y: 5 })
+
+    game.beginMegaTurn()
+    game.runTicks(120)
+    game.togglePause()
+    const end = JSON.stringify(game.toDebugJson())
+
+    game.replayTurn()
+    expect(game.snapshot().replaying).toBe(true)
+    let guard = 0
+    while (game.snapshot().replaying && guard++ < 5000) game.runTicks(1)
+    expect(guard).toBeLessThan(5000)
+    expect(JSON.stringify(game.toDebugJson())).toBe(end)
+  })
+})
+
 describe('Game integration — king guard lethality', () => {
   beforeEach(() => clearComponents())
 

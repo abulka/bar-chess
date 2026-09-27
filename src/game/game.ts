@@ -886,6 +886,11 @@ export class Game {
     this.turn++
     this.megaPending = structuredClone(this.cmds)
     this.megaTicks = 0
+    // Each play beat starts a fresh move budget, so the AI's matching-moves cap
+    // (movement.ts) is measured against the player's moves in this beat rather
+    // than banking moves from earlier beats.
+    this.teams.red.movesThisTurn = 0
+    this.teams.blue.movesThisTurn = 0
     this.megaSnapshot = this.captureTurn()
     this.megaActive = true
     this.paused = false
