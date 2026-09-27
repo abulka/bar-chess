@@ -725,6 +725,7 @@ function confirmFork(): void {
   game.forkTurn()
   forkArmed.value = false
   liveLog.rewind(game.turn)
+  recorder.rewindTo(game.turn)
   refresh()
 }
 
@@ -747,12 +748,14 @@ watch(
 function onJumpTurn(index: number): void {
   game.jumpToTurn(index)
   liveLog.rewind(game.turn)
+  recorder.rewindTo(game.turn)
   refresh()
 }
 
 function onPlayTurn(index: number): void {
   game.replayTurnAt(index)
   liveLog.rewind(game.turn)
+  recorder.rewindTo(game.turn)
   refresh()
 }
 
@@ -764,12 +767,14 @@ function onReplay(): void {
 function onUndo(): void {
   game.undoTurn()
   liveLog.rewind(game.turn)
+  recorder.rewindTo(game.turn)
   refresh()
 }
 
 function onRedo(): void {
   game.redoTurn()
   liveLog.rewind(game.turn)
+  recorder.rewindTo(game.turn)
   refresh()
 }
 

@@ -135,6 +135,19 @@ export class Recorder {
     this.byTurn.clear()
   }
 
+  /**
+   * Drop recorded beats after `turn`, following the history cursor on
+   * undo/redo/jump/replay. The baseline is untouched, so the record still
+   * replays from where it started up to the viewed boundary — without this an
+   * exported record mixed a stale baseline with beats from an abandoned future.
+   */
+  rewindTo(turn: number): void {
+    for (const t of [...this.byTurn.keys()]) {
+      if (t > turn) this.byTurn.delete(t)
+    }
+    this.data.result = null
+  }
+
   /** Replace the recorded state, e.g. to roll back an editor session. */
   restore(record: GameRecord): void {
     this.data = structuredClone(record)

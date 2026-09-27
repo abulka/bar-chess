@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Team } from '../../src/ecs/components'
+import { Cell, Health, PieceType, Team } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
 import { clearComponents } from '../helpers'
 
@@ -235,5 +235,46 @@ describe('turn list & history navigation', () => {
     expect(loaded.importPosition(saved).ok).toBe(true)
     expect(loaded.snapshot().historyTrimmed).toBe(31)
     expect(loaded.snapshot().historyLength).toBe(50)
+  })
+
+  it('never resurrects a piece across history, and replays every beat exactly', () => {
+    const source = new Game(8, 'ai-vs-ai', 2654435769)
+    for (let i = 0; i < 45 && source.winner === null; i++) runTurn(source)
+    const saved = JSON.parse(JSON.stringify(source.exportPosition({ history: true })))
+
+    const loaded = new Game(8, 'ai-vs-ai')
+    expect(loaded.importPosition(saved).ok).toBe(true)
+    const boundaries = loaded.snapshot().turns.length
+
+    const living = (): Set<number> => {
+      const out = new Set<number>()
+      for (const e of loaded.world.query(Cell, Team, PieceType, Health)) {
+        if (loaded.world.require(e, Health).cur > 0) out.add(e)
+      }
+      return out
+    }
+
+    // Walking boundaries forward, a piece that has died must never come back.
+    loaded.jumpToTurn(0)
+    let prev = living()
+    const dead = new Set<number>()
+    for (let i = 1; i < boundaries; i++) {
+      loaded.jumpToTurn(i)
+      const cur = living()
+      for (const e of prev) if (!cur.has(e)) dead.add(e)
+      for (const e of cur) expect(dead.has(e)).toBe(false)
+      prev = cur
+    }
+
+    // Replaying any recorded beat reproduces exactly the boundary it produced.
+    for (let i = 1; i < boundaries; i++) {
+      loaded.jumpToTurn(i)
+      const expected = JSON.stringify(loaded.toDebugJson())
+      loaded.jumpToTurn(i - 1)
+      loaded.replayTurnAt(i)
+      let guard = 0
+      while (loaded.snapshot().replaying && guard++ < 8000) loaded.runTicks(1)
+      expect(JSON.stringify(loaded.toDebugJson())).toBe(expected)
+    }
   })
 })
