@@ -174,6 +174,12 @@ The battle **starts paused**. Give orders, then take a turn:
   undo/redo history, so loading a slot lets you keep undoing, redoing and
   replaying. Saving closes an in-flight mega turn first. If the browser storage
   is full, the slot falls back to a position-only save (undo history is not kept).
+  Every save carries a **simulation version** (`SIM_VERSION`); if the rules/AI
+  changed since it was recorded, loading it clears the turn history and loads the
+  position only, with a warning — an old beat cannot be replayed under new rules,
+  and pretending otherwise made a dead piece appear to come back during replay.
+  `SIM_VERSION` is bumped **only for changes that alter simulation outcomes**;
+  visual/game-feel tweaks never affect saves (effects are render-only).
 
 ## Seeds, self-play & game records
 
@@ -418,6 +424,17 @@ Scope: the **selection** always shows full detail; `my orders` (`o`) and
   choices persist.
   All pieces render at a uniform size. Projectiles are small and distinct per piece (dot / shell /
   lance / tumbling bomb) and travel and rotate in flight.
+- **Hit feedback** — a significant non-lethal hit (at least 20% of the target's
+  max HP) shows a small **pink** burst, flashes the damaged piece in its **own
+  team colour**, and makes it tremble briefly, so a big exchange reads even when
+  a unit survives. Chip damage and killing blows are skipped (deaths keep their
+  own explosion). Every **capture-advance** also plays the small red pulse, not
+  just chess-rule insta-kills, so a killer sliding onto the victim's square is
+  visible. All **explosions are red** (`DEATH_FX_COLOR`): the orange/amber palette
+  is reserved for the Orange team, so an orange blast would read as the wrong side.
+  These effects are **render-only** (`FxLayer`, driven by `explosion`/`advance`/
+  `damage` events and aged by frame time) — they are never part of the world
+  snapshot, so tweaking them can never invalidate a save or a replay.
 - A wide **turn bar** under the toolbar fills as a turn (gold) or replay
   (violet) progresses. It tracks real remaining move work (not a time guess),
   sweeps smoothly, reaches and **holds 100%** on completion, and reads READY

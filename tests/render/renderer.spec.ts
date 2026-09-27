@@ -5,7 +5,8 @@ vi.mock('../../src/render/terrain', () => ({
   bakeTerrain: () => ({ width: 0, height: 0 }),
 }))
 
-import { Health, Motion, PieceType, Position, Render, Stance, Target, Weapon } from '../../src/ecs/components'
+import { Health, Motion, PieceType, Render, Stance, Target, Weapon } from '../../src/ecs/components'
+import { DEATH_FX_COLOR, HIT_FX_COLOR } from '../../src/game/constants'
 import { Game } from '../../src/game/game'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { WEAPONS } from '../../src/game/pieces'
@@ -307,6 +308,42 @@ describe('Renderer autonomous target overlay', () => {
     s.renderer.draw(s.game)
 
     expect(s.ctx.strokes.some((st) => st.style === ENGAGE)).toBe(false)
+  })
+})
+
+describe('Renderer hit impact fx', () => {
+  it('draws the pink burst ring for a hit event', () => {
+    const { renderer, ctx, game } = setup()
+    renderer.handleEvent({
+      seq: 1,
+      tick: 0,
+      phase: 'damage',
+      type: 'damage',
+      msg: '',
+      data: { hitFx: { x: 100, y: 100, severity: 1, target: null } },
+    })
+
+    ctx.strokes = []
+    renderer.draw(game)
+
+    expect(ctx.strokes.some((st) => st.style === HIT_FX_COLOR && st.points.length === 0)).toBe(true)
+  })
+
+  it('draws a red death explosion for an explosion event', () => {
+    const { renderer, ctx, game } = setup()
+    renderer.handleEvent({
+      seq: 1,
+      tick: 0,
+      phase: 'death',
+      type: 'explosion',
+      msg: '',
+      data: { capture: false, radiusTiles: 1.6, x: 100, y: 100 },
+    })
+
+    ctx.strokes = []
+    renderer.draw(game)
+
+    expect(ctx.strokes.some((st) => st.style === DEATH_FX_COLOR && st.points.length === 0)).toBe(true)
   })
 })
 

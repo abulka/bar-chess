@@ -277,4 +277,79 @@ describe('turn list & history navigation', () => {
       expect(JSON.stringify(loaded.toDebugJson())).toBe(expected)
     }
   })
+
+  it('clears history when a save predates the current simulation version', () => {
+    const source = new Game(8, 'ai-vs-ai', 3)
+    runTurn(source)
+    runTurn(source)
+    const saved = JSON.parse(JSON.stringify(source.exportPosition({ history: true })))
+    expect(typeof saved.simVersion).toBe('number')
+    expect(saved.history.length).toBeGreaterThan(1)
+
+    const legacy = JSON.parse(JSON.stringify(saved))
+    delete legacy.simVersion
+
+    const loaded = new Game(8, 'ai-vs-ai')
+    const result = loaded.importPosition(legacy)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.warning).toMatch(/older simulation version/)
+    const snap = loaded.snapshot()
+    expect(snap.turn).toBe(source.turn) // the board still loaded
+    expect(snap.historyLength).toBe(1)
+    expect(snap.historyTrimmed).toBe(0)
+    expect(snap.turns).toHaveLength(1)
+  })
+
+  it('keeps history when the simulation version matches', () => {
+    const source = new Game(8, 'ai-vs-ai', 4)
+    runTurn(source)
+    runTurn(source)
+    const loaded = new Game(8, 'ai-vs-ai')
+    const result = loaded.importPosition(JSON.parse(JSON.stringify(source.exportPosition({ history: true }))))
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.warning).toBeUndefined()
+    expect(loaded.snapshot().turns.length).toBe(3)
+  })
+
+  it('drops the retired Fx store and no longer writes one', () => {
+    const source = new Game(8, 'ai-vs-ai', 9)
+    runTurn(source)
+    runTurn(source)
+    const saved = JSON.parse(JSON.stringify(source.exportPosition({ history: true })))
+    expect(saved.world.stores.some((s: { name: string }) => s.name === 'Fx')).toBe(false)
+
+    // Simulate an older save that still carried the retired Fx store.
+    saved.simVersion = saved.simVersion - 1
+    saved.world.stores.push({ name: 'Fx', entries: [] })
+    for (const entry of saved.history) {
+      entry.state.world.stores.push({ name: 'Fx', entries: [] })
+      if (entry.start) entry.start.world.stores.push({ name: 'Fx', entries: [] })
+    }
+
+    const loaded = new Game(8, 'ai-vs-ai')
+    const result = loaded.importPosition(saved)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.warning).toMatch(/older simulation version/)
+    expect(loaded.snapshot().historyLength).toBe(1)
+  })
+
+  it('snaps a divergent replay back to the stored boundary', () => {
+    const source = new Game(8, 'ai-vs-ai', 6)
+    for (let i = 0; i < 6; i++) runTurn(source)
+    const saved = JSON.parse(JSON.stringify(source.exportPosition({ history: true })))
+    // Corrupt one boundary's tick so the re-simulated replay cannot match it.
+    const boundary = saved.history[4]
+    const tamperedTick = boundary.state.tick + 7
+    boundary.state.tick = tamperedTick
+
+    const loaded = new Game(8, 'ai-vs-ai')
+    expect(loaded.importPosition(saved).ok).toBe(true)
+    loaded.jumpToTurn(3)
+    loaded.replayTurnAt(4)
+    let guard = 0
+    while (loaded.snapshot().replaying && guard++ < 8000) loaded.runTicks(1)
+
+    // The safety net restored the stored boundary instead of keeping the replay.
+    expect(loaded.snapshot().tick).toBe(tamperedTick)
+  })
 })

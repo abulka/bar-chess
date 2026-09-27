@@ -28,6 +28,7 @@ const panning = ref(false)
 
 let renderer: Renderer | null = null
 let observer: ResizeObserver | null = null
+let unsubscribeEvents: (() => void) | null = null
 let pointerDown = false
 let selecting = false
 let commandClick = false
@@ -272,6 +273,7 @@ onMounted(() => {
   renderer = new Renderer(canvas)
   fit()
   props.game.onFrame = () => renderer?.draw(props.game)
+  unsubscribeEvents = props.game.bus.subscribe((event) => renderer?.handleEvent(event))
   observer = new ResizeObserver(() => renderer?.resize())
   if (wrapperRef.value) observer.observe(wrapperRef.value)
   if (import.meta.env.DEV && renderer) {
@@ -281,6 +283,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   props.game.onFrame = null
+  unsubscribeEvents?.()
+  unsubscribeEvents = null
   observer?.disconnect()
 })
 </script>

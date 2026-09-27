@@ -20,6 +20,14 @@ export const SPEEDS = [0.5, 1, 2, 4]
 /** How far an autonomous Attack piece will look for a target (cells). */
 export const ATTACK_LEASH = 8
 
+/**
+ * Simulation/rules version. Bump this by hand on any change to AI, combat or
+ * movement behaviour that would make an old recorded beat replay differently.
+ * Saves stamped with a different version load position-only (their turn history
+ * is cleared) so a replay can never mix old recorded states with new rules.
+ */
+export const SIM_VERSION = 2
+
 /** Seconds a capture-advance step glides for (slower than a normal step). */
 export const CAPTURE_ADVANCE_TRAVEL = 0.75
 /** Capture-advance blast: small, quick triple pulse, matched to the glide. */
@@ -27,6 +35,28 @@ export const CAPTURE_ADVANCE_FX_TTL = 0.75
 export const CAPTURE_ADVANCE_FX_RADIUS = 0.8
 /** Colour of the capture-advance pulses. */
 export const CAPTURE_ADVANCE_FX_COLOR = '#ff3b30'
+
+/**
+ * Normal death explosion colour. Red, never the team tint: the orange/amber
+ * palette is reserved for the Orange team, so an orange blast on a blue piece
+ * (or vice versa) would read as the wrong side.
+ */
+export const DEATH_FX_COLOR = '#ff3b30'
+export const DEATH_FX_TTL = 0.5
+export const DEATH_FX_RADIUS_TILES = 1.6
+
+/**
+ * Hit-impact feedback: a significant non-fatal hit (at least
+ * `HIT_FX_MIN_FRACTION` of the target's max HP) shows a small pink burst plus a
+ * flash on the damaged piece in its own team colour and a brief tremble.
+ * `HIT_FX_MAX_ACTIVE` caps concurrent bursts so splash fire cannot flood the board.
+ */
+export const HIT_FX_TTL = 0.38
+export const HIT_FX_MIN_FRACTION = 0.2
+export const HIT_FX_MIN_RADIUS = 0.22
+export const HIT_FX_MAX_RADIUS = 0.7
+export const HIT_FX_MAX_ACTIVE = 12
+export const HIT_FX_COLOR = '#ff4fb0'
 
 /**
  * Finish pressure: once a side is down to its king alone, incoming damage to

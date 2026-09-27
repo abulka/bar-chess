@@ -129,10 +129,12 @@ const system: System = {
       motion.elapsed = 0
       used.add(killer)
 
+      // The capture pulse is render-only (FxLayer): it shows for ordinary
+      // captures; a chess-rule kill already pulsed red with its explosion.
       ctx.bus.emit('advance', `#${killer} advanced to ${dest.x},${dest.y}`, {
         entity: killer,
         team,
-        data: { cell: dest },
+        data: { cell: dest, x: center.x, y: center.y, chess: intent.chess === true },
       })
     }
 

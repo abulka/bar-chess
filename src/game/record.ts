@@ -1,6 +1,7 @@
 import { Cell, clearAllComponents } from '../ecs/components'
 import type { EventRecord } from '../ecs/events'
 import type { BoardSize } from './boards'
+import { SIM_VERSION } from './constants'
 import { Game } from './game'
 import type { GameMode } from './game'
 import { validatePosition } from './position'
@@ -61,6 +62,8 @@ export interface GameRecord {
   playerTeam: TeamId
   seed: number
   settings: SimSettings
+  /** Simulation/rules version the game was recorded under. */
+  simVersion?: number
   /**
    * The exact battle state the recorded inputs start from (position-only, no
    * history). Restored before the turns are re-applied, so games started from a
@@ -201,6 +204,7 @@ function headerFor(game: Game): GameRecord {
     playerTeam: game.playerTeam,
     seed: game.seed,
     settings: game.simSettings(),
+    simVersion: SIM_VERSION,
     baseline: game.exportPosition(),
     turns: [],
     result: null,
@@ -225,6 +229,11 @@ export interface ReplayResult {
  * concurrently running `Game`.
  */
 export function replayRecord(record: GameRecord, options: ReplayOptions = {}): ReplayResult {
+  if (record.simVersion !== SIM_VERSION) {
+    console.warn(
+      `[bar-chess] replaying a record from simulation v${String(record.simVersion)} under v${SIM_VERSION}; outcomes may differ`,
+    )
+  }
   clearAllComponents()
   const game = new Game(record.size as BoardSize, record.mode, record.seed)
   if (record.baseline) {

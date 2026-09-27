@@ -25,6 +25,8 @@ export interface AdvanceCommand {
   killer: Entity
   victim: Entity
   cell: Vec2
+  /** True when the kill was a chess-rule insta-kill (its own death pulse is enough). */
+  chess?: boolean
 }
 
 export interface Commands {

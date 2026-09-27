@@ -3,8 +3,9 @@ import {
   FINISH_PRESSURE_MAX_BONUS,
   FINISH_PRESSURE_PERIOD_TICKS,
   FINISH_PRESSURE_STEP,
+  HIT_FX_MIN_FRACTION,
 } from '../../game/constants'
-import { Cell, ChessKill, Dead, Health, Motion, PieceType, Target, Team } from '../components'
+import { Cell, ChessKill, Dead, Health, Motion, PieceType, Position, Target, Team } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
@@ -47,6 +48,16 @@ const system: System = {
           )
       health.cur = Math.max(0, health.cur - amount)
 
+      // A significant non-lethal hit carries a render-only impact payload; the
+      // FxLayer turns it into a burst + flash. Chip damage and killing blows are
+      // skipped (deaths have their own explosion).
+      const fraction = health.max > 0 ? amount / health.max : 0
+      const hitPos = ctx.world.get(target, Position)
+      const hitFx =
+        health.cur > 0 && !cmd.lethal && fraction >= HIT_FX_MIN_FRACTION && hitPos
+          ? { x: hitPos.x, y: hitPos.y, severity: fraction, target }
+          : null
+
       const targetComp = ctx.world.get(target, Target)
       if (targetComp && cmd.source !== null) {
         targetComp.lastAttacker = cmd.source
@@ -61,7 +72,7 @@ const system: System = {
       ctx.bus.emit('damage', `#${target} took ${amount} dmg (hp ${health.cur}/${health.max})`, {
         entity: target,
         team,
-        data: { amount, source: cmd.source, kind: cmd.kind },
+        data: { amount, source: cmd.source, kind: cmd.kind, hitFx },
       })
 
       if (health.cur <= 0 && !ctx.world.has(target, Dead)) {
@@ -83,7 +94,12 @@ const system: System = {
           ) {
             const tcell = ctx.world.get(target, Cell)
             if (tcell) {
-              ctx.cmds.advance.push({ killer: cmd.source, victim: target, cell: { x: tcell.x, y: tcell.y } })
+              ctx.cmds.advance.push({
+                killer: cmd.source,
+                victim: target,
+                cell: { x: tcell.x, y: tcell.y },
+                chess: cmd.kind === 'chess',
+              })
             }
           }
         }

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Cell, Health, Motion, Order, PieceType, Position, Stance, Team } from '../../src/ecs/components'
+import type { EventRecord } from '../../src/ecs/events'
 import type { SimContext } from '../../src/ecs/types'
 import { createPiece } from '../../src/game/factory'
 import { PIECES } from '../../src/game/pieces'
@@ -192,5 +193,39 @@ describe('advance system — chess-style capture step', () => {
     advance.update(ctx)
 
     expect(ctx.cmds.advance).toHaveLength(0)
+  })
+
+  it('emits a capture-pulse advance event for an ordinary capture', () => {
+    const ctx = context()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
+    const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
+    kill(ctx, queen, victim)
+    const events: EventRecord[] = []
+    ctx.bus.subscribe((e) => events.push(e))
+
+    advance.update(ctx)
+
+    const event = events.find((e) => e.type === 'advance')
+    expect(event).toBeDefined()
+    expect(event!.data).toMatchObject({ chess: false })
+    expect(typeof event!.data!.x).toBe('number')
+    expect(typeof event!.data!.y).toBe('number')
+  })
+
+  it('tags a chess-rule advance so its pulse is not doubled', () => {
+    const ctx = context()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
+    const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
+    const vcell = { ...ctx.world.require(victim, Cell) }
+    ctx.world.require(queen, Stance).mode = 'attack'
+    ctx.world.destroy(victim)
+    ctx.cmds.advance.push({ killer: queen, victim, cell: vcell, chess: true })
+    const events: EventRecord[] = []
+    ctx.bus.subscribe((e) => events.push(e))
+
+    advance.update(ctx)
+
+    const event = events.find((e) => e.type === 'advance')
+    expect(event?.data).toMatchObject({ chess: true })
   })
 })

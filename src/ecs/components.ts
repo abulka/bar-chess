@@ -152,15 +152,6 @@ export interface ProjectileData {
   waypointIndex: number
 }
 
-export interface FxData {
-  ttl: number
-  maxTtl: number
-  radius: number
-  color: string
-  /** Capture-advance blast: small red triple pulse instead of a kill explosion. */
-  capture?: boolean
-}
-
 export const Position = defineComponent<PositionData>('Position')
 export const Cell = defineComponent<CellData>('Cell')
 export const Team = defineComponent<TeamId>('Team')
@@ -173,7 +164,6 @@ export const Target = defineComponent<TargetData>('Target')
 export const Weapon = defineComponent<WeaponData>('Weapon')
 export const Motion = defineComponent<MotionData>('Motion')
 export const Projectile = defineComponent<ProjectileData>('Projectile')
-export const Fx = defineComponent<FxData>('Fx')
 export const Dead = defineComponent<true>('Dead')
 /** Marks a kill delivered by the chess-kill rule (drives the red pulse FX). */
 export const ChessKill = defineComponent<true>('ChessKill')
@@ -197,7 +187,6 @@ export const ALL_STORES = [
   Weapon,
   Motion,
   Projectile,
-  Fx,
   Dead,
   ChessKill,
 ]

@@ -1,6 +1,5 @@
 import {
   Cell,
-  Fx,
   Health,
   Motion,
   Order,
@@ -14,6 +13,7 @@ import {
   Weapon,
 } from '../ecs/components'
 import type { Entity } from '../ecs/world'
+import type { EventRecord } from '../ecs/events'
 import { buildOccupancy, makeOccupied } from '../game/occupancy'
 import { fireCells, moveDestinations } from '../game/geometry'
 import type { OccupiedFn } from '../game/geometry'
@@ -28,6 +28,7 @@ import { TEAM_IDS } from '../game/constants'
 import type { Game } from '../game/game'
 import { Camera } from './camera'
 import { drawEditorCursor } from './editor'
+import { FxLayer } from './fx'
 import { firingLine, routePolyline, type FiringLine, type FiringSegment } from './overlays'
 import {
   BAR_BG,
@@ -56,6 +57,8 @@ const STANCE_COLORS: Record<string, string> = {
 export class Renderer {
   camera = new Camera()
   time = 0
+  /** Render-only effect pool, fed from the event bus (never part of the sim). */
+  readonly fx = new FxLayer()
 
   private terrain: HTMLCanvasElement | null = null
   private terrainKey = ''
@@ -66,6 +69,11 @@ export class Renderer {
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas
+  }
+
+  /** Forward a simulation event to the effect pool. */
+  handleEvent(record: EventRecord): void {
+    this.fx.handle(record)
   }
 
   resize(): void {
@@ -89,6 +97,7 @@ export class Renderer {
     const dt = this.lastFrameTime > 0 ? Math.min(0.05, (now - this.lastFrameTime) / 1000) : 1 / 60
     this.lastFrameTime = now
     this.time += dt
+    this.fx.update(dt)
     this.camera.update(dt)
     const ctx = this.canvas.getContext('2d')
     if (!ctx) return
@@ -713,9 +722,24 @@ export class Renderer {
       }
     }
 
+    // Pieces that just took a significant hit tremble briefly; the offset decays
+    // with the hit effect's life so it reads as an impact, not permanent jitter.
+    const shake = new Map<Entity, { x: number; y: number }>()
+    for (const fx of this.fx.effects) {
+      if (fx.kind !== 'hit' || fx.target == null) continue
+      const life = fx.maxTtl > 0 ? Math.max(0, fx.ttl / fx.maxTtl) : 0
+      const amp = life * life * t * 0.16
+      shake.set(fx.target, { x: Math.sin(this.time * 72) * amp, y: Math.cos(this.time * 65) * amp })
+    }
+
     for (const e of sorted) {
       const pos = game.world.require(e, Position)
       const render = game.world.require(e, Render)
+      const sh = shake.get(e)
+      if (sh) {
+        ctx.save()
+        ctx.translate(sh.x, sh.y)
+      }
       const health = game.world.require(e, Health)
       const size = render.size * t
 
@@ -804,6 +828,7 @@ export class Renderer {
         ctx.arc(pos.x, pos.y, size * 0.56, 0, Math.PI * 2)
         ctx.stroke()
       }
+      if (sh) ctx.restore()
     }
   }
 
@@ -893,11 +918,42 @@ export class Renderer {
   }
 
   private drawFx(ctx: CanvasRenderingContext2D, game: Game): void {
-    for (const e of game.world.query(Fx, Position)) {
-      const pos = game.world.require(e, Position)
-      const fx = game.world.require(e, Fx)
-      const t = 1 - fx.ttl / fx.maxTtl
-      if (fx.capture) {
+    const tile = game.board.tile
+    for (const fx of this.fx.effects) {
+      const t = fx.maxTtl > 0 ? 1 - fx.ttl / fx.maxTtl : 1
+      const radius = fx.radiusTiles * tile
+      if (fx.kind === 'hit') {
+        // Significant hit: a small pink burst plus a flash on the damaged piece
+        // in its OWN colour (following it if it moves). The piece also trembles
+        // — see the shake applied in `drawPieces`.
+        const targetPos = fx.target != null ? game.world.get(fx.target, Position) : undefined
+        const targetRender = fx.target != null ? game.world.get(fx.target, Render) : undefined
+        const px = targetPos ? targetPos.x : fx.x
+        const py = targetPos ? targetPos.y : fx.y
+        const flash = targetRender?.tint ?? fx.color
+        const fade = Math.max(0, 1 - t)
+        const ring = radius * (0.3 + t * 0.9)
+        // The whole piece flashes in its own colour, bright and brief.
+        ctx.globalAlpha = fade * 0.6
+        ctx.fillStyle = flash
+        ctx.beginPath()
+        ctx.arc(px, py, tile * 0.5, 0, Math.PI * 2)
+        ctx.fill()
+        // Pink ring expanding outward.
+        ctx.globalAlpha = fade * 0.95
+        ctx.strokeStyle = fx.color
+        ctx.lineWidth = 2.5 / this.camera.zoom
+        ctx.beginPath()
+        ctx.arc(px, py, ring, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.globalAlpha = fade
+        ctx.beginPath()
+        ctx.arc(px, py, ring * 0.3 * (1 - t * 0.6), 0, Math.PI * 2)
+        ctx.fill()
+        ctx.globalAlpha = 1
+        continue
+      }
+      if (fx.kind === 'capture') {
         // Capture advance: three quick red pulses racing the killer's glide.
         const pulses = 3
         ctx.strokeStyle = fx.color
@@ -906,29 +962,30 @@ export class Renderer {
           const phase = (t * pulses + i / pulses) % 1
           ctx.globalAlpha = Math.max(0, 1 - t) * (1 - phase) * 0.9
           ctx.beginPath()
-          ctx.arc(pos.x, pos.y, fx.radius * (0.35 + phase * 1.1), 0, Math.PI * 2)
+          ctx.arc(fx.x, fx.y, radius * (0.35 + phase * 1.1), 0, Math.PI * 2)
           ctx.stroke()
         }
         ctx.globalAlpha = Math.max(0, 1 - t) * 0.9
         ctx.fillStyle = fx.color
         ctx.beginPath()
-        ctx.arc(pos.x, pos.y, fx.radius * 0.3 * (1 - t * 0.5), 0, Math.PI * 2)
+        ctx.arc(fx.x, fx.y, radius * 0.3 * (1 - t * 0.5), 0, Math.PI * 2)
         ctx.fill()
         ctx.globalAlpha = 1
         continue
       }
-      const radius = fx.radius * (0.35 + t * 0.9)
+      const blastRadius = radius * (0.35 + t * 0.9)
       const alpha = Math.max(0, 1 - t)
       ctx.globalAlpha = alpha * 0.8
-      ctx.fillStyle = '#ffcf6b'
+      // Death explosions are red, never team/orange-tinted.
+      ctx.fillStyle = fx.color
       ctx.beginPath()
-      ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2)
+      ctx.arc(fx.x, fx.y, blastRadius, 0, Math.PI * 2)
       ctx.fill()
       ctx.globalAlpha = alpha
       ctx.strokeStyle = fx.color
       ctx.lineWidth = 2 / this.camera.zoom
       ctx.beginPath()
-      ctx.arc(pos.x, pos.y, radius * 0.9, 0, Math.PI * 2)
+      ctx.arc(fx.x, fx.y, blastRadius * 0.9, 0, Math.PI * 2)
       ctx.stroke()
       ctx.globalAlpha = 1
     }

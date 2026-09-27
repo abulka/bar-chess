@@ -7,7 +7,6 @@ import type { Entity, WorldSnapshot } from '../ecs/world'
 import type { Commands, SimContext, TeamController, TeamRuntime } from '../ecs/types'
 import {
   Cell,
-  Fx,
   Health,
   Motion,
   Order,
@@ -35,6 +34,7 @@ import {
   RAIL_FRACTION_DEFAULT,
   RAIL_FRACTION_MAX,
   RAIL_FRACTION_MIN,
+  SIM_VERSION,
   SPEEDS,
   TEAM_COLORS,
   TEAM_IDS,
@@ -321,7 +321,7 @@ export interface GameSnapshot {
   warnings: number
   selected: Entity[]
   selectedLines: Array<{ entity: Entity; kind: string; lines: ComponentLine[] }>
-  counts: { entities: number; pieces: number; projectiles: number; fx: number }
+  counts: { entities: number; pieces: number; projectiles: number }
   winner: TeamId | null
   /** Signed static evaluation in pawn points; positive means red is ahead. */
   advantage: number
@@ -1524,6 +1524,31 @@ export class Game {
         this.replayContinuous = false
         this.barProgress = 1
         this.paused = true
+        // Safety net: a replay must land on the boundary it was recorded for.
+        // If it drifted (e.g. a save replayed under changed rules), snap back to
+        // the stored state rather than leaving a divergent world on screen.
+        const expected = this.history[this.cursor]?.state
+        if (expected) {
+          // Compare only outcome-relevant state: presentation-only stores
+          // (`Render`) are ignored so cosmetic changes can never look like a
+          // simulation divergence.
+          const simOnly = (state: TurnState): string => {
+            const s = this.serializeTurnState(state)
+            const stores = s.world.stores.filter((st) => st.name !== 'Render')
+            return JSON.stringify({
+              world: { ...s.world, stores },
+              rng: s.rng,
+              tick: s.tick,
+              turn: s.turn,
+              teams: s.teams,
+              winner: s.winner,
+            })
+          }
+          if (simOnly(this.captureTurn()) !== simOnly(expected)) {
+            this.restoreTurn(expected)
+            this.bus.emit('warn', 'replay diverged from the recorded turn — restored the stored boundary')
+          }
+        }
         // Replayed pieces may have died in the turn; keep the panel focused on a
         // live piece and settle the rules on the boundary we ended at.
         this.selected = this.selected.filter((e) => this.world.isAlive(e))
@@ -2425,12 +2450,16 @@ export class Game {
 
   /**
    * Replace the current battle with a previously exported position. Returns an
-   * error instead of mutating the game when the data is malformed.
+   * error instead of mutating the game when the data is malformed. A save
+   * recorded under a different simulation version loads position-only (its turn
+   * history is cleared) and reports a warning, so replay can never mix old
+   * recorded states with the current rules.
    */
-  importPosition(data: unknown): { ok: true } | { ok: false; error: string } {
+  importPosition(data: unknown): { ok: true; warning?: string } | { ok: false; error: string } {
     const valid = validatePosition(data)
     if (!valid.ok) return valid
     const saved = data as SavedPosition
+    const legacy = saved.simVersion !== SIM_VERSION
 
     this.world.clear()
     this.world.restore(buildWorldSnapshot(saved))
@@ -2486,11 +2515,18 @@ export class Game {
 
     this.terrainVersion++
     this.ctx = this.buildContext()
-    this.restoreHistory(saved)
+    this.restoreHistory(
+      legacy ? { ...saved, history: undefined, cursor: undefined, trimmed: undefined } : saved,
+    )
 
     this.bus.emit('map', `loaded position ${this.board.data.name}`)
     const turns = this.cursor > 0 ? `, ${this.cursor} turn(s) of history` : ''
     this.bus.emit('info', `position loaded (tick ${this.tick}${turns})`)
+    if (legacy) {
+      const warning = 'save was recorded under an older simulation version — turn history cleared'
+      this.bus.emit('warn', warning)
+      return { ok: true, warning }
+    }
     return { ok: true }
   }
 
@@ -2629,7 +2665,6 @@ export class Game {
   snapshot(): GameSnapshot {
     const pieces = this.world.query(Position, Cell).length
     const projectiles = this.world.query(Projectile, Position).length
-    const fx = this.world.query(Fx).length
     const adv = advantageDetail(this)
     const advantage = adv.score
     const advantageTooltip = describeAdvantage(adv)
@@ -2688,7 +2723,7 @@ export class Game {
         kind: this.world.get(e, PieceType)?.kind ?? '?',
         lines: this.inspect(e),
       })),
-      counts: { entities: this.world.count, pieces, projectiles, fx },
+      counts: { entities: this.world.count, pieces, projectiles },
       winner: this.winner,
       advantage,
       advantageTooltip,

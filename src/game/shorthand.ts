@@ -1,6 +1,5 @@
 import {
   Cell,
-  Fx,
   Health,
   Motion,
   Order,
@@ -253,9 +252,6 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
     })
     lines.push(`# proj: ${parts.join('; ')}`)
   }
-
-  const fx = game.world.query(Fx).length
-  if (fx > 0) lines.push(`# fx ${fx}`)
 
   return lines.join('\n')
 }

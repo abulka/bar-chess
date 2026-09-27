@@ -104,11 +104,10 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Weapon` | `{ left }` | seconds until next shot |
 | `Motion` | `{ goal, intent, holdUntilHp, hitStreak, prevCell, goalSetTick, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn, ease?, freeAdvance? }` | grid movement + render interpolation; `intent` is the goal's source (`order`/`preserve`/`defense`/`engage`/`rally`); `holdUntilHp` is a latched safe-hold until that HP (full health for a critical wound, the recovery threshold otherwise); `hitStreak` counts hits since the last step (sustained-fire trigger); `prevCell`/`goalSetTick` drive the anti-dither recency penalty and retreat commitment; `reserved` is the cell being entered; `ease`/`freeAdvance` mark a capture-advance glide (eased, no post-arrival cooldown) |
 | `Projectile` | `{ team, damage, ttl, trajectory, splash, radius, size, shape, spin, color, target, owner, waypoints, waypointIndex }` | |
-| `Fx` | `{ ttl, maxTtl, radius, color, capture? }` | render-only impact/explosion; `capture` selects the small red triple pulse used for chess kills |
 | `Dead` | `true` | marker processed by the death system |
 | `ChessKill` | `true` | kill delivered by the chess-kill rule; selects the red-pulse FX |
 
-Pieces carry `Cell`; projectiles and FX do not, so occupancy only ever contains
+Pieces carry `Cell`; projectiles do not, so occupancy only ever contains
 pieces.
 
 ---
@@ -563,18 +562,23 @@ cell/reservation during movement validation and path planning.
   blockers.
 - **damage** — applies damage with ±10% seeded variance (a `lethal` chess-kill
   command drops the target straight to 0 HP), marks `Dead`, credits kills,
-  increments the victim's `Motion.hitStreak`. When `ctx.finishPressure` is on,
+  increments the victim's `Motion.hitStreak`. A significant non-lethal hit (≥20%
+  of the target's max HP) adds a render-only `hitFx` payload to its `damage` event
+  (the `FxLayer` turns it into a pink burst + piece flash + tremble). When
+  `ctx.finishPressure` is on,
   damage to a king whose side has been king-only for longer than
   `FINISH_PRESSURE_GRACE_TICKS` is multiplied by up to +100% in steps, so an
   attrition siege resolves instead of reaching the study turn cap. A kill
   by a direct blow from a still-living enemy of the victim queues an `advance`
   intent (killer → victim cell) when `ctx.captureAdvance` is on.
-- **death** — spawns an `Fx`, updates losses, queues destruction. A **chess-rule
-  kill** (tagged with the `ChessKill` marker by `damage`) gets its own small,
-  quick **red triple pulse** and a quiet two-thump crunch
-  (`death.capture.<kind>`); ordinary HP kills keep the standard team-coloured
-  blast and boom, even when a capture advance follows.
-- **cleanup** — destroys queued entities and ages FX.
+- **death** — updates losses, queues destruction, and emits an `explosion` event
+  carrying `{ kind, capture, radiusTiles, x, y }`. A **chess-rule kill** (tagged
+  with the `ChessKill` marker by `damage`) gets its own small, quick **red triple
+  pulse** and a quiet two-thump crunch (`death.capture.<kind>`); ordinary HP kills
+  keep the standard **red** explosion (`DEATH_FX_COLOR` — orange is reserved for
+  the Orange team), even when a capture advance follows. No effect entities are
+  created: the render layer draws them.
+- **cleanup** — destroys queued entities.
 - **advance** — drains `cmds.advance`. After cleanup has freed the victim's
   square, an **idle** killer (no active order, queue, path or hop; the attack
   order that just killed this victim does not count) steps along the firing ray
@@ -629,14 +633,18 @@ rank as a single first move (a blocked first square forbids the double step).
 ## 8. Rendering — `src/render/`
 
 The renderer is a read-only view. `Game.onFrame` is set by `BoardView.vue` to
-call `renderer.draw(game)` each animation frame.
+call `renderer.draw(game)` each animation frame. `BoardView` also subscribes the
+game bus to `renderer.handleEvent`, which feeds the render-only `FxLayer`
+(`fx.ts`): explosion/capture/hit effects are spawned from events and aged by
+frame time, never stored in the world.
 
 Draw order: clear → baked terrain (`terrain.ts`, keyed by
 `boardId:WxH:terrainVersion:grid`) → camera transform → spawn zones → scoped
 overlays (move/attack cells, range arcs, paths, destinations, red tracking
 chains) → hover ghosts → pieces (shadow, glyph, health + reload bars, stance
-badge, selection/target rings) → projectiles (shape-specific: dot/shell/lance/
-tumbling bomb) → FX rings → hover cursor → border → chess coordinates.
+badge, selection/target rings; a hit piece trembles) → projectiles
+(shape-specific: dot/shell/lance/tumbling bomb) → FX (red death blast, red
+capture pulse, pink hit burst) → hover cursor → border → chess coordinates.
 
 ### `Camera` — `src/render/camera.ts`
 
@@ -864,6 +872,21 @@ malformed history) before anything is mutated.
   budget),
   resets all transient turn/replay/selection state, pauses and rebuilds `ctx`.
   A position-only save (no `history`) still loads, starting a fresh history.
+  Every save also carries `simVersion` (`SIM_VERSION`, `src/game/constants.ts`).
+  When it does not match the running build, `importPosition` **clears the turn
+  history** and loads the position only, returning a warning: a beat recorded
+  under different rules/AI re-simulates to a different outcome, so replaying it
+  would show a piece dying and then reappearing at the next stored boundary. As
+  a second line of defence, when a replay finishes it compares the live world to
+  the stored boundary (ignoring presentation-only stores such as `Render`) and, on
+  a mismatch, restores the stored state and warns.
+  **`SIM_VERSION` is bumped only for changes that alter simulation outcomes**
+  (AI/combat/movement/entity allocation). Visual-only changes never bump it and
+  never touch saves: effects live in the render-only `FxLayer`
+  (`src/render/fx.ts`), are spawned from `explosion`/`advance`/`damage` events,
+  and are aged by real frame time. The retired `Fx` component is accepted-and-
+  dropped when loading an older save. `App`/`BoardView` subscribe the game bus to
+  the renderer's `handleEvent`, exactly like `AudioEngine`.
 - **Save/Load**: named slots in **IndexedDB** (`src/game/storage.ts` over the
   Promise wrapper `src/game/idb.ts`, DB `bar-chess`), split between a light
   `saveIndex` store (meta) and a `saves` store (`{ id, data }`) so listing never

@@ -819,7 +819,7 @@ function applyLoaded(data: unknown): void {
     ioMessage.value = result.error
     return
   }
-  ioMessage.value = ''
+  ioMessage.value = result.warning ?? ''
   boardView.value?.fit()
   recorder.reset()
   liveLog.begin()

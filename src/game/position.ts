@@ -2,6 +2,7 @@ import * as components from '../ecs/components'
 import type { ComponentStore, Entity, WorldSnapshot } from '../ecs/world'
 import { Board } from './board'
 import type { MapData } from './board'
+import { SIM_VERSION } from './constants'
 import type { GameMode, OverlayFlags } from './game'
 import type { Commands, TeamRuntime } from '../ecs/types'
 import type { SimSettings } from './settings'
@@ -53,6 +54,12 @@ export interface SavedHistoryEntry {
  */
 export interface SavedPosition {
   version: number
+  /**
+   * Simulation/rules version the state was produced under. A save with a
+   * different (or missing) value loads position-only, because its recorded
+   * beats would replay differently under the current rules.
+   */
+  simVersion?: number
   board: MapData & { terrain: number[] }
   world: SerializedWorld
   rng: number
@@ -84,6 +91,14 @@ for (const value of Object.values(components)) {
   }
 }
 
+/**
+ * Stores that once existed but no longer belong to the simulation. They are
+ * accepted on load and dropped, so an old save still opens (its `simVersion`
+ * gate clears the recorded beats). `Fx` moved out of the ECS into the render-only
+ * `FxLayer`.
+ */
+const RETIRED_STORES = new Set(['Fx'])
+
 export type ValidationResult = { ok: true } | { ok: false; error: string }
 
 function validateWorld(world: unknown): string | null {
@@ -93,7 +108,9 @@ function validateWorld(world: unknown): string | null {
     if (!store || typeof store.name !== 'string' || !Array.isArray(store.entries)) {
       return 'malformed component store'
     }
-    if (!STORE_REGISTRY[store.name]) return `unknown component store "${store.name}"`
+    if (!STORE_REGISTRY[store.name] && !RETIRED_STORES.has(store.name)) {
+      return `unknown component store "${store.name}"`
+    }
   }
   return null
 }
@@ -144,6 +161,9 @@ export function validatePosition(data: unknown): ValidationResult {
   if (d.version !== POSITION_VERSION) {
     return { ok: false, error: `unsupported position version ${String(d.version)} (expected ${POSITION_VERSION})` }
   }
+  if (d.simVersion !== undefined && typeof d.simVersion !== 'number') {
+    return { ok: false, error: 'malformed sim version' }
+  }
   const board = d.board
   if (!board || typeof board !== 'object' || !Array.isArray(board.terrain)) {
     return { ok: false, error: 'missing board terrain' }
@@ -192,6 +212,7 @@ export function serializePosition(game: {
   const captured = game.world.capture()
   return {
     version: POSITION_VERSION,
+    simVersion: SIM_VERSION,
     board: { ...game.board.data, terrain: Array.from(game.board.terrain) },
     world: serializeWorldSnapshot(captured),
     rng: game.rng.getState(),
@@ -220,10 +241,13 @@ export function buildWorldSnapshot(saved: { world: SerializedWorld }): WorldSnap
   return {
     next: saved.world.next,
     entities: saved.world.entities.slice(),
-    stores: saved.world.stores.map((s) => ({
-      store: STORE_REGISTRY[s.name],
-      entries: s.entries as Array<[Entity, unknown]>,
-    })),
+    // Retired stores (e.g. the old `Fx`) are silently dropped.
+    stores: saved.world.stores
+      .filter((s) => STORE_REGISTRY[s.name] !== undefined)
+      .map((s) => ({
+        store: STORE_REGISTRY[s.name],
+        entries: s.entries as Array<[Entity, unknown]>,
+      })),
   }
 }
 
