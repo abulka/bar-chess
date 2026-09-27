@@ -1,6 +1,7 @@
 import { cellsBetween, chebyshev, containsCell, fireCells, moveDestinations } from '../../game/geometry'
 import type { OccupiedFn } from '../../game/geometry'
 import { kingOf } from '../../game/healing'
+import { enemyCoverage } from '../../game/kingSafety'
 import { dist, dist2, vecEquals } from '../../game/math'
 import { makeOccupied, occupiedExcept } from '../../game/occupancy'
 import { PIECES, WEAPONS } from '../../game/pieces'
@@ -138,6 +139,7 @@ export function aiKingGoal(
     return 0
   }
 
+  const covered = enemyCoverage(ctx.board, ctx.world, ctx.occupancy, king, team)
   const step = evaluateSafeStep(
     ctx,
     cell,
@@ -151,6 +153,7 @@ export function aiKingGoal(
         secondary: home ? dist(c.x, c.y, home.x, home.y) : 0,
         penalty: ditherPenalty(c, options),
       }),
+    (c) => !covered.has(ctx.board.cellIndex(c.x, c.y)),
   )
   if (step === null) return null
 
@@ -179,10 +182,14 @@ export interface LoneKingOptions {
  * Lone-king policy: a king with no field pieces left never runs, because it is
  * faster than its attackers and dodging forever turned material wins into
  * turn-cap draws. Instead, when a threat is inside `LAST_STAND_RADIUS` it walks
- * straight at it, so the range-1 king guard (80% of max HP) becomes a real
- * threat and the finish resolves either way. Otherwise it returns to its post —
- * unless both sides are king-only, when it seeks the enemy king so an A-vs-A
- * king duel cannot idle out to the turn cap.
+ * toward it, so the range-1 king guard (80% of max HP) becomes a real threat
+ * and the finish resolves either way. Otherwise it returns to its post.
+ *
+ * Kings obey the no-check rule, so candidates covered by an enemy weapon are
+ * never chosen: against the enemy king (both sides king-only) this naturally
+ * settles into chess opposition at distance 2 — neither king may close, and the
+ * game is a draw unless field pieces remain. Against a field threat the king
+ * takes any legal adjacent square it can reach, or holds when there is none.
  */
 export function loneKingGoal(
   ctx: SimContext,
@@ -226,7 +233,10 @@ export function loneKingGoal(
 
   const selfFree = occupiedExcept(ctx.board, ctx.occupancy, king)
   const coverages = buildCoverage(ctx, threats, selfFree)
-  const moves = moveDestinations(ctx.board, cell, def.move, team, makeOccupied(ctx.board, ctx.occupancy))
+  const covered = enemyCoverage(ctx.board, ctx.world, ctx.occupancy, king, team)
+  const moves = moveDestinations(ctx.board, cell, def.move, team, makeOccupied(ctx.board, ctx.occupancy)).filter(
+    (c) => !covered.has(ctx.board.cellIndex(c.x, c.y)),
+  )
   let best: Vec2 | null = null
   let bestGap = targetGap
   let bestDanger = Infinity

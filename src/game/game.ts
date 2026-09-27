@@ -43,6 +43,7 @@ import {
 import { coordName } from './coords'
 import { containsCell, fireCells, NEVER } from './geometry'
 import type { OccupiedFn } from './geometry'
+import { enemyCoverage } from './kingSafety'
 import { dist2, healthRatio, vecEquals } from './math'
 import { attackPlan } from './approach'
 import { advantageDetail, describeAdvantage } from './advantage'
@@ -548,12 +549,21 @@ export class Game {
   // is currently showing; `history.length - 1 === cursor` means "at the latest".
   private history: HistoryEntry[] = []
   private cursor = 0
-  /** Beats dropped off the front of the history by HISTORY_LIMIT. */
+  /** Beats dropped off the front of the history by the retention budget. */
   private historyTrimmed = 0
   /** Lazily rebuilt turn-list metadata; null whenever the history changes. */
   private summaries: TurnSummary[] | null = null
-  /** Cap on retained turn states so long AI-vs-AI runs cannot grow unbounded. */
-  private static readonly HISTORY_LIMIT = 100
+  /** Always keep this many beats of undo, even on a huge board. */
+  private static readonly HISTORY_MIN_BEATS = 50
+  /** Hard ceiling on retained beats, so history scans stay cheap. */
+  private static readonly HISTORY_MAX_BEATS = 1000
+  /**
+   * Cap on retained history by weight, not beat count: the sum of entity
+   * records across every stored start/end snapshot. Counting beats alone either
+   * threw away long 8x8 games or let 64x64 games grow unbounded; entities track
+   * the real memory driver. ~20k keeps several hundred beats on a normal board.
+   */
+  private static readonly HISTORY_ENTITY_BUDGET = 20_000
   // Turns are serialized (one move at a time), so the cap is generous; the turn
   // normally ends as soon as every piece has moved or is blocked.
   private static readonly TURN_MAX_TICKS = 240
@@ -906,14 +916,36 @@ export class Game {
   private pushHistory(entry: HistoryEntry): void {
     this.history.length = this.cursor + 1
     this.history.push(entry)
-    if (this.history.length > Game.HISTORY_LIMIT) {
-      this.history.shift()
-      this.historyTrimmed++
-    }
+    this.historyTrimmed += this.trimHistory()
     this.cursor = this.history.length - 1
     this.summaries = null
     // A completed beat is the new boundary; its orders are the baseline now.
     this.ordersTouched = false
+  }
+
+  /** Entity records stored by one boundary (start + end snapshots). */
+  private historyWeight(entry: HistoryEntry): number {
+    return entry.state.world.entities.length + (entry.start ? entry.start.world.entities.length : 0)
+  }
+
+  /**
+   * Drop the oldest beats until the retained history fits the entity budget and
+   * the hard beat ceiling, always keeping `HISTORY_MIN_BEATS`. Returns how many
+   * were dropped; callers adjust `cursor`/`historyTrimmed`.
+   */
+  private trimHistory(): number {
+    let weight = 0
+    for (const entry of this.history) weight += this.historyWeight(entry)
+    let dropped = 0
+    while (
+      this.history.length > Game.HISTORY_MIN_BEATS &&
+      (this.history.length > Game.HISTORY_MAX_BEATS || weight > Game.HISTORY_ENTITY_BUDGET)
+    ) {
+      weight -= this.historyWeight(this.history[0])
+      this.history.shift()
+      dropped++
+    }
+    return dropped
   }
 
   /** Start any buffered beat once the current turn/replay/mega turn finishes. */
@@ -1679,7 +1711,7 @@ export class Game {
   private pushHistoryBoundary(): void {
     this.history.length = this.cursor + 1
     this.history.push(this.boundary())
-    if (this.history.length > Game.HISTORY_LIMIT) this.history.shift()
+    this.historyTrimmed += this.trimHistory()
     this.cursor = this.history.length - 1
   }
 
@@ -1870,7 +1902,7 @@ export class Game {
     const never = NEVER
 
     if (order.kind === 'goto' && order.dest) {
-      return findPath(this.board, cell, order.dest, def.move, team, never).cells.length === 0
+      return findPath(this.board, cell, order.dest, def.move, team, this.kingSafe(e, team, never)).cells.length === 0
     }
     if (order.kind === 'attack' && order.target !== null && this.world.isAlive(order.target)) {
       // A positionally impossible target still settles once the piece is parked
@@ -1881,9 +1913,10 @@ export class Game {
       const tcell = this.world.get(order.target, Cell)
       if (!tcell) return false
       const geometry = WEAPONS[def.weapon].geometry
-      const plan = attackPlan(this.board, cell, tcell, def.move, geometry, team, never)
+      const avoid = kind === 'king' ? this.kingSafe(e, team, never) : undefined
+      const plan = attackPlan(this.board, cell, tcell, def.move, geometry, team, never, avoid)
       if (plan.reachable) return false
-      return findPath(this.board, cell, plan.cell, def.move, team, never).cells.length === 0
+      return findPath(this.board, cell, plan.cell, def.move, team, avoid ?? never).cells.length === 0
     }
     return false
   }
@@ -2314,14 +2347,13 @@ export class Game {
     const entries = saved.history.map((entry) => this.deserializeHistoryEntry(entry))
     let cursor = saved.cursor ?? entries.length - 1
     let trimmed = saved.trimmed ?? 0
-    if (entries.length > Game.HISTORY_LIMIT) {
-      const drop = entries.length - Game.HISTORY_LIMIT
-      entries.splice(0, drop)
+    this.history = entries
+    const drop = this.trimHistory()
+    if (drop > 0) {
       cursor -= drop
       trimmed += drop
     }
-    this.history = entries
-    this.cursor = Math.max(0, Math.min(cursor, entries.length - 1))
+    this.cursor = Math.max(0, Math.min(cursor, this.history.length - 1))
     this.historyTrimmed = trimmed
   }
 
@@ -2477,7 +2509,8 @@ export class Game {
     const geometry = WEAPONS[def.weapon].geometry
     const occ = buildOccupancy(this.world, this.board)
     const blocked = occupiedExcept(this.board, occ, e)
-    const plan = attackPlan(this.board, cell, tcell, def.move, geometry, team, blocked)
+    const avoid = kind === 'king' ? this.kingSafe(e, team, NEVER) : undefined
+    const plan = attackPlan(this.board, cell, tcell, def.move, geometry, team, blocked, avoid)
     if (plan.inRange) {
       clearMotion(motion)
       motion.path = []
@@ -2505,13 +2538,24 @@ export class Game {
     if (!cell || !kind || !team) return
     const def = PIECES[kind]
     if (!def) return
-    let result = findPath(this.board, cell, dest, def.move, team, occupied)
+    let result = findPath(this.board, cell, dest, def.move, team, this.kingSafe(e, team, occupied))
     if (!result.found && result.cells.length === 0 && fallback) {
-      result = findPath(this.board, cell, dest, def.move, team, fallback)
+      result = findPath(this.board, cell, dest, def.move, team, this.kingSafe(e, team, fallback))
     }
     motion.path = result.cells
     motion.replanAt = this.tick + 15
     motion.blocked = !result.found
+  }
+
+  /**
+   * An occupied predicate that also blocks chess-check squares when `e` is a
+   * king, so previews and planned routes never draw a step into check.
+   */
+  private kingSafe(e: Entity, team: TeamId, base: OccupiedFn): OccupiedFn {
+    if (this.world.get(e, PieceType)?.kind !== 'king') return base
+    const occ = buildOccupancy(this.world, this.board)
+    const covered = enemyCoverage(this.board, this.world, occ, e, team)
+    return (x, y) => base(x, y) || covered.has(this.board.cellIndex(x, y))
   }
 
   /** Treats friendly pieces as passable (they move); enemies and walls block. */

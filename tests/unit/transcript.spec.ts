@@ -25,16 +25,16 @@ function trace(): TurnTrace[] {
       turn: 0,
       tick: 0,
       pieces: [
-        { entity: 1, team: 'red', kind: 'pawn', cell: { x: 4, y: 6 }, goal: null, moving: false, movedThisTurn: false, orderKind: 'none', target: null, underFire: false, hp: 42, maxHp: 42 },
-        { entity: 2, team: 'blue', kind: 'pawn', cell: { x: 3, y: 5 }, goal: null, moving: false, movedThisTurn: false, orderKind: 'none', target: null, underFire: false, hp: 42, maxHp: 42 },
+        { entity: 1, team: 'red', kind: 'pawn', cell: { x: 4, y: 6 }, goal: null, moving: false, movedThisTurn: false, orderKind: 'none', target: null, underFire: false, inCheck: false, hp: 42, maxHp: 42 },
+        { entity: 2, team: 'blue', kind: 'pawn', cell: { x: 3, y: 5 }, goal: null, moving: false, movedThisTurn: false, orderKind: 'none', target: null, underFire: false, inCheck: false, hp: 42, maxHp: 42 },
       ],
     },
     {
       turn: 1,
       tick: 100,
       pieces: [
-        { entity: 1, team: 'red', kind: 'pawn', cell: { x: 4, y: 6 }, goal: null, moving: false, movedThisTurn: false, orderKind: 'none', target: 2, underFire: true, hp: 34, maxHp: 42 },
-        { entity: 2, team: 'blue', kind: 'pawn', cell: { x: 3, y: 6 }, goal: null, moving: false, movedThisTurn: true, orderKind: 'none', target: 1, underFire: false, hp: 42, maxHp: 42 },
+        { entity: 1, team: 'red', kind: 'pawn', cell: { x: 4, y: 6 }, goal: null, moving: false, movedThisTurn: false, orderKind: 'none', target: 2, underFire: true, inCheck: false, hp: 34, maxHp: 42 },
+        { entity: 2, team: 'blue', kind: 'pawn', cell: { x: 3, y: 6 }, goal: null, moving: false, movedThisTurn: true, orderKind: 'none', target: 1, underFire: false, inCheck: false, hp: 42, maxHp: 42 },
       ],
     },
   ]

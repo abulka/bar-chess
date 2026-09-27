@@ -1,5 +1,6 @@
 import { chebyshev, containsCell, fireCells } from '../../game/geometry'
 import { HEAL_RADIUS } from '../../game/healing'
+import { enemyCoverage } from '../../game/kingSafety'
 import { dist, dist2, vecEquals } from '../../game/math'
 import { occupiedExcept } from '../../game/occupancy'
 import { reachableCells } from '../../game/pathfind'
@@ -243,6 +244,10 @@ export function escapeGoal(
     if (!keepCell) return false
     return containsCell(fireCells(ctx.board, { x, y }, WEAPONS[def.weapon].geometry, team, selfFree), keepCell.x, keepCell.y)
   }
+  // A king's escape must never step into check: filter every covered square out.
+  const covered =
+    kind === 'king' ? enemyCoverage(ctx.board, ctx.world, ctx.occupancy, piece, team) : null
+  const legal = covered ? (c: Vec2) => !covered.has(ctx.board.cellIndex(c.x, c.y)) : undefined
 
   const step = evaluateSafeStep(
     ctx,
@@ -253,6 +258,7 @@ export function escapeGoal(
     threats,
     proximityPenalty,
     (field, c) => field.metrics(c.x, c.y, { prefer: keepsShot(c.x, c.y), penalty: cellPenalty(c) }),
+    legal,
   )
   if (step === null) return null
 

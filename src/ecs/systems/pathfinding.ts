@@ -1,8 +1,10 @@
 import { vecEquals } from '../../game/math'
+import { enemyCoverage } from '../../game/kingSafety'
 import { occupiedExcept } from '../../game/occupancy'
 import { findPath } from '../../game/pathfind'
 import { PIECES } from '../../game/pieces'
 import { Cell, Motion, Order, PieceType, Team } from '../components'
+import type { OccupiedFn } from '../../game/geometry'
 import type { System } from '../pipeline'
 
 // Ordered-attack re-plan cadence in ticks: longer once a real route is found,
@@ -64,12 +66,19 @@ const system: System = {
 
       budget--
       const team = ctx.world.require(e, Team)
+      // A king routes around enemy coverage: every covered square is treated as
+      // blocked for both live and theoretical plans, so it never pathes into check.
+      const covered =
+        kind === 'king' ? enemyCoverage(ctx.board, ctx.world, ctx.occupancy, e, team) : null
+      const routeOccupied: OccupiedFn = covered
+        ? (x, y) => liveOccupied(x, y) || covered.has(ctx.board.cellIndex(x, y))
+        : liveOccupied
 
       if (isAttack) {
         const targetEnt = order.target
         const targetCell =
           targetEnt !== null && targetEnt !== undefined ? ctx.world.get(targetEnt, Cell) : undefined
-        const live = findPath(ctx.board, cell, goal, def.move, team, liveOccupied)
+        const live = findPath(ctx.board, cell, goal, def.move, team, routeOccupied)
         // Live route if it reaches the goal; otherwise a best-effort partial so
         // the piece still creeps toward it; otherwise a fresh theoretical route
         // (only the target's own square avoided) so the intended line stays
@@ -84,8 +93,10 @@ const system: System = {
                 def.move,
                 team,
                 targetCell !== undefined
-                  ? (x: number, y: number) => x === targetCell.x && y === targetCell.y
-                  : liveOccupied,
+                  ? (x: number, y: number) =>
+                      (x === targetCell.x && y === targetCell.y) ||
+                      (covered?.has(ctx.board.cellIndex(x, y)) ?? false)
+                  : routeOccupied,
               )
         motion.path = result.cells
         motion.blocked = !live.found
@@ -93,7 +104,7 @@ const system: System = {
         continue
       }
 
-      const result = findPath(ctx.board, cell, goal, def.move, team, liveOccupied)
+      const result = findPath(ctx.board, cell, goal, def.move, team, routeOccupied)
       motion.path = result.cells
       motion.replanAt = ctx.tick + (result.found ? 15 : 10)
       motion.blocked = !result.found

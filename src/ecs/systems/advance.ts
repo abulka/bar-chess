@@ -1,5 +1,6 @@
 import { CAPTURE_ADVANCE_TRAVEL } from '../../game/constants'
 import { containsCell, fireCells } from '../../game/geometry'
+import { enemyCoverage } from '../../game/kingSafety'
 import { vecEquals } from '../../game/math'
 import { buildOccupancy, makeOccupied, occupiedExcept } from '../../game/occupancy'
 import { clearMotion } from '../../game/queue'
@@ -100,6 +101,11 @@ const system: System = {
       }
       // Don't step into a firing envelope that would kill the killer.
       if (!advanceSafe(ctx, killer, dest)) continue
+      // A king never capture-advances into check.
+      if (ctx.world.require(killer, PieceType).kind === 'king') {
+        const covered = enemyCoverage(board, ctx.world, ctx.occupancy, killer, team)
+        if (covered.has(destIdx)) continue
+      }
 
       occupancy.set(destIdx, killer)
       const center = board.cellCenter(dest.x, dest.y)

@@ -156,8 +156,10 @@ export function evaluateSafeStep(
   threats: Threat[],
   proximityPenalty: (chebyshevDist: number) => number,
   score: (field: ThreatField, c: Vec2) => SafeStepMetrics,
+  legal?: (c: Vec2) => boolean,
 ): SafeStepResult | null {
-  const options = moveDestinations(ctx.board, cell, move, team, makeOccupied(ctx.board, ctx.occupancy))
+  let options = moveDestinations(ctx.board, cell, move, team, makeOccupied(ctx.board, ctx.occupancy))
+  if (legal) options = options.filter(legal)
   const field = threatField(coverages, threats, proximityPenalty)
   const best = bestSafeStep(options, (c) => score(field, c))
   if (best === null) return null

@@ -1,11 +1,12 @@
 import { ATTACK_LEASH, TEAM_IDS } from '../../game/constants'
 import { chebyshev } from '../../game/geometry'
+import { enemyCoverage } from '../../game/kingSafety'
 import { healthRatio, vecEquals } from '../../game/math'
 import { makeOccupied } from '../../game/occupancy'
 import { HEAL_RADIUS, kingOf } from '../../game/healing'
 import { attackPlan, inFiringGeometry } from '../../game/approach'
 import { coordName } from '../../game/coords'
-import { PIECES, WEAPONS } from '../../game/pieces'
+import { PIECES, WEAPONS, weaponDamage } from '../../game/pieces'
 import type { PieceDef } from '../../game/pieces'
 import { destReachable as canReach } from '../../game/pathfind'
 import { noteOrder, clearMotion, clearOrder, promoteNext, rechainQueue } from '../../game/queue'
@@ -141,14 +142,21 @@ function pursue(
   team: 'red' | 'blue',
   avoid?: (x: number, y: number) => boolean,
 ): { x: number; y: number } | null {
-  const def = PIECES[ctx.world.require(e, PieceType).kind]
+  const kind = ctx.world.require(e, PieceType).kind
+  const def = PIECES[kind]
   if (!def) return null
   const cell = ctx.world.require(e, Cell)
   const tcell = ctx.world.require(target, Cell)
   const occupied = makeOccupied(ctx.board, ctx.occupancy)
   const weaponGeom = WEAPONS[def.weapon].geometry
   const recent = ctx.world.get(e, Motion)?.prevCell ?? null
-  const plan = attackPlan(ctx.board, cell, tcell, def.move, weaponGeom, team, occupied, avoid, recent)
+  // A king must also avoid firing cells that would put it in check.
+  let blocked = avoid
+  if (kind === 'king') {
+    const covered = enemyCoverage(ctx.board, ctx.world, ctx.occupancy, e, team)
+    blocked = (x, y) => (avoid ? avoid(x, y) : false) || covered.has(ctx.board.cellIndex(x, y))
+  }
+  const plan = attackPlan(ctx.board, cell, tcell, def.move, weaponGeom, team, occupied, blocked, recent)
   return plan.inRange ? null : plan.cell
 }
 
@@ -527,24 +535,34 @@ const system: System = {
         continue
       }
 
-      // The AI king defends its post instead of charging with the army.
+      // The AI king defends its post instead of charging with the army. Once the
+      // enemy is down to its king alone it advances to opposition (distance 2;
+      // the no-check rule forbids closing further), supporting the finish.
       if (controller === 'ai' && isKing) {
         const threats = kingThreats(ctx, e, team, kingThreatMemo)
-        const goal = aiKingGoal(ctx, e, team, threats, {
-          prevCell: motion.prevCell,
-          sticky: committedGoal(motion, 'defense', ctx.tick),
-        })
+        const goal =
+          endgame && enemyKing !== null
+            ? loneKingGoal(ctx, e, team, threats, { enemyKingOnly: true })
+            : aiKingGoal(ctx, e, team, threats, {
+                prevCell: motion.prevCell,
+                sticky: committedGoal(motion, 'defense', ctx.tick),
+              })
         setGoal(motion, goal, goal === null ? 'none' : 'defense', ctx.tick)
         continue
       }
 
       // Finishing phase: the enemy has only its king left, so hunt it directly.
       // This deliberately skips bodyguard duty and self-preservation — a
-      // wounded attacker must still take the shot that ends the game.
+      // wounded attacker must still take the shot that ends the game. A piece
+      // that survives one king guard (`hp > 0.8*maxHp`) may also enter the
+      // enemy king's 3×3 to trap it; a piece that would die there keeps its
+      // distance and shoots from outside the ring.
       if (endgame && enemyKing !== null) {
         target.entity = enemyKing
         target.retargetAt = ctx.tick + 12
-        const goal = pursue(ctx, e, enemyKing, team, enemyDanger)
+        const guardHit = hp ? weaponDamage(WEAPONS.kingGuard, hp.max) : Infinity
+        const canTankGuard = hp !== undefined && hp.cur > guardHit
+        const goal = pursue(ctx, e, enemyKing, team, canTankGuard ? undefined : enemyDanger)
         setGoal(motion, goal, goal === null ? 'none' : 'engage', ctx.tick)
         continue
       }

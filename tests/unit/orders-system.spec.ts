@@ -981,6 +981,34 @@ describe('orders system — damage-aware retreats and last stand', () => {
     expect(chebyshev(motion.goal!.x, motion.goal!.y, 4, 7)).toBeLessThan(7)
   })
 
+  it('advances an endgame AI king to opposition, never adjacent', () => {
+    const ctx = makeContext()
+    ctx.teams.red.controller = 'ai'
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 2 })
+    createPiece(ctx, 'red', PIECES.queen, { x: 0, y: 0 })
+    createPiece(ctx, 'blue', PIECES.king, { x: 4, y: 5 }) // gap 3
+
+    run(ctx)
+
+    const motion = ctx.world.require(king, Motion)
+    expect(motion.intent).toBe('defense')
+    expect(motion.goal).not.toBeNull()
+    // Closing to distance 2 is legal; distance 1 is covered by the enemy king.
+    expect(chebyshev(motion.goal!.x, motion.goal!.y, 4, 5)).toBe(2)
+  })
+
+  it('holds at opposition rather than stepping adjacent to the enemy king', () => {
+    const ctx = makeContext()
+    ctx.teams.red.controller = 'ai'
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 3 })
+    createPiece(ctx, 'red', PIECES.queen, { x: 0, y: 0 })
+    createPiece(ctx, 'blue', PIECES.king, { x: 4, y: 5 }) // gap 2, all neighbours covered
+
+    run(ctx)
+
+    expect(ctx.world.require(king, Motion).goal).toBeNull()
+  })
+
   it('last-stands for a player king only in Attack stance', () => {
     const ctx = makeContext()
     const active = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 4 })

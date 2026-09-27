@@ -1,4 +1,5 @@
 import { moveDestinations } from '../../game/geometry'
+import { enemyCoverage } from '../../game/kingSafety'
 import { lerp, vecEquals } from '../../game/math'
 import { buildOccupancy, occupiedExcept } from '../../game/occupancy'
 import { PIECES } from '../../game/pieces'
@@ -68,10 +69,13 @@ const system: System = {
       // always at least one, so a passive player cannot freeze the AI. Nothing
       // carries over, so a blocked AI never bursts later. In AI-vs-AI both sides
       // are free. Player-issued orders bypass the budget, so you can command
-      // enemy pieces directly.
+      // enemy pieces directly. The finishing phase is exempt: once either side is
+      // down to its king, the AI must be free to press the kill — and its own
+      // king free to last-stand — even when the player makes no moves.
       if (ctx.turnActive && ctx.teams[team].controller === 'ai' && order.kind === 'none') {
         const other = team === 'red' ? 'blue' : 'red'
-        if (ctx.teams[other].controller === 'human') {
+        const endgame = ctx.teams[team].kingOnlySince >= 0 || ctx.teams[other].kingOnlySince >= 0
+        if (!endgame && ctx.teams[other].controller === 'human') {
           const allowance = Math.max(ctx.teams[other].movesThisTurn, 1)
           if (ctx.teams[team].movesThisTurn >= allowance) continue
         }
@@ -97,6 +101,14 @@ const system: System = {
           motion.replanAt = Math.min(motion.replanAt, ctx.tick + 4)
           motion.path = []
         }
+        continue
+      }
+      // A king may never walk into check: refuse a hop onto a covered square and
+      // let pathfinding re-route next tick.
+      if (kind === 'king' && enemyCoverage(board, ctx.world, occupancy, e, team).has(board.cellIndex(next.x, next.y))) {
+        motion.blocked = true
+        motion.replanAt = Math.min(motion.replanAt, ctx.tick + 4)
+        motion.path = []
         continue
       }
 

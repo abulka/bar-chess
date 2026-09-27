@@ -85,6 +85,53 @@ describe('endgame king targeting', () => {
   })
 })
 
+describe('endgame AI move budget and finish', () => {
+  beforeEach(() => clearComponents())
+
+  it('lets a second AI piece move once the finish is on', () => {
+    const game = new Game(8, 'human-vs-ai', 5)
+    stripArmy(game)
+    // The queen begins off the king's lines, so it must spend a move to pursue.
+    createPiece(shim(game), 'red', PIECES.queen, { x: 2, y: 2 })
+    const king = createPiece(shim(game), 'red', PIECES.king, { x: 4, y: 0 })
+    const blueKing = createPiece(shim(game), 'blue', PIECES.king, { x: 0, y: 3 })
+    game.teams.red.alive = { queen: 1, king: 1 }
+    game.teams.blue.alive = { king: 1 }
+    game.world.require(blueKing, Health).cur = 11
+    const before = { ...game.world.require(king, Cell) }
+
+    game.beginTurn()
+    let guard = 0
+    while (game.turnActive && guard++ < 4000) game.runTicks(1)
+
+    // The human side is down to its king, so the AI is in the finishing phase
+    // and must not be rationed by the live move budget: queen AND king move.
+    expect(game.teams.blue.kingOnlySince).toBeGreaterThanOrEqual(0)
+    expect(game.teams.red.movesMade).toBe(2)
+    const after = game.world.require(king, Cell)
+    expect(after.x !== before.x || after.y !== before.y).toBe(true)
+  })
+
+  it('resolves the reported queen+king siege once the king joins', () => {
+    const game = new Game(8, 'human-vs-ai', 7)
+    stripArmy(game)
+    createPiece(shim(game), 'red', PIECES.queen, { x: 2, y: 5 })
+    const king = createPiece(shim(game), 'red', PIECES.king, { x: 4, y: 0 })
+    const blueKing = createPiece(shim(game), 'blue', PIECES.king, { x: 0, y: 4 })
+    game.teams.red.alive = { queen: 1, king: 1 }
+    game.teams.blue.alive = { king: 1 }
+    game.world.require(king, Health).cur = 8
+    game.world.require(blueKing, Health).cur = 11
+
+    for (let i = 0; i < 40 && game.winner === null; i++) {
+      game.beginTurn()
+      let guard = 0
+      while (game.turnActive && guard++ < 4000) game.runTicks(1)
+    }
+    expect(game.winner).toBe('red')
+  })
+})
+
 describe('promotion', () => {
   beforeEach(() => clearComponents())
 

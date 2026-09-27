@@ -127,6 +127,15 @@ Attack to have a piece keep engaging on its own, or None to disengage.
 indicators** (tracking chain, targeted ring, Attack stance). Pieces have no
 default ring — a red ring means "this piece is under an attack order".
 
+**History retention.** Undo/redo keeps turn-boundary snapshots under an
+**entity budget** rather than a fixed beat count: the retained history holds at
+most `HISTORY_MAX_BEATS = 1000` beats and roughly
+`HISTORY_ENTITY_BUDGET = 20000` stored entity records (each beat stores its
+start and end world), always keeping the latest `HISTORY_MIN_BEATS = 50`. On a
+normal 8×8 game that retains several hundred turns — far beyond the old
+100-beat cap — while a busy large-board game trims sooner. The turn list shows
+how many earlier beats were trimmed.
+
 Auto-targeting follows from this: attack order = sticky target; Attack = scored
 auto-acquire (a shootable enemy first, then one firing on the piece, then damaged
 and nearer ones); no stance = in-range only; Move = retaliation only (returns fire
@@ -212,12 +221,30 @@ several cells along a rank/file, and a pawn advances one square — or two from 
 home rank (rank 2 / rank 7), its chess first move — in a single move. The
 two-square step is blocked if the first square is occupied.
 
+**King safety (check).** Like chess, a king may never move onto a square covered
+by an enemy weapon's current firing geometry — sliders with a clear line,
+knight leaps, pawn forward diagonals, and the enemy king's adjacent ring. Kings
+can therefore never be adjacent; a king cannot attack a queen (every neighbour
+is covered), but can still catch knights/pawns from their dead squares and
+rooks/bishops from safe angles. There is no checkmate or stalemate: a king in
+check with no legal square holds and fights, and the battle still ends only when
+a king dies (a king-only standoff is recorded as a draw). The rule is enforced
+both when planning (pathfinding routes around checked squares, move-cell
+overlays hide illegal steps, escape and king policies never pick a covered
+square) and at the movement gate itself, so no order can walk a king into a
+firing line. In the endgame the AI king advances to **opposition** at distance 2
+from the lone enemy king and supports the finish there, and kings only
+capture-advance when the victim's square is not in check.
+
 **AI move budget.** An AI team facing a human may not out-move them within a
 turn: it may make at most as many moves that turn as the human makes, and always
 at least one, so a passive player cannot freeze the AI. Order two pieces and the
 AI may move two in the same turn; do nothing and it still gets one move. Nothing
 carries over between turns, so a blocked AI never bursts later. AI-vs-AI is
-unrestricted.
+unrestricted. The **finishing phase is exempt**: once either side is down to its
+king, the AI moves freely so it can press the kill (and its own king can
+last-stand) even when the player makes no moves — otherwise the queen would
+spend the whole allowance and the king would never get to join in.
 
 ## Game modes
 
@@ -319,14 +346,19 @@ current square** rather than a fixed map midpoint, so the army converges on the
 win condition once the field clears. Range-1 weapons acquire by Chebyshev
 distance, so a pawn or king notices the diagonal squares its weapon actually
 covers. Once the enemy is down to its king alone, the attacker skips
-self-preservation and bodyguard duty to press the finish. A lone king never
-kites (it is faster than every attacker, and dodging forever turned material
-wins into turn-cap draws) and never retreats either: when a threat is inside
-`LAST_STAND_RADIUS = 3` it walks straight at it, so the range-1 king guard
-(80% of max HP) is a real threat and the endgame resolves either way; otherwise
-it returns to its post. When **both** sides are king-only the two kings seek each
-other, so an AI-vs-AI king duel cannot idle out to the turn cap. A player king
-last-stands only in Attack stance; None/Move keep the player in control.
+self-preservation and bodyguard duty to press the finish, and the AI king leaves
+its post to take **opposition** at distance 2 — the no-check rule forbids
+closing further, so it supports rather than trades. In the finish, an attacker
+that can survive one king guard hit (`hp > 0.8 × maxHp`) may also enter the
+enemy king's 3×3 to trap it instead of shooting from outside the ring; one that
+would die there keeps its distance. A lone king never kites (it
+is faster than every attacker, and dodging forever turned material
+wins into turn-cap draws) and never retreats either: when a field threat is
+inside `LAST_STAND_RADIUS = 3` it works toward it on legal squares, taking any
+uncovered adjacent square it can reach; otherwise it returns to its post. A
+player king last-stands only in Attack stance; None/Move keep the player in
+control. With both kings obeying check, a king-only ending settles into
+opposition and is a draw.
 
 **Finishing safely.** Pursuit avoids the 3×3 around an enemy king, where the
 king's guard hits for 80% of max HP: `attackPlan`/`previewFiringCell` prefer a

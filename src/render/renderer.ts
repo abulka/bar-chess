@@ -17,6 +17,7 @@ import type { Entity } from '../ecs/world'
 import { buildOccupancy, makeOccupied } from '../game/occupancy'
 import { fireCells, moveDestinations } from '../game/geometry'
 import type { OccupiedFn } from '../game/geometry'
+import { enemyCoverage } from '../game/kingSafety'
 import { HEAL_COLOR, HEAL_RADIUS, healingTargets } from '../game/healing'
 import { healthRatio, dist, vecEquals } from '../game/math'
 import { PIECES, WEAPONS } from '../game/pieces'
@@ -204,7 +205,12 @@ export class Renderer {
     // Reach/attack shading is detailed, so it is reserved for selected pieces;
     // army views show paths, goals and targets instead.
     if (game.overlays.moveCells && full) {
-      const moves = moveDestinations(board, cell, def.move, team, occupied)
+      let moves = moveDestinations(board, cell, def.move, team, occupied)
+      // A king's legal moves exclude every square covered by an enemy weapon.
+      if (kind === 'king') {
+        const covered = enemyCoverage(board, game.world, buildOccupancy(game.world, board), e, team)
+        moves = moves.filter((c) => !covered.has(board.cellIndex(c.x, c.y)))
+      }
       ctx.fillStyle = `rgba(90,176,255,${0.18 * glow})`
       ctx.strokeStyle = `rgba(90,176,255,${0.32 * glow})`
       ctx.lineWidth = 1 / this.camera.zoom

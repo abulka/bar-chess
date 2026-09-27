@@ -17,6 +17,7 @@ import { coordName } from './coords'
 import { byTeamThenCell, renderAsciiGrid, TERRAIN_CHAR } from './grid'
 import { buildOccupancy } from './occupancy'
 import { hasInstaKill } from './instaKill'
+import { isInCheck } from './kingSafety'
 import { underFireAttacker } from './underFire'
 import type { Game } from './game'
 import type { Entity } from '../ecs/world'
@@ -31,7 +32,7 @@ const FORMAT_LEGEND =
   'atk=#id(cell)[!]=attack order (! positionally unreachable); ' +
   'kill=#id(cell)=parked insta-kill (immediate chess kill, lands next tick, outranks self-preservation); ' +
   'tgt=#id(cell) current target; ' +
-  'fire=#id under retaliation; goal=<cell> path end; path=hop>hop (A* move hops); blk=route blocked; ' +
+  'fire=#id under retaliation; check=king stands on an enemy-covered square; goal=<cell> path end; path=hop>hop (A* move hops); blk=route blocked; ' +
   'intent=<preserve|rally|defense|engage> why the goal was chosen (absent = explicit order or none); ' +
   'hold=<hp> wounded: holds in healing until this HP before resuming (full heal when critical); ' +
   'moving=mid-hop; res=<cell> reserved next cell; ' +
@@ -53,6 +54,10 @@ two forward diagonals at range 1; a rook fires along ranks/files).
 The sim runs a fixed 30Hz tick loop. A "turn" gives each piece one move; a route is an A* path over
 its own move geometry, so one "path" cell is one hop (a rook's next hop can be far, a knight's
 fixed). All randomness is seeded, so a position plus inputs replays identically.
+Kings obey the chess check rule: a king may never move onto a square covered by an enemy weapon
+this moment (including the enemy king's adjacent ring), so kings can never be adjacent and cannot
+walk into a firing line. A king already in check simply holds and fights; the battle still ends
+only when a king dies.
 Win: the battle ends when a king dies and the other team wins; both kings down on the same tick is a
 draw. A game stopped at the turn cap without a king death is a partial, not a draw.
 Rules toggles: autoPreserve lets a wounded AI/Attack-stance piece retreat to heal; captureAdvance
@@ -179,6 +184,10 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
     const attacker = underFireAttacker(game.world, game.board, occupancy, e, game.tick)
     if (attacker !== null) {
       flags.push(`fire=${refName(game, height, attacker)}`)
+    }
+    // Kings follow the no-check rule: this square is covered by an enemy weapon.
+    if (kind === 'king' && isInCheck(game.board, game.world, occupancy, e, team)) {
+      flags.push('check')
     }
 
     if (motion.goal) flags.push(`goal=${cellName(height, motion.goal)}`)

@@ -3,6 +3,7 @@ import type { EventRecord } from '../ecs/events'
 import { analyzeGame } from './analysis'
 import type { GameAnalysis } from './analysis'
 import type { Game } from './game'
+import { isInCheck } from './kingSafety'
 import { buildOccupancy } from './occupancy'
 import type { GameRecord } from './record'
 import { formatTranscript } from './transcript'
@@ -153,10 +154,12 @@ export class GameLog {
       const motion = this.game.world.require(e, Motion)
       const order = this.game.world.require(e, Order)
       const target = this.game.world.require(e, Target)
+      const team = this.game.world.require(e, Team)
+      const kind = this.game.world.require(e, PieceType).kind
       pieces.push({
         entity: e,
-        team: this.game.world.require(e, Team),
-        kind: this.game.world.require(e, PieceType).kind,
+        team,
+        kind,
         cell: { x: cell.x, y: cell.y },
         goal: motion.goal ? { x: motion.goal.x, y: motion.goal.y } : null,
         moving: motion.moving,
@@ -164,6 +167,8 @@ export class GameLog {
         orderKind: order.kind,
         target: target.entity,
         underFire: underFireAttacker(this.game.world, this.game.board, occupancy, e, this.game.tick) !== null,
+        inCheck:
+          kind === 'king' && isInCheck(this.game.board, this.game.world, occupancy, e, team),
         hp: hp.cur,
         maxHp: hp.max,
         orderLog: order.log.slice(),

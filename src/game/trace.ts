@@ -13,6 +13,8 @@ export interface PieceTrace {
   orderKind: OrderKind
   target: number | null
   underFire: boolean
+  /** A king standing on an enemy-covered square (chess check). */
+  inCheck: boolean
   hp: number
   maxHp: number
   /** Order transitions up to this boundary (oldest first), if sampled. */

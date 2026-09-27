@@ -213,7 +213,11 @@ requestAnimationFrame(frame):
   plays a fresh turn. The confirmation warns via `ordersTouched` when no order
   was changed since the boundary, since the deterministic sim would repeat the
   same outcome.
-- `history` is a bounded list of `HistoryEntry` (cap `HISTORY_LIMIT = 100`);
+- `history` is a bounded list of `HistoryEntry` under an entity budget:
+  `HISTORY_MAX_BEATS = 1000`, `HISTORY_ENTITY_BUDGET = 20000` stored entity
+  records and a `HISTORY_MIN_BEATS = 50` floor. `trimHistory()` drops the oldest
+  beats until the retained start+end snapshots fit, and is used by
+  `pushHistory`, the editor boundary and import, so the rule cannot drift.
   `historyTrimmed` counts beats dropped off the front, and `snapshot().turns`
   lazily exposes per-boundary `TurnSummary` metadata (turn, mega, ticks, piece
   counts, active orders, moves/kills/losses) for the left-rail **turns** tab.
@@ -339,6 +343,10 @@ cell/reservation during movement validation and path planning.
   firing geometry.
 - **orders** — turns stance/order into `Motion.goal` for every piece (human or
   AI): an `attack` order pursues the target (or stops to fire when in geometry).
+  In the **finishing phase** (enemy king-only) every attacker targets the enemy
+  king and skips preservation; one that can survive a king guard hit
+  (`hp > 0.8 × maxHp`) also drops the 3×3 avoidance to trap the king, while a
+  piece that would die there keeps its standoff.
   A **positionally unreachable** target (`order.reachable === false`, e.g. a bishop
   ordered onto the opposite colour) is still approached best-effort: the route
   ends on the closest reachable empty square, and the overlay draws that route
@@ -377,12 +385,13 @@ cell/reservation during movement validation and path planning.
   of its own back rank once the board is clear. It still fires at adjacent
   enemies via combat. **`loneKingGoal`** handles a side with no field pieces:
   it never kites (it is faster than every attacker, so dodging forever turned
-  material wins into turn-cap draws) and never retreats — a threat inside
-  `LAST_STAND_RADIUS = 3` is walked straight at, so the range-1 king guard
-  (80% of max HP) is a real threat; otherwise it returns to its post. When both
-  sides are king-only the two kings seek each other, so an AI-vs-AI king duel
-  cannot idle to the cap. A player king last-stands only in Attack stance;
-  None/Move keep the current dodge/hold behaviour. Nearby AI pieces within
+  material wins into turn-cap draws) and never retreats — when a field threat is
+  inside `LAST_STAND_RADIUS = 3` it works toward it on legal squares (taking any
+  uncovered adjacent square it can reach); otherwise it returns to its post.
+  When both sides are king-only it seeks the enemy king and settles at chess
+  **opposition** (distance 2), a draw. A player king last-stands only in Attack
+  stance; None/Move keep the current dodge/hold behaviour. All three policies run
+  their move options through the no-check filter below. Nearby AI pieces within
   `KING_GUARD_RADIUS = 4` of a
   threatened king become **bodyguards**: they first try to `screenPlan` — step
   onto a passable square on the Bresenham line between attacker and king
@@ -392,6 +401,19 @@ cell/reservation during movement validation and path planning.
   (removing it would open the line), so it does not wander off once the attacker
   drops out of the threat list. (Knights leap, so they cannot be screened.) A
   per-update `claimed` set spreads guards across squares.
+  **King safety (check)** is a core rule (`kingSafety.ts`): a king may never end
+  a movement step on a square covered by any enemy weapon's current geometry —
+  measured with the king's own square freed (`enemyCoverage`) so vacating a
+  blocked line opens the shots it would have to dodge. Because the enemy king's
+  range-1 ring is included, kings can never be adjacent; a king in check with no
+  legal square holds (there is no checkmate). Enforcement is layered:
+  `movement` refuses the hop at the gate, `pathfinding` treats covered squares
+  as blocked for a king's live and theoretical routes, the preserve/king
+  policies filter their candidate squares (`evaluateSafeStep` takes an optional
+  `legal` predicate), `pursue` adds coverage to a king's firing-cell avoidance,
+  `Game.kingSafe` wraps preview/planned routes so overlays match execution, the
+  renderer hides covered move-cells, and `advance` blocks a capture-advance into
+  check.
   A separate **self-preservation** pass runs first for any piece (human or AI).
   `preservation.ts` supplies the shared core: `coverageThreats` (every enemy
   whose `fireCells` cover the piece, plus its recent attacker; the king widens
@@ -526,7 +548,10 @@ cell/reservation during movement validation and path planning.
   the slide length. An AI team whose opponent is human is also capped by the
   opponent's per-turn `movesThisTurn`, so it cannot out-move the player within a
   turn (with a floor of one move so a passive player cannot freeze it; nothing
-  carries over between turns). A player-issued order (`Order.kind !== 'none'`)
+  carries over between turns). The cap is lifted once either side is king-only
+  (the finishing phase), so the AI can press the kill and its own king can
+  last-stand even against a passive player. A player-issued order
+  (`Order.kind !== 'none'`)
   bypasses the budget; only pieces whose team is under human control can be
   commanded (your own team in Human-vs-AI, both teams in Human-vs-Human, none in
   AI-vs-AI).
@@ -835,7 +860,8 @@ malformed history) before anything is mutated.
   history (`SavedHistoryEntry[]`) and cursor, so loading restores undo/redo and
   replay exactly. `Game.importPosition(data)` rebuilds the `Board`, restores the
   world (mapping serialized store names back through a registry), reapplies the
-  saved sim settings, restores the history/cursor (trimming to `HISTORY_LIMIT`),
+  saved sim settings, restores the history/cursor (re-trimmed by the entity
+  budget),
   resets all transient turn/replay/selection state, pauses and rebuilds `ctx`.
   A position-only save (no `history`) still loads, starting a fresh history.
 - **Save/Load**: named slots in **IndexedDB** (`src/game/storage.ts` over the
@@ -979,7 +1005,8 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   `src/game/analysis.ts` flags gaps: held-under-fire (with hits taken while held
   and the longest consecutive-hit streak), never-moved/never-fired,
   no-progress turns, oscillation, retreat loops, focus fire/overkill, and the
-  endgame siege measures `kingOnlyTurns` / `kingShotsWhileAlone`. The batch
+  endgame siege measures `kingOnlyTurns` / `kingCheckTurns` /
+  `kingShotsWhileAlone`. The batch
   summary also reports `openingVariants`, so a batch of near-identical openings
   is visible rather than mistaken for varied evidence. Per-turn activity also carries
   `order:` notes — why a piece's order/behaviour changed (issued/replaced/

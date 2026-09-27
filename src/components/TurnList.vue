@@ -121,7 +121,7 @@ watch(
         <b>f</b> discards future turns · <b>u</b>/<b>r</b> undo/redo · <b>y</b> replay
       </p>
       <p v-if="snapshot.historyTrimmed > 0" class="muted tiny">
-        {{ snapshot.historyTrimmed }} earlier beat{{ snapshot.historyTrimmed === 1 ? '' : 's' }} trimmed (history cap)
+        {{ snapshot.historyTrimmed }} earlier beat{{ snapshot.historyTrimmed === 1 ? '' : 's' }} trimmed (history budget)
       </p>
     </div>
   </div>

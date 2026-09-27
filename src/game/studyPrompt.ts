@@ -145,8 +145,8 @@ export function formatGameAnalysis(analysis: GameAnalysis): string {
     `winner=${analysis.winner ?? 'none'} turns=${analysis.turns}` +
       `${analysis.partial ? ' (partial)' : ''} shots=${analysis.shots} hits=${analysis.hits} ` +
       `kills=${analysis.kills} noProgressTurns=${analysis.noProgressTurns}`,
-    `kingOnlyTurns=${analysis.kingOnlyTurns} kingShotsWhileAlone=${analysis.kingShotsWhileAlone} ` +
-      `overkill=${analysis.overkill}`,
+    `kingOnlyTurns=${analysis.kingOnlyTurns} kingCheckTurns=${analysis.kingCheckTurns} ` +
+      `kingShotsWhileAlone=${analysis.kingShotsWhileAlone} overkill=${analysis.overkill}`,
   ]
   if (analysis.heldUnderFire.length > 0) {
     lines.push(

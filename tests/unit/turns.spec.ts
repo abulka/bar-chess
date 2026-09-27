@@ -202,19 +202,38 @@ describe('turn list & history navigation', () => {
     expect(loaded.snapshot().historyIndex).toBe(1)
   })
 
-  it('counts beats dropped by the history cap', () => {
+  it('keeps a long 8x8 history inside the entity budget', () => {
     const game = new Game(8, 'ai-vs-ai', 71)
     // An empty board keeps each turn at its minimum length (~1s of ticks).
     for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
     for (let i = 0; i < 105; i++) runTurn(game)
 
+    // An empty board weighs almost nothing, so the budget retains all beats.
     const snap = game.snapshot()
-    expect(snap.historyLength).toBe(100)
-    expect(snap.historyTrimmed).toBe(6)
+    expect(snap.historyLength).toBe(106)
+    expect(snap.historyTrimmed).toBe(0)
 
     const saved = JSON.parse(JSON.stringify(game.exportPosition({ history: true })))
     const loaded = new Game(8, 'ai-vs-ai')
     expect(loaded.importPosition(saved).ok).toBe(true)
-    expect(loaded.snapshot().historyTrimmed).toBe(6)
+    expect(loaded.snapshot().historyTrimmed).toBe(0)
+  })
+
+  it('drops old beats when the entity budget is exceeded', () => {
+    const game = new Game(8, 'ai-vs-ai', 72)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    // Heavy snapshots: each beat stores two worlds of 1000 entity records.
+    for (let i = 0; i < 1000; i++) game.world.create()
+    for (let i = 0; i < 80; i++) runTurn(game)
+
+    const snap = game.snapshot()
+    expect(snap.historyLength).toBe(50) // the minimum-depth floor
+    expect(snap.historyTrimmed).toBe(31) // 1 opening + 80 turns - 50 kept
+
+    const saved = JSON.parse(JSON.stringify(game.exportPosition({ history: true })))
+    const loaded = new Game(8, 'ai-vs-ai')
+    expect(loaded.importPosition(saved).ok).toBe(true)
+    expect(loaded.snapshot().historyTrimmed).toBe(31)
+    expect(loaded.snapshot().historyLength).toBe(50)
   })
 })

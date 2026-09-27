@@ -216,6 +216,8 @@ export interface GameAnalysis {
   retreatLoops: string[]
   /** Turns where exactly one side had only its king left. */
   kingOnlyTurns: number
+  /** Turns where any king stood on an enemy-covered square (chess check). */
+  kingCheckTurns: number
   /** Shots fired by a king while its side was down to that king alone. */
   kingShotsWhileAlone: number
   /** Cell signature of the first turns, for spotting identical openings. */
@@ -325,6 +327,7 @@ export function analyzeGame(record: GameRecord, events: EventRecord[], trace: Tu
   // and the shots its king fired during that phase (the death-spiral measure).
   const kingOnlyByTurn = new Map<number, Set<TeamId>>()
   let kingOnlyTurns = 0
+  let kingCheckTurns = 0
   for (const turn of trace) {
     const hasField: Record<TeamId, boolean> = { red: false, blue: false }
     for (const piece of turn.pieces) if (piece.kind !== 'king') hasField[piece.team] = true
@@ -335,6 +338,7 @@ export function analyzeGame(record: GameRecord, events: EventRecord[], trace: Tu
       kingOnlyTurns++
       kingOnlyByTurn.set(turn.turn, alone)
     }
+    if (turn.pieces.some((p) => p.kind === 'king' && p.inCheck)) kingCheckTurns++
   }
   let kingShotsWhileAlone = 0
   for (const event of events) {
@@ -374,6 +378,7 @@ export function analyzeGame(record: GameRecord, events: EventRecord[], trace: Tu
     oscillation,
     retreatLoops,
     kingOnlyTurns,
+    kingCheckTurns,
     kingShotsWhileAlone,
     openingSignature,
   }
@@ -407,6 +412,8 @@ export interface BatchSummary {
   noProgressTurns: number
   /** Total turns across the batch where one side had only its king left. */
   kingOnlyTurns: number
+  /** Total turns across the batch where a king was in check. */
+  kingCheckTurns: number
   /** Total shots fired by king-only sides. */
   kingShotsWhileAlone: number
   overkill: number
@@ -431,6 +438,7 @@ export function summarizeBatch(games: BatchGame[]): BatchSummary {
   let oscillationCount = 0
   let noProgressTurns = 0
   let kingOnlyTurns = 0
+  let kingCheckTurns = 0
   let kingShotsWhileAlone = 0
   let overkill = 0
   let retreatLoopCount = 0
@@ -451,6 +459,7 @@ export function summarizeBatch(games: BatchGame[]): BatchSummary {
     oscillationCount += g.analysis.oscillation.length
     noProgressTurns += g.analysis.noProgressTurns
     kingOnlyTurns += g.analysis.kingOnlyTurns
+    kingCheckTurns += g.analysis.kingCheckTurns
     kingShotsWhileAlone += g.analysis.kingShotsWhileAlone
     overkill += g.analysis.overkill
     retreatLoopCount += g.analysis.retreatLoops.length
@@ -474,6 +483,7 @@ export function summarizeBatch(games: BatchGame[]): BatchSummary {
     oscillationCount,
     noProgressTurns,
     kingOnlyTurns,
+    kingCheckTurns,
     kingShotsWhileAlone,
     overkill,
     retreatLoopCount,
@@ -492,7 +502,8 @@ export function formatBatchSummary(summary: BatchSummary): string {
     `neverMoved=${summary.neverMovedCount} neverFired=${summary.neverFiredCount} ` +
     `oscillation=${summary.oscillationCount} noProgressTurns=${summary.noProgressTurns} ` +
     `retreatLoops=${summary.retreatLoopCount} kingOnlyTurns=${summary.kingOnlyTurns} ` +
-    `kingShotsWhileAlone=${summary.kingShotsWhileAlone} overkill=${summary.overkill} ` +
+    `kingCheckTurns=${summary.kingCheckTurns} kingShotsWhileAlone=${summary.kingShotsWhileAlone} ` +
+    `overkill=${summary.overkill} ` +
     `openingVariants=${summary.openingVariants}`
   )
 }
