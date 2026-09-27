@@ -50,6 +50,8 @@ export interface TeamRuntime {
   movesMade: number
   /** moves made during the current turn */
   movesThisTurn: number
+  /** Tick the team was first seen with only its king left (-1 = not king-only). */
+  kingOnlySince: number
 }
 
 export interface SimContext {
@@ -75,4 +77,6 @@ export interface SimContext {
   captureAdvance: boolean
   /** when true, a pawn reaching the enemy back rank promotes to a queen */
   promotion: boolean
+  /** when true, the lone king's incoming damage ramps after a grace period */
+  finishPressure: boolean
 }

@@ -26,6 +26,9 @@ export function firingPositionExists(
   return false
 }
 
+/** Hop-unit tie-break that stops a shooter bouncing back to the cell it just left. */
+const RECENT_CELL_PENALTY = 0.5
+
 /**
  * Firing cell to route an attack preview toward: the empty, reachable approach
  * cell that minimises total travel (piece → cell → target). The piece → cell leg
@@ -36,7 +39,8 @@ export function firingPositionExists(
  * (keeping the chosen square close to the victim). Picking a genuine approach
  * cell keeps the final shooting line aligned with the weapon geometry (a bishop
  * shoots diagonally, a rook straight) instead of the nearest cell, which can sit
- * directly beside the target.
+ * directly beside the target. `recent` (the cell just vacated) loses a tie so a
+ * blocked shooter detours instead of oscillating one step back and forth.
  */
 export function previewFiringCell(
   board: Board,
@@ -47,6 +51,7 @@ export function previewFiringCell(
   team: TeamId,
   occupied: OccupiedFn,
   avoid?: OccupiedFn,
+  recent?: Vec2 | null,
 ): Vec2 | null {
   const reach = reachableCells(board, from, moveGeom, team)
   const moves = moveDistances(board, from, moveGeom, team)
@@ -58,7 +63,9 @@ export function previewFiringCell(
     cells
       .map((c) => ({
         c,
-        moves: moves[board.cellIndex(c.x, c.y)],
+        moves:
+          moves[board.cellIndex(c.x, c.y)] +
+          (recent && vecEquals(c, recent) ? RECENT_CELL_PENALTY : 0),
         // Euclidean total kept as a tie-break among equally-reachable cells.
         s: dist2(c.x, c.y, from.x, from.y) + dist2(c.x, c.y, targetCell.x, targetCell.y),
       }))
@@ -148,11 +155,12 @@ export function attackPlan(
   team: TeamId,
   occupied: OccupiedFn,
   avoid?: OccupiedFn,
+  recent?: Vec2 | null,
 ): AttackPlan {
   const reachable = firingPositionExists(board, from, targetCell, moveGeom, weaponGeom, team)
   const inRange = inFiringGeometry(board, from, targetCell, weaponGeom, team, occupied)
   const cell =
-    previewFiringCell(board, from, targetCell, moveGeom, weaponGeom, team, occupied, avoid) ??
+    previewFiringCell(board, from, targetCell, moveGeom, weaponGeom, team, occupied, avoid, recent) ??
     closestEmptyCell(board, from, targetCell, moveGeom, team, occupied) ??
     { x: targetCell.x, y: targetCell.y }
   return { reachable, inRange, cell }

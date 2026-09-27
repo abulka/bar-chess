@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Health, Motion, Order, Stance, Target } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
+import { chebyshev } from '../../src/game/geometry'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { createPiece } from '../../src/game/factory'
 import { PIECES } from '../../src/game/pieces'
@@ -878,6 +879,7 @@ describe('orders system — motion intent provenance', () => {
     const ctx = context()
     ctx.teams.red.controller = 'ai'
     const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 4 })
+    createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 0 }) // a field piece, so not a lone king
     createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 0 })
 
     run(ctx)
@@ -895,5 +897,109 @@ describe('orders system — motion intent provenance', () => {
     run(ctx)
 
     expect(ctx.world.require(queen, Motion).intent).toBe('engage')
+  })
+})
+
+describe('orders system — damage-aware retreats and last stand', () => {
+  beforeEach(() => clearComponents())
+
+  it('backs a valuable piece off after sustained hits even above the retreat threshold', () => {
+    const ctx = makeContext()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 }) // covers the c-file
+    ctx.world.require(queen, Stance).mode = 'attack'
+    expect(ctx.world.require(queen, Health).cur).toBe(PIECES.queen.hp)
+    ctx.world.require(queen, Motion).hitStreak = 2
+
+    run(ctx)
+
+    const motion = ctx.world.require(queen, Motion)
+    expect(motion.intent).toBe('preserve')
+    expect(motion.goal).not.toBeNull()
+    expect(motion.goal!.x).not.toBe(4)
+  })
+
+  it('holds its square when hits have not accumulated', () => {
+    const ctx = makeContext()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
+    ctx.world.require(queen, Stance).mode = 'attack'
+
+    run(ctx)
+
+    expect(ctx.world.require(queen, Motion).goal).toBeNull()
+  })
+
+  it('timestamps a team that is down to its king alone', () => {
+    const ctx = makeContext()
+    createPiece(ctx, 'red', PIECES.king, { x: 4, y: 0 })
+    createPiece(ctx, 'blue', PIECES.king, { x: 4, y: 7 })
+    createPiece(ctx, 'blue', PIECES.rook, { x: 0, y: 7 })
+
+    run(ctx)
+
+    expect(ctx.teams.red.kingOnlySince).toBe(0)
+    expect(ctx.teams.blue.kingOnlySince).toBe(-1)
+  })
+
+  it('advances a lone AI king toward a threat inside last-stand range', () => {
+    const ctx = makeContext()
+    ctx.teams.red.controller = 'ai'
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 4 })
+    createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 1 }) // gap 3, covers the file
+
+    run(ctx)
+
+    const motion = ctx.world.require(king, Motion)
+    expect(motion.intent).toBe('defense')
+    expect(motion.goal).not.toBeNull()
+    expect(chebyshev(motion.goal!.x, motion.goal!.y, 4, 1)).toBeLessThan(3)
+  })
+
+  it('holds its post when the nearest threat is out of last-stand range', () => {
+    const ctx = makeContext()
+    ctx.teams.red.controller = 'ai'
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 7 })
+    createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 0 }) // gap 7, sniping
+
+    run(ctx)
+
+    expect(ctx.world.require(king, Motion).goal).toBeNull()
+  })
+
+  it('seeks the enemy king when both sides are king-only', () => {
+    const ctx = makeContext()
+    ctx.teams.red.controller = 'ai'
+    ctx.teams.blue.controller = 'ai'
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 0 })
+    createPiece(ctx, 'blue', PIECES.king, { x: 4, y: 7 })
+
+    run(ctx)
+
+    const motion = ctx.world.require(king, Motion)
+    expect(motion.goal).not.toBeNull()
+    expect(chebyshev(motion.goal!.x, motion.goal!.y, 4, 7)).toBeLessThan(7)
+  })
+
+  it('last-stands for a player king only in Attack stance', () => {
+    const ctx = makeContext()
+    const active = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 4 })
+    ctx.world.require(active, Stance).mode = 'attack'
+    createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 1 })
+
+    run(ctx)
+
+    expect(ctx.world.require(active, Motion).intent).toBe('defense')
+    expect(ctx.world.require(active, Motion).goal).not.toBeNull()
+  })
+
+  it('leaves a passive player king holding instead of charging', () => {
+    const ctx = makeContext()
+    const passive = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 4 })
+    createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 1 })
+
+    run(ctx)
+
+    expect(ctx.world.require(passive, Motion).goal).toBeNull()
   })
 })

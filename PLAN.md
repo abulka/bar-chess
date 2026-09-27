@@ -186,9 +186,12 @@ are left alone. `Stop game` keeps the current (game's) partial recording and
 moves on; `Cancel all` discards everything. As it runs, `StudyController`
 (`src/game/study.ts`) records each game and samples a per-turn piece trace, then
 `transcript.ts` / `analysis.ts` produce a compact per-game transcript (including
-a board per turn) and flag gameplay gaps (pieces that held under fire, never
-moved, oscillation, focus fire, no-progress turns). Each transcript names the
-human policy, so a reader can tell a policy artifact from a rule problem.
+a board per turn) and flag gameplay gaps (pieces that held under fire, with the
+hits taken while held and the longest consecutive-hit streak; never moved;
+oscillation; retreat loops; focus fire and overkill; no-progress turns; and the
+endgame siege measures `kingOnlyTurns` / `kingShotsWhileAlone`). Each transcript
+names the human policy, so a reader can tell a policy artifact from a rule
+problem.
 **Copy analysis prompt** reuses the shared `LLM_GAME_RULES` preamble and the same
 per-game body as the live "copy history for LLM" bundle, then prepends a batch
 summary, a generated piece/weapon stat table and each game's flagged analysis; a
@@ -252,6 +255,27 @@ never retreat: they can only step forward, so a "flee" would walk them into the
 enemy and drop the shot, so they hold and fire instead. A persisted
 **auto-preserve** checkbox in the toolbar turns the behaviour off.
 
+**Sustained-fire awareness and retreat commitment.** Above the HP gate a piece
+still reconsiders: after `HIT_STREAK_TRIGGER = 2` hits taken since its last
+step, a non-pawn dodges (or heals) even at full health, and the hold must not
+wait for the HP threshold — this breaks the static queen duels where two
+valuable pieces traded shots for ten turns. A chosen retreat goal is
+**committed** for `RETREAT_COMMIT_TICKS = 60` ticks (about two turns) and the
+square just vacated carries a small recency penalty, so a piece no longer
+dithers A→B→A between two near-equal cover squares or bounces off its own
+blocked firing line; a materially better square still wins immediately. The
+same commitment applies to the AI king's defensive step and to attack approach:
+`previewFiringCell` penalises the cell just left as a tie-break, so a shooter
+whose line is blocked by an ally detours instead of stepping aside and back.
+New orders always clear the commitment.
+
+**Finish pressure.** A persisted **finish pressure** checkbox (default on) makes
+a king whose side has no field pieces left take ramping damage after
+`FINISH_PRESSURE_GRACE_TICKS = 240` ticks (about 6-8 turns), +25% per
+`FINISH_PRESSURE_PERIOD_TICKS = 180` up to +100%. It converts a one-sided
+attrition siege — the king standing still while ranged pieces chip it — into a
+resolution inside the study turn cap, without touching base weapon damage.
+
 **Insta-kill.** The one thing that outranks self-preservation is an **immediate
 chess kill** (`chess kills` rule on, human-only, victim already in the ordered
 piece's capture pattern). It is parked at order-issue time and lands on the next
@@ -277,9 +301,12 @@ leashed — an explicit order is followed.
 a chess capture. It only applies to an **idle** killer (no active order, queue,
 path or hop; the attack order that just killed this victim does not count), steps
 along the firing ray it killed with (re-checked for a clear line), and is a free
-move — it does not spend the piece's turn move or the AI move budget. This rewards kills with territorial pressure instead of everyone standing
-still and sniping. For a pawn this is its chess capture: it marches straight but
-steps diagonally onto a piece it shot down.
+move — it does not spend the piece's turn move or the AI move budget. It is also
+**destination-safe**: a piece that would step into a volley that could kill it,
+or that is preserve-latched and healing, stays put. This rewards kills with
+territorial pressure instead of everyone standing still and sniping. For a pawn
+this is its chess capture: it marches straight but steps diagonally onto a piece
+it shot down.
 
 **Promotion.** A persisted **promotion** checkbox (default on) turns a pawn that
 reaches the enemy back rank into a queen: it keeps its current HP, gains the
@@ -292,9 +319,14 @@ current square** rather than a fixed map midpoint, so the army converges on the
 win condition once the field clears. Range-1 weapons acquire by Chebyshev
 distance, so a pawn or king notices the diagonal squares its weapon actually
 covers. Once the enemy is down to its king alone, the attacker skips
-self-preservation and bodyguard duty to press the finish, and a lone king stops
-kiting and holds its post (it is faster than every attacker, so dodging forever
-used to turn material wins into turn-cap draws).
+self-preservation and bodyguard duty to press the finish. A lone king never
+kites (it is faster than every attacker, and dodging forever turned material
+wins into turn-cap draws) and never retreats either: when a threat is inside
+`LAST_STAND_RADIUS = 3` it walks straight at it, so the range-1 king guard
+(80% of max HP) is a real threat and the endgame resolves either way; otherwise
+it returns to its post. When **both** sides are king-only the two kings seek each
+other, so an AI-vs-AI king duel cannot idle out to the turn cap. A player king
+last-stands only in Attack stance; None/Move keep the player in control.
 
 **Finishing safely.** Pursuit avoids the 3×3 around an enemy king, where the
 king's guard hits for 80% of max HP: `attackPlan`/`previewFiringCell` prefer a
@@ -306,7 +338,8 @@ strand surviving rooks and queens.
 
 **Draws.** A stopped study game with no living non-king piece on either side is
 recorded as a draw rather than a timeout. Kings can still be marched in by a
-player, so this is a study label, not an automatic game end.
+player, so this is a study label, not an automatic game end; with finish pressure
+on, AI king duels now resolve rather than sitting at their posts.
 
 **Advantage bar.** A thin, full-width bar under the turn bar (the `who's winning`
 overlay) shows who is ahead. `advantageDetail` / `describeAdvantage`

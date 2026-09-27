@@ -1,6 +1,6 @@
 import { chebyshev, containsCell, fireCells } from '../../game/geometry'
 import { HEAL_RADIUS } from '../../game/healing'
-import { dist, dist2 } from '../../game/math'
+import { dist, dist2, vecEquals } from '../../game/math'
 import { occupiedExcept } from '../../game/occupancy'
 import { reachableCells } from '../../game/pathfind'
 import { PIECES, WEAPONS, weaponDamage, weaponVision } from '../../game/pieces'
@@ -186,11 +186,36 @@ export const COVER_RADIUS = 6
 const ADJACENT_PENALTY = 5
 
 /**
+ * Deterrents against visible dithering: stepping straight back onto the square
+ * just vacated, and abandoning a retreat goal inside its commitment window.
+ * Both are smaller than any weapon's damage, so a genuinely safer square still
+ * wins; they only break near-ties in the right direction.
+ */
+const RECENCY_PENALTY = 6
+const STICKY_BONUS = 6
+
+export interface EscapeOptions {
+  /** The last cell the piece vacated, penalised to break A→B→A cycles. */
+  prevCell?: Vec2 | null
+  /** A committed goal to keep while the retreat window is open. */
+  sticky?: Vec2 | null
+}
+
+/** Scoring adjustment against visible dithering, shared by preserve and the king. */
+export function ditherPenalty(c: Vec2, options: EscapeOptions): number {
+  if (options.prevCell && vecEquals(c, options.prevCell)) return RECENCY_PENALTY
+  if (options.sticky && vecEquals(c, options.sticky)) return -STICKY_BONUS
+  return 0
+}
+
+/**
  * The best legal one-step escape from the given threats. Scores each square by
  * the total weapon damage that covers it (so it dodges *all* shooters, not just
  * one), then by whether it keeps `keepShot` in firing geometry, then by how far
  * it is from the threats. Moves only when the step actually improves things;
- * otherwise returns null (hold and fight).
+ * otherwise returns null (hold and fight). Recently vacated squares and
+ * deviations from a committed goal are penalised so a piece does not visibly
+ * dither between two near-equal squares.
  */
 export function escapeGoal(
   ctx: SimContext,
@@ -198,6 +223,7 @@ export function escapeGoal(
   team: TeamId,
   threats: Threat[],
   keepShot: Entity | null,
+  options: EscapeOptions = {},
 ): Vec2 | null {
   const kind = ctx.world.get(piece, PieceType)?.kind
   const def = kind ? PIECES[kind] : undefined
@@ -210,6 +236,7 @@ export function escapeGoal(
   // it is about to step into.
   const coverages = buildCoverage(ctx, threats, selfFree)
   const proximityPenalty = (d: number): number => (d <= 1 ? ADJACENT_PENALTY : 0)
+  const cellPenalty = (c: Vec2): number => ditherPenalty(c, options)
 
   const keepCell = keepShot !== null ? ctx.world.get(keepShot, Cell) ?? null : null
   const keepsShot = (x: number, y: number): boolean => {
@@ -225,7 +252,7 @@ export function escapeGoal(
     coverages,
     threats,
     proximityPenalty,
-    (field, c) => field.metrics(c.x, c.y, { prefer: keepsShot(c.x, c.y) }),
+    (field, c) => field.metrics(c.x, c.y, { prefer: keepsShot(c.x, c.y), penalty: cellPenalty(c) }),
   )
   if (step === null) return null
 

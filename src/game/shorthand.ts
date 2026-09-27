@@ -58,7 +58,8 @@ draw. A game stopped at the turn cap without a king death is a partial, not a dr
 Rules toggles: autoPreserve lets a wounded AI/Attack-stance piece retreat to heal; captureAdvance
 lets an idle killer step onto a victim's now-empty square; chessKills enables the parked immediate
 chess kill (lands next tick, outranks self-preservation); promotion turns a pawn that reaches the
-enemy back rank into a queen.
+enemy back rank into a queen; finishPressure ramps damage to a king whose side has no field pieces
+left, so an attrition siege resolves.
 Reading a position block:
   <r|b><PNBRQK> <cell>   one unit (r=red, b=blue); grid uses Upper=red, lower=blue
   hp<cur>/<max>          present only when damaged

@@ -49,6 +49,7 @@ const system: System = {
           // Release the origin only now that the piece has actually arrived.
           occupancy.delete(board.cellIndex(cell.x, cell.y))
           const dest = board.worldToCell(motion.toX, motion.toY)
+          motion.prevCell = { x: cell.x, y: cell.y }
           cell.x = dest.x
           cell.y = dest.y
           motion.reserved = null
@@ -101,6 +102,9 @@ const system: System = {
 
       motion.path.shift()
       const center = board.cellCenter(next.x, next.y)
+      // A real step breaks the hit streak: damage-aware retreats only apply to a
+      // piece that has stayed put through them.
+      motion.hitStreak = 0
       motion.fromX = pos.x
       motion.fromY = pos.y
       motion.toX = center.x

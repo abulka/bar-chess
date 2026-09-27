@@ -69,7 +69,7 @@ describe('transcript & analysis', () => {
     expect(analysis.shots).toBe(1)
     expect(analysis.hits).toBe(1)
     expect(analysis.heldUnderFire).toEqual([
-      { piece: 'rP e2', turns: 'T1', hitsTaken: 1, isPawn: true },
+      { piece: 'rP e2', turns: 'T1', hitsTaken: 1, heldHits: 1, maxStreak: 1, isPawn: true },
     ])
     expect(analysis.neverMoved).toContain('rP e2')
     expect(analysis.neverFired).toContain('rP e2')

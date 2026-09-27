@@ -55,6 +55,7 @@ export function teamRuntime(controller: TeamController = 'human'): TeamRuntime {
     deployed: 0,
     movesMade: 0,
     movesThisTurn: 0,
+    kingOnlySince: -1,
   }
 }
 
@@ -63,7 +64,13 @@ export function teamRuntime(controller: TeamController = 'human'): TeamRuntime {
  * Override `size` / `captureAdvance` / `autoPreserve` per suite.
  */
 export function makeContext(
-  opts?: { size?: number; captureAdvance?: boolean; autoPreserve?: boolean; promotion?: boolean },
+  opts?: {
+    size?: number
+    captureAdvance?: boolean
+    autoPreserve?: boolean
+    promotion?: boolean
+    finishPressure?: boolean
+  },
 ): SimContext {
   return {
     world: new World(),
@@ -82,6 +89,7 @@ export function makeContext(
     autoPreserve: opts?.autoPreserve ?? true,
     captureAdvance: opts?.captureAdvance ?? false,
     promotion: opts?.promotion ?? true,
+    finishPressure: opts?.finishPressure ?? true,
   }
 }
 

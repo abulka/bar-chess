@@ -101,6 +101,12 @@ export interface MotionData {
    * safe-hold and does not advance its order. Full health for a critical wound,
    * `recoverThreshold` (about one more hit absorbed) for a lesser one. 0 = no hold. */
   holdUntilHp: number
+  /** Hits taken since the last movement step; drives damage-aware retreats. */
+  hitStreak: number
+  /** The last cell this piece vacated, so goal selection can avoid 2-cycles. */
+  prevCell: Vec2 | null
+  /** Tick the current goal was chosen; a retreat is committed for a short window. */
+  goalSetTick: number
   /** cell currently being entered; occupancy reserves it until arrival */
   reserved: Vec2 | null
   /** upcoming cells in tile coordinates, excluding the current cell */

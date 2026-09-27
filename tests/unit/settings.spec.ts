@@ -21,6 +21,8 @@ describe('settings persistence', () => {
       autoPreserve: false,
       captureAdvance: true,
       chessKills: true,
+      promotion: false,
+      finishPressure: false,
       soundEnabled: true,
       bottomFraction: 0.4,
       leftRailFraction: 0.2,
@@ -48,6 +50,8 @@ describe('settings persistence', () => {
     expect(restored.autoPreserve).toBe(false)
     expect(restored.captureAdvance).toBe(true)
     expect(restored.chessKills).toBe(true)
+    expect(restored.promotion).toBe(false)
+    expect(restored.finishPressure).toBe(false)
     expect(restored.soundEnabled).toBe(true)
     expect(restored.bottomFraction).toBe(0.4)
     expect(restored.leftRailFraction).toBe(0.2)

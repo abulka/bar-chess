@@ -235,16 +235,21 @@ describe('GameLog & LLM game prompt', () => {
       shots: 3,
       hits: 2,
       kills: 0,
-      heldUnderFire: [{ piece: 'rP e2', turns: 'T1-T2', hitsTaken: 2, isPawn: true }],
-      neverMovedUnderFire: [{ piece: 'rP e2', turns: 'T1-T2', hitsTaken: 2, isPawn: true }],
+      heldUnderFire: [{ piece: 'rP e2', turns: 'T1-T2', hitsTaken: 2, heldHits: 2, maxStreak: 2, isPawn: true }],
+      neverMovedUnderFire: [{ piece: 'rP e2', turns: 'T1-T2', hitsTaken: 2, heldHits: 2, maxStreak: 2, isPawn: true }],
       neverMoved: ['bK e1'],
       neverFired: [],
       focusFire: [],
+      overkill: 0,
       noProgressTurns: 0,
       oscillation: [],
+      retreatLoops: [],
+      kingOnlyTurns: 0,
+      kingShotsWhileAlone: 0,
+      openingSignature: '',
     })
     expect(text).toContain('winner=none turns=5 (partial)')
-    expect(text).toContain('heldUnderFire: rP e2 T1-T2 (2 hits, pawn)')
+    expect(text).toContain('heldUnderFire: rP e2 T1-T2 (2 hits while held, streak 2, pawn)')
     expect(text).toContain('neverMoved: bK e1')
   })
 })

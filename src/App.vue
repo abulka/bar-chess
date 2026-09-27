@@ -678,6 +678,12 @@ function onTogglePromotion(): void {
   refresh()
 }
 
+function onToggleFinishPressure(): void {
+  game.setFinishPressure(!game.finishPressure)
+  persistSettings()
+  refresh()
+}
+
 function onReset(): void {
   game.reset()
   recorder.reset()
@@ -992,6 +998,7 @@ onBeforeUnmount(() => {
       @toggle-capture-advance="onToggleCaptureAdvance"
       @toggle-chess-kills="onToggleChessKills"
       @toggle-promotion="onTogglePromotion"
+      @toggle-finish-pressure="onToggleFinishPressure"
     />
 
     <div class="topbars">

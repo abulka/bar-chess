@@ -143,6 +143,7 @@ export function formatTranscript(input: TranscriptInput): string {
       `captureAdvance=${record.settings.captureAdvance ? 'on' : 'off'} ` +
       `chessKills=${record.settings.chessKills ? 'on' : 'off'} ` +
       `promotion=${record.settings.promotion === false ? 'off' : 'on'} ` +
+      `finishPressure=${record.settings.finishPressure === false ? 'off' : 'on'} ` +
       `playerTeam=${record.playerTeam}`,
   )
   if (input.study) {

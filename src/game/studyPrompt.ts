@@ -32,9 +32,13 @@ Reading the batch:
   ===== game seed=... =====  one game; its seed reproduces it
   # game / # rules ...       per-game header and rule toggles, then # turns / # pieces / # final
   # analysis                 per-game flags: heldUnderFire (pieces that stayed put while
-                             under fire; 'pawn' marks the intentional case), neverMoved,
-                             neverFired, oscillation (reversals), focusFire (turns where two or
-                             more attackers hit one target), noProgressTurns, shots/hits/kills.
+                             under fire; 'pawn' marks the intentional case, with hits taken
+                             while held and the longest consecutive-hit streak), neverMoved,
+                             neverFired, oscillation (reversals), retreatLoops (pieces that
+                             started 3+ self-preservation retreats), focusFire (turns where two
+                             or more attackers hit one target) and overkill (3+ attackers),
+                             noProgressTurns, kingOnlyTurns/kingShotsWhileAlone (the endgame
+                             siege measure), shots/hits/kills.
 Known artifacts of the compact transcript (do not read these as rule flaws):
   - Event lines (fired / took dmg / destroyed / order) name a unit by its position at the END of
     the turn, or its last sampled square if it died that turn.
@@ -141,12 +145,18 @@ export function formatGameAnalysis(analysis: GameAnalysis): string {
     `winner=${analysis.winner ?? 'none'} turns=${analysis.turns}` +
       `${analysis.partial ? ' (partial)' : ''} shots=${analysis.shots} hits=${analysis.hits} ` +
       `kills=${analysis.kills} noProgressTurns=${analysis.noProgressTurns}`,
+    `kingOnlyTurns=${analysis.kingOnlyTurns} kingShotsWhileAlone=${analysis.kingShotsWhileAlone} ` +
+      `overkill=${analysis.overkill}`,
   ]
   if (analysis.heldUnderFire.length > 0) {
     lines.push(
       'heldUnderFire: ' +
         analysis.heldUnderFire
-          .map((h) => `${h.piece} ${h.turns} (${h.hitsTaken} hits${h.isPawn ? ', pawn' : ''})`)
+          .map(
+            (h) =>
+              `${h.piece} ${h.turns} (${h.heldHits} hits while held, streak ${h.maxStreak}` +
+              `${h.isPawn ? ', pawn' : ''})`,
+          )
           .join('; '),
     )
   }
@@ -161,6 +171,7 @@ export function formatGameAnalysis(analysis: GameAnalysis): string {
   if (analysis.neverMoved.length > 0) lines.push(`neverMoved: ${analysis.neverMoved.join(', ')}`)
   if (analysis.neverFired.length > 0) lines.push(`neverFired: ${analysis.neverFired.join(', ')}`)
   if (analysis.oscillation.length > 0) lines.push(`oscillation: ${analysis.oscillation.join(', ')}`)
+  if (analysis.retreatLoops.length > 0) lines.push(`retreatLoops: ${analysis.retreatLoops.join(', ')}`)
   if (analysis.focusFire.length > 0) {
     lines.push(
       'focusFire: ' + analysis.focusFire.map((f) => `${f.target} T${f.turn}×${f.attackers}`).join('; '),

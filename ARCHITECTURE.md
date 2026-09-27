@@ -102,7 +102,7 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Order` | `{ kind, dest, target, targetCell, chessKill, reachable, resumeTarget, resumeTurn, queue, log }` | active step is one-shot `none` / `goto` / `attack`; `targetCell` is the target's last known cell (order-log notes); `chessKill` parks an **insta-kill** victim (immediate chess kill, human-only, active-order-only — see `src/game/instaKill.ts`), consumed on the next tick (kept on the order so it is part of the turn snapshot); `reachable` marks an attack target that is positionally attainable; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence (`resumeTarget`/`resumeTurn` are retained for save compatibility but unused — a move now replaces an attack); `log` is a bounded list of recent order transitions (`noteOrder`) so the panel can explain why an order was issued, replaced, completed or abandoned |
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping. `underFireUntil` is a raw ~3 s latch (the AI keeps treating the recent attacker as a threat); **reporting** goes through `underFireAttacker` (`src/game/underFire.ts`), which also requires the attacker to still cover the square |
 | `Weapon` | `{ left }` | seconds until next shot |
-| `Motion` | `{ goal, intent, holdUntilHp, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn, ease?, freeAdvance? }` | grid movement + render interpolation; `intent` is the goal's source (`order`/`preserve`/`defense`/`engage`/`rally`); `holdUntilHp` is a latched safe-hold until that HP (full health for a critical wound, the recovery threshold otherwise); `reserved` is the cell being entered; `ease`/`freeAdvance` mark a capture-advance glide (eased, no post-arrival cooldown) |
+| `Motion` | `{ goal, intent, holdUntilHp, hitStreak, prevCell, goalSetTick, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn, ease?, freeAdvance? }` | grid movement + render interpolation; `intent` is the goal's source (`order`/`preserve`/`defense`/`engage`/`rally`); `holdUntilHp` is a latched safe-hold until that HP (full health for a critical wound, the recovery threshold otherwise); `hitStreak` counts hits since the last step (sustained-fire trigger); `prevCell`/`goalSetTick` drive the anti-dither recency penalty and retreat commitment; `reserved` is the cell being entered; `ease`/`freeAdvance` mark a capture-advance glide (eased, no post-arrival cooldown) |
 | `Projectile` | `{ team, damage, ttl, trajectory, splash, radius, size, shape, spin, color, target, owner, waypoints, waypointIndex }` | |
 | `Fx` | `{ ttl, maxTtl, radius, color, capture? }` | render-only impact/explosion; `capture` selects the small red triple pulse used for chess kills |
 | `Dead` | `true` | marker processed by the death system |
@@ -187,7 +187,8 @@ requestAnimationFrame(frame):
   (`speed` scales the accumulator only, so the sim stays deterministic).
   `World.capture()/restore()` does a deep `structuredClone` of every component
   store; `Rng.getState()/setState()` restores the PRNG. `TurnState` also carries
-  the sim-affecting rules in force (`autoPreserve`/`captureAdvance`/`chessKills`),
+  the sim-affecting rules in force (`autoPreserve`/`captureAdvance`/`chessKills`/
+  `promotion`/`finishPressure`),
   restored on undo/redo/replay so a turn always re-runs under its original rules.
   During a normal replay `ctx.turnActive` is forced true so the one-move-per-turn
   gate matches the original turn; a `continuous` mega replay leaves it false so
@@ -247,7 +248,9 @@ and a `You: Blue · Red ai` badge.
 `SimContext` (`src/ecs/types.ts`) is the shared mutable context passed to every
 system: `world`, `bus`, `board`, `rng`, `tick`, `turn`, `dt`, `cmds`, `teams`,
 `occupancy`, `pathBudget`, `verbosePhases`, `turnActive`, `autoPreserve`,
-`captureAdvance`.
+`captureAdvance`, `promotion`, `finishPressure`. `TeamRuntime` also carries
+`kingOnlySince` (the tick a side was first seen with only its king; -1 when it
+still has field pieces), maintained by `orders` and read by `damage`.
 
 System order (`createPipeline()` in `src/ecs/systems/index.ts`):
 
@@ -359,7 +362,10 @@ cell/reservation during movement validation and path planning.
   square by **actual movement hops** (`moveDistances`, a BFS alongside
   `reachableCells`), not Euclidean distance — so a knight heads for the firing
   square it can reach in the fewest moves instead of a "nearer-looking" one four
-  hops away. Euclidean total is only the tie-break among equally-reachable squares.
+  hops away. Euclidean total is only the tie-break among equally-reachable squares,
+  and the cell just vacated (`Motion.prevCell`) loses that tie by half a hop, so a
+  shooter whose best line is blocked by an ally detours instead of oscillating one
+  step back and forth.
   **AI king defense** (`kingDefense.ts`) never rallies. `kingThreats` ranks every
   enemy that can currently hit the king (its weapon's `fireCells` cover the
   king's square, at any range), anyone who hit it while it is still `underFire`,
@@ -369,7 +375,15 @@ cell/reservation during movement validation and path planning.
   threat distance, then nearer home), backing off only while a threat is inside
   `KING_STANDOFF = 5`; it holds rather than shuffling, and returns to the middle
   of its own back rank once the board is clear. It still fires at adjacent
-  enemies via combat. Nearby AI pieces within `KING_GUARD_RADIUS = 4` of a
+  enemies via combat. **`loneKingGoal`** handles a side with no field pieces:
+  it never kites (it is faster than every attacker, so dodging forever turned
+  material wins into turn-cap draws) and never retreats — a threat inside
+  `LAST_STAND_RADIUS = 3` is walked straight at, so the range-1 king guard
+  (80% of max HP) is a real threat; otherwise it returns to its post. When both
+  sides are king-only the two kings seek each other, so an AI-vs-AI king duel
+  cannot idle to the cap. A player king last-stands only in Attack stance;
+  None/Move keep the current dodge/hold behaviour. Nearby AI pieces within
+  `KING_GUARD_RADIUS = 4` of a
   threatened king become **bodyguards**: they first try to `screenPlan` — step
   onto a passable square on the Bresenham line between attacker and king
   (`cellsBetween`) so a slide shot stops on them — and otherwise `pursue` the
@@ -391,7 +405,11 @@ cell/reservation during movement validation and path planning.
   that still fires. It triggers when the piece is below a
   per-kind HP threshold (`preserveThreshold`: queen/king 0.5, rook 0.45,
   bishop/knight 0.4, else 0.3) **or** outgunned **or** — for queen/rook/bishop/
-  knight/king — covered by two or more shooters, even above the HP gate. Pawns are
+  knight/king — covered by two or more shooters, even above the HP gate, **or**
+  hit by `HIT_STREAK_TRIGGER = 2` blows since its last step. That sustained-fire
+  trigger (`Motion.hitStreak`, incremented by `damage`, reset when a step starts)
+  makes a piece that keeps being chipped reconsider its square even at full
+  health — the fix for static trading duels. Pawns are
   exempt from the retreat: they can only step forward, so an "escape" would march
   them into the enemy and give up the shot, so they hold and fire instead. Valuable
   pieces run this scan every tick so they can bail before taking damage; cheap
@@ -432,12 +450,17 @@ cell/reservation during movement validation and path planning.
   **healing aura** is a
   strong sanctuary: a piece inside it holds while wounded unless the volley it
   currently faces
-  would **kill** it (`outgunned`) — a mere shooter or a stale "recent attacker" is
+  would **kill** it (`outgunned`) or sustained hits are outpacing the heal — a
+  mere shooter or a stale "recent attacker" is
   not enough — so it recovers instead of being nudged out of range. When
   hurt, the scan widens to `COVER_RADIUS = 6` so nearby enemies count even before
   they can shoot, and a piece that is merely pressured (not yet wounded) still
   steps to the least-exposed nearby square, keeping its
-  shot as a tie-break, rather than chasing. Gated by
+  shot as a tie-break, rather than chasing. A chosen preserve/defense goal is
+  **committed** for `RETREAT_COMMIT_TICKS = 60` ticks (`Motion.goalSetTick`) and
+  accepts a sticky bonus only while its window is open, while `Motion.prevCell`
+  carries a recency penalty, so near-equal cover squares no longer produce
+  visible A→B→A dithering; a materially safer square still wins at once. Gated by
   `ctx.autoPreserve`, the persisted **auto-preserve** toolbar toggle; with it off
   the same coverage-based retreat still runs for a low-HP Attack-stance piece
   (there is no longer a single-target `fleeCell` path). A `none`/`move` piece
@@ -451,7 +474,9 @@ cell/reservation during movement validation and path planning.
   A self-preservation retreat is also written to the piece's `Order.log` as one
   **episode**: a single `self-preservation: retreating → <cell>` when it starts and
   a single close-out when it ends (`self-preservation: safe — holding` /
-  `… safe — resuming order` for the safe branch, `… no safer step — holding` when
+  `… safe — resuming order` for the safe branch, `… still under fire — holding`
+  when it is not wounded enough to act but a shooter still covers it, `… no
+  safer step — holding` when
   it is still covered but every step is no safer, `… no longer needed — holding` /
   `… no longer needed — resuming order` when the gate simply stops acting). So the
   autonomous move shows up in the panel history, the shorthand `note=` and the
@@ -512,7 +537,11 @@ cell/reservation during movement validation and path planning.
   impact via `cmds.damage`; `line` shots are stopped by walls; jump/arc ignore
   blockers.
 - **damage** — applies damage with ±10% seeded variance (a `lethal` chess-kill
-  command drops the target straight to 0 HP), marks `Dead`, credits kills. A kill
+  command drops the target straight to 0 HP), marks `Dead`, credits kills,
+  increments the victim's `Motion.hitStreak`. When `ctx.finishPressure` is on,
+  damage to a king whose side has been king-only for longer than
+  `FINISH_PRESSURE_GRACE_TICKS` is multiplied by up to +100% in steps, so an
+  attrition siege resolves instead of reaching the study turn cap. A kill
   by a direct blow from a still-living enemy of the victim queues an `advance`
   intent (killer → victim cell) when `ctx.captureAdvance` is on.
 - **death** — spawns an `Fx`, updates losses, queues destruction. A **chess-rule
@@ -531,7 +560,9 @@ cell/reservation during movement validation and path planning.
   not the piece's turn move), so it ignores the move cooldown after arrival, the
   turn move allowance and the AI move budget. The hop is re-validated against
   live occupancy and geometry (blocked line, occupied destination or a dead
-  killer cancels it), capped at one step per killer per tick, and exposed by the
+  killer cancels it), skipped when a preserve latch is active, and skipped when
+  the landing square sits under fire the killer could not survive
+  (`advanceSafe`), capped at one step per killer per tick, and exposed by the
   persisted **capture advance** toolbar toggle (default on). It is an
   **Attack-mode** behaviour only: a passive (`none`/`move`) piece never
   capture-advances, so a kill can never pull it off a safe or healing square.
@@ -660,7 +691,7 @@ terrainVersion editorMode editorBrush editorDirty canEdit mapName`.
 
 | Component | Responsibility |
 | --------- | -------------- |
-| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay/fork, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, chess kills, promotion, reset, `New game`, `New from template…`, editor toggle |
+| `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay/fork, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, chess kills, promotion, finish pressure, reset, `New game`, `New from template…`, editor toggle |
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle; routes map-editor clicks/drags (stamp, continuous erase) and exposes `cellAtClient`/`overBoard` for palette drops |
 | `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed — AI, Attack stance or an active attack order — `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. It tells the situation as history / now / pending: the **order / auto changes** list shows the piece's last few transitions with their tick (e.g. `immediate chess kill → e3`, `immediate chess kill lands → e3`, `target at e3 lost — attack abandoned`, `self-preservation: retreating → …`); a parked insta-kill, a latched `safe-hold until <hp> hp` and a "self-preservation overriding the attack order" banner show the pending state; the queue shows what runs next |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane, drag drops the piece on a chosen cell (or arms an editor brush in editor mode) |
@@ -945,8 +976,12 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   *held* under fire, a piece that never moved — explicit.
 - **Transcript & analysis.** `src/game/transcript.ts` renders a compact per-game
   text (header, opening board, per-turn activity, per-piece summary) and
-  `src/game/analysis.ts` flags gaps: held-under-fire, never-moved/never-fired,
-  no-progress turns, oscillation, focus fire. Per-turn activity also carries
+  `src/game/analysis.ts` flags gaps: held-under-fire (with hits taken while held
+  and the longest consecutive-hit streak), never-moved/never-fired,
+  no-progress turns, oscillation, retreat loops, focus fire/overkill, and the
+  endgame siege measures `kingOnlyTurns` / `kingShotsWhileAlone`. The batch
+  summary also reports `openingVariants`, so a batch of near-identical openings
+  is visible rather than mistaken for varied evidence. Per-turn activity also carries
   `order:` notes — why a piece's order/behaviour changed (issued/replaced/
   completed/abandoned, including autonomous self-preservation retreats) — taken
   from the piece's `Order.log` (`src/game/queue.ts`) via the

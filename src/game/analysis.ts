@@ -20,6 +20,12 @@ export interface PieceStats {
   damageTaken: number
   underFireTurns: number
   heldTurns: number[]
+  /** Hits absorbed on turns spent stationary under fire. */
+  heldHits: number
+  /** Longest run of turns stationary under fire while taking at least one hit. */
+  maxHoldStreak: number
+  /** Self-preservation retreat episodes started, from the order log. */
+  retreats: number
   diedTurn: number | null
   lastTurn: number
   hp: number
@@ -69,6 +75,9 @@ export function summarizePieces(trace: TurnTrace[], events: EventRecord[]): Piec
         damageTaken: 0,
         underFireTurns: 0,
         heldTurns: [],
+        heldHits: 0,
+        maxHoldStreak: 0,
+        retreats: 0,
         diedTurn: null,
         lastTurn: 0,
         hp: piece.hp,
@@ -79,7 +88,32 @@ export function summarizePieces(trace: TurnTrace[], events: EventRecord[]): Piec
     return s
   }
 
+  // Hits per turn per piece, so a hold streak counts turns that actually hurt,
+  // not merely turns spent inside the `underFire` latch.
+  const hitsByTurnEntity = new Map<string, number>()
+  for (const event of events) {
+    if (event.type !== 'damage' || event.entity === undefined) continue
+    const key = `${turnForTick(trace, event.tick)}:${event.entity}`
+    hitsByTurnEntity.set(key, (hitsByTurnEntity.get(key) ?? 0) + 1)
+  }
+  // Retreat episodes, deduped across the per-turn orderLog snapshots.
+  const retreatKeys = new Map<number, Set<string>>()
+  for (const turn of trace) {
+    for (const piece of turn.pieces) {
+      for (const note of piece.orderLog ?? []) {
+        if (!note.text.startsWith('self-preservation: retreating')) continue
+        let set = retreatKeys.get(piece.entity)
+        if (!set) {
+          set = new Set()
+          retreatKeys.set(piece.entity, set)
+        }
+        set.add(`${note.tick}\u0000${note.text}`)
+      }
+    }
+  }
+
   let prev = new Map<number, PieceTrace>()
+  const holdStreak = new Map<number, number>()
   for (const turn of trace) {
     const current = new Map<number, PieceTrace>()
     for (const piece of turn.pieces) {
@@ -88,7 +122,20 @@ export function summarizePieces(trace: TurnTrace[], events: EventRecord[]): Piec
       if (before && !vecEquals(before.cell, piece.cell)) s.moves++
       if (piece.underFire) {
         s.underFireTurns++
-        if (before && vecEquals(before.cell, piece.cell)) s.heldTurns.push(turn.turn)
+        if (before && vecEquals(before.cell, piece.cell)) {
+          s.heldTurns.push(turn.turn)
+          const hits = hitsByTurnEntity.get(`${turn.turn}:${piece.entity}`) ?? 0
+          if (hits > 0) {
+            s.heldHits += hits
+            const streak = (holdStreak.get(piece.entity) ?? 0) + 1
+            holdStreak.set(piece.entity, streak)
+            if (streak > s.maxHoldStreak) s.maxHoldStreak = streak
+          } else {
+            holdStreak.set(piece.entity, 0)
+          }
+        }
+      } else {
+        holdStreak.set(piece.entity, 0)
       }
       s.lastCell = { ...piece.cell }
       s.hp = piece.hp
@@ -104,6 +151,8 @@ export function summarizePieces(trace: TurnTrace[], events: EventRecord[]): Piec
     }
     prev = current
   }
+
+  for (const s of stats.values()) s.retreats = retreatKeys.get(s.entity)?.size ?? 0
 
   for (const event of events) {
     if (event.type === 'shot' && event.entity !== undefined) {
@@ -130,7 +179,12 @@ export function summarizePieces(trace: TurnTrace[], events: EventRecord[]): Piec
 export interface HeldUnderFire {
   piece: string
   turns: string
+  /** Total hits the piece took over the whole game. */
   hitsTaken: number
+  /** Hits taken on the turns it spent stationary under fire. */
+  heldHits: number
+  /** Longest consecutive run of such turns with at least one hit. */
+  maxStreak: number
   isPawn: boolean
 }
 
@@ -154,8 +208,18 @@ export interface GameAnalysis {
   neverMoved: string[]
   neverFired: string[]
   focusFire: FocusFire[]
+  /** Turns where three or more attackers hit the same target. */
+  overkill: number
   noProgressTurns: number
   oscillation: string[]
+  /** Pieces that started three or more self-preservation retreats. */
+  retreatLoops: string[]
+  /** Turns where exactly one side had only its king left. */
+  kingOnlyTurns: number
+  /** Shots fired by a king while its side was down to that king alone. */
+  kingShotsWhileAlone: number
+  /** Cell signature of the first turns, for spotting identical openings. */
+  openingSignature: string
 }
 
 function turnForTick(trace: TurnTrace[], tick: number): number {
@@ -180,6 +244,8 @@ export function analyzeGame(record: GameRecord, events: EventRecord[], trace: Tu
       piece: pieceLabel(s, height),
       turns: rangeLabel(s.heldTurns),
       hitsTaken: s.hitsTaken,
+      heldHits: s.heldHits,
+      maxStreak: s.maxHoldStreak,
       isPawn: s.kind === 'pawn',
     }))
 
@@ -189,6 +255,8 @@ export function analyzeGame(record: GameRecord, events: EventRecord[], trace: Tu
       piece: pieceLabel(s, height),
       turns: rangeLabel(s.heldTurns),
       hitsTaken: s.hitsTaken,
+      heldHits: s.heldHits,
+      maxStreak: s.maxHoldStreak,
       isPawn: s.kind === 'pawn',
     }))
 
@@ -217,6 +285,7 @@ export function analyzeGame(record: GameRecord, events: EventRecord[], trace: Tu
     focusFire.push({ target: labelOf(Number(entityText)), attackers: sources.size, turn: Number(turnText) })
   }
   focusFire.sort((a, b) => a.turn - b.turn)
+  const overkill = focusFire.filter((f) => f.attackers >= 3).length
 
   // No-progress turns: nobody moved and nothing took damage.
   let noProgressTurns = 0
@@ -248,6 +317,46 @@ export function analyzeGame(record: GameRecord, events: EventRecord[], trace: Tu
     if (bounces >= 3) oscillation.push(`${pieceLabel(s, height)} (${bounces} reversals)`)
   }
 
+  const retreatLoops = stats
+    .filter((s) => s.retreats >= 3)
+    .map((s) => `${pieceLabel(s, height)} (${s.retreats} retreats)`)
+
+  // King-only tracking: turns where exactly one side has nothing but its king,
+  // and the shots its king fired during that phase (the death-spiral measure).
+  const kingOnlyByTurn = new Map<number, Set<TeamId>>()
+  let kingOnlyTurns = 0
+  for (const turn of trace) {
+    const hasField: Record<TeamId, boolean> = { red: false, blue: false }
+    for (const piece of turn.pieces) if (piece.kind !== 'king') hasField[piece.team] = true
+    const alone = new Set<TeamId>()
+    if (!hasField.red) alone.add('red')
+    if (!hasField.blue) alone.add('blue')
+    if (alone.size === 1) {
+      kingOnlyTurns++
+      kingOnlyByTurn.set(turn.turn, alone)
+    }
+  }
+  let kingShotsWhileAlone = 0
+  for (const event of events) {
+    if (event.type !== 'shot' || event.entity === undefined) continue
+    const turn = turnForTick(trace, event.tick)
+    const alone = kingOnlyByTurn.get(turn)
+    if (!alone) continue
+    const entry = trace.find((t) => t.turn === turn)
+    const piece = entry?.pieces.find((p) => p.entity === event.entity)
+    if (piece && piece.kind === 'king' && alone.has(piece.team)) kingShotsWhileAlone++
+  }
+
+  const openingSignature = trace
+    .slice(0, 3)
+    .map((t) =>
+      t.pieces
+        .map((p) => `${p.team}${p.kind}${p.cell.x},${p.cell.y}`)
+        .sort()
+        .join('|'),
+    )
+    .join(';')
+
   return {
     winner: record.result?.winner ?? null,
     turns: record.result?.turns ?? trace.length - 1,
@@ -260,8 +369,13 @@ export function analyzeGame(record: GameRecord, events: EventRecord[], trace: Tu
     neverMoved,
     neverFired,
     focusFire,
+    overkill,
     noProgressTurns,
     oscillation,
+    retreatLoops,
+    kingOnlyTurns,
+    kingShotsWhileAlone,
+    openingSignature,
   }
 }
 
@@ -291,6 +405,14 @@ export interface BatchSummary {
   neverFiredCount: number
   oscillationCount: number
   noProgressTurns: number
+  /** Total turns across the batch where one side had only its king left. */
+  kingOnlyTurns: number
+  /** Total shots fired by king-only sides. */
+  kingShotsWhileAlone: number
+  overkill: number
+  retreatLoopCount: number
+  /** Distinct opening signatures: 1 means every seed opened identically. */
+  openingVariants: number
 }
 
 export function summarizeBatch(games: BatchGame[]): BatchSummary {
@@ -308,6 +430,11 @@ export function summarizeBatch(games: BatchGame[]): BatchSummary {
   let neverFiredCount = 0
   let oscillationCount = 0
   let noProgressTurns = 0
+  let kingOnlyTurns = 0
+  let kingShotsWhileAlone = 0
+  let overkill = 0
+  let retreatLoopCount = 0
+  const openings = new Set<string>()
   for (const g of games) {
     if (g.winner === 'red') redWins++
     else if (g.winner === 'blue') blueWins++
@@ -323,6 +450,11 @@ export function summarizeBatch(games: BatchGame[]): BatchSummary {
     neverFiredCount += g.analysis.neverFired.length
     oscillationCount += g.analysis.oscillation.length
     noProgressTurns += g.analysis.noProgressTurns
+    kingOnlyTurns += g.analysis.kingOnlyTurns
+    kingShotsWhileAlone += g.analysis.kingShotsWhileAlone
+    overkill += g.analysis.overkill
+    retreatLoopCount += g.analysis.retreatLoops.length
+    if (g.analysis.openingSignature) openings.add(g.analysis.openingSignature)
   }
   const n = games.length || 1
   return {
@@ -341,6 +473,11 @@ export function summarizeBatch(games: BatchGame[]): BatchSummary {
     neverFiredCount,
     oscillationCount,
     noProgressTurns,
+    kingOnlyTurns,
+    kingShotsWhileAlone,
+    overkill,
+    retreatLoopCount,
+    openingVariants: openings.size,
   }
 }
 
@@ -353,6 +490,9 @@ export function formatBatchSummary(summary: BatchSummary): string {
     `shots=${summary.totalShots} hits=${summary.totalHits} hitRate=${hitRate}% ` +
     `heldUnderFire=${summary.heldCount} neverMovedUnderFire=${summary.neverMovedUnderFireCount} ` +
     `neverMoved=${summary.neverMovedCount} neverFired=${summary.neverFiredCount} ` +
-    `oscillation=${summary.oscillationCount} noProgressTurns=${summary.noProgressTurns}`
+    `oscillation=${summary.oscillationCount} noProgressTurns=${summary.noProgressTurns} ` +
+    `retreatLoops=${summary.retreatLoopCount} kingOnlyTurns=${summary.kingOnlyTurns} ` +
+    `kingShotsWhileAlone=${summary.kingShotsWhileAlone} overkill=${summary.overkill} ` +
+    `openingVariants=${summary.openingVariants}`
   )
 }

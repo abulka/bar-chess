@@ -27,6 +27,7 @@ const emit = defineEmits<{
   (e: 'toggle-capture-advance'): void
   (e: 'toggle-chess-kills'): void
   (e: 'toggle-promotion'): void
+  (e: 'toggle-finish-pressure'): void
 }>()
 
 const speeds = SPEEDS
@@ -198,6 +199,11 @@ function onSoundChange(event: Event): void {
     <label class="toggle" title="A pawn that reaches the enemy back rank becomes a queen">
       <input type="checkbox" :checked="props.snapshot.promotion" @change="emit('toggle-promotion')" />
       promotion
+    </label>
+
+    <label class="toggle" title="A king whose side has no field pieces left takes ramping damage after a grace period, so attrition sieges resolve">
+      <input type="checkbox" :checked="props.snapshot.finishPressure" @change="emit('toggle-finish-pressure')" />
+      finish pressure
     </label>
 
     <button class="ctl" @click="emit('toggle-hud')">{{ props.snapshot.hudVisible ? 'Hide HUD' : 'Show HUD' }}</button>

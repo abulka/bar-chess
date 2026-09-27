@@ -20,6 +20,7 @@ function options(overrides: Partial<StudyOptions> = {}): StudyOptions {
     captureAdvance: false,
     chessKills: false,
     promotion: true,
+    finishPressure: true,
     ...overrides,
   }
 }

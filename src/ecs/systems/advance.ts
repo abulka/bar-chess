@@ -1,11 +1,32 @@
 import { CAPTURE_ADVANCE_TRAVEL } from '../../game/constants'
 import { containsCell, fireCells } from '../../game/geometry'
 import { vecEquals } from '../../game/math'
-import { buildOccupancy, makeOccupied } from '../../game/occupancy'
+import { buildOccupancy, makeOccupied, occupiedExcept } from '../../game/occupancy'
 import { clearMotion } from '../../game/queue'
 import { PIECES, WEAPONS } from '../../game/pieces'
-import { Cell, Motion, Order, PieceType, Position, Stance, Team } from '../components'
+import { Cell, Health, Motion, Order, PieceType, Position, Stance, Team } from '../components'
+import type { Entity } from '../world'
+import type { SimContext } from '../types'
 import type { System } from '../pipeline'
+import { COVER_RADIUS, coverageThreats } from './preservation'
+import { buildCoverage, dangerAt } from './threatField'
+
+/**
+ * Whether stepping onto `dest` is survivable under the enemies currently
+ * covering it. A kill should keep momentum, not walk a piece into a volley that
+ * would delete it.
+ */
+function advanceSafe(ctx: SimContext, killer: Entity, dest: { x: number; y: number }): boolean {
+  const hp = ctx.world.get(killer, Health)
+  if (!hp || hp.cur <= 0) return false
+  const team = ctx.world.get(killer, Team)
+  if (!team) return true
+  const threats = coverageThreats(ctx, killer, team, new Map(), { proximityRadius: COVER_RADIUS })
+  if (threats.length === 0) return true
+  const selfFree = occupiedExcept(ctx.board, ctx.occupancy, killer)
+  const coverages = buildCoverage(ctx, threats, selfFree)
+  return dangerAt(coverages, threats, dest.x, dest.y) < hp.cur
+}
 
 /**
  * Chess-style capture advance: when a kill leaves the victim's square open, the
@@ -49,6 +70,8 @@ const system: System = {
       const motion = ctx.world.require(killer, Motion)
       if (order.queue.length > 0) continue
       if (motion.moving || motion.path.length > 0 || motion.reserved !== null || motion.goal !== null) continue
+      // A preserve-latched piece is healing up, not pressing an advance.
+      if (motion.holdUntilHp > 0 || motion.intent === 'preserve') continue
       // A standing order blocks the advance, except the attack order that just
       // killed this victim: it is about to complete, so the capture still lands.
       const attackOrderOnVictim = order.kind === 'attack' && order.target === intent.victim
@@ -75,6 +98,8 @@ const system: System = {
       if (!containsCell(fireCells(board, cell, WEAPONS[def.weapon].geometry, team, occupied), dest.x, dest.y)) {
         continue
       }
+      // Don't step into a firing envelope that would kill the killer.
+      if (!advanceSafe(ctx, killer, dest)) continue
 
       occupancy.set(destIdx, killer)
       const center = board.cellCenter(dest.x, dest.y)

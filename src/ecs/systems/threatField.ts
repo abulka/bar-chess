@@ -34,7 +34,11 @@ export function buildCoverage(ctx: SimContext, threats: Threat[], selfFire: Occu
  * stay per-caller: self-preservation uses a flat adjacent penalty; the AI king
  * uses an adjacent spike and a radius gradient.
  */
-function dangerAt(
+/**
+ * Total covering damage at `(x, y)`, exported so policies that need a single
+ * square's exposure (advance safety, last-stand approach) share the same maths.
+ */
+export function dangerAt(
   coverages: Coverage[],
   threats: Threat[],
   x: number,
@@ -108,7 +112,7 @@ function bestSafeStep(options: Vec2[], metrics: (c: Vec2) => SafeStepMetrics): V
 export interface ThreatField {
   danger(x: number, y: number): number
   dist(x: number, y: number): number
-  metrics(x: number, y: number, extra?: { prefer?: boolean; secondary?: number }): SafeStepMetrics
+  metrics(x: number, y: number, extra?: { prefer?: boolean; secondary?: number; penalty?: number }): SafeStepMetrics
 }
 
 function threatField(
@@ -119,11 +123,14 @@ function threatField(
   return {
     danger: (x, y) => dangerAt(coverages, threats, x, y, proximityPenalty),
     dist: (x, y) => minThreatDist(threats, x, y),
-    metrics: (x, y, extra = {}) => ({
-      danger: dangerAt(coverages, threats, x, y, proximityPenalty),
-      primary: minThreatDist(threats, x, y),
-      ...extra,
-    }),
+    metrics: (x, y, extra = {}) => {
+      const { penalty = 0, ...rest } = extra
+      return {
+        danger: dangerAt(coverages, threats, x, y, proximityPenalty) + penalty,
+        primary: minThreatDist(threats, x, y),
+        ...rest,
+      }
+    },
   }
 }
 

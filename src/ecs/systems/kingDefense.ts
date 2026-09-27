@@ -1,5 +1,6 @@
 import { cellsBetween, chebyshev, containsCell, fireCells, moveDestinations } from '../../game/geometry'
 import type { OccupiedFn } from '../../game/geometry'
+import { kingOf } from '../../game/healing'
 import { dist, dist2, vecEquals } from '../../game/math'
 import { makeOccupied, occupiedExcept } from '../../game/occupancy'
 import { PIECES, WEAPONS } from '../../game/pieces'
@@ -7,9 +8,9 @@ import type { TeamId, Vec2 } from '../../game/types'
 import { Cell, PieceType, Team } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
-import { coverageThreats, homeCell } from './preservation'
-import type { Threat, ThreatMemo } from './preservation'
-import { buildCoverage, evaluateSafeStep } from './threatField'
+import { coverageThreats, ditherPenalty, homeCell } from './preservation'
+import type { EscapeOptions, Threat, ThreatMemo } from './preservation'
+import { buildCoverage, dangerAt, evaluateSafeStep } from './threatField'
 
 /** How close an enemy must get before the AI king reacts even without a shot. */
 const KING_THREAT_RADIUS = 3
@@ -108,7 +109,13 @@ export function isScreening(ctx: SimContext, guard: Entity, team: TeamId, kingCe
  * actually improves safety; otherwise holds. Returns the goal cell, or null to
  * stand fast.
  */
-export function aiKingGoal(ctx: SimContext, king: Entity, team: TeamId, threats: Threat[]): Vec2 | null {
+export function aiKingGoal(
+  ctx: SimContext,
+  king: Entity,
+  team: TeamId,
+  threats: Threat[],
+  options: EscapeOptions = {},
+): Vec2 | null {
   const kind = ctx.world.get(king, PieceType)?.kind
   const def = kind ? PIECES[kind] : undefined
   const cell = ctx.world.get(king, Cell)
@@ -139,7 +146,11 @@ export function aiKingGoal(ctx: SimContext, king: Entity, team: TeamId, threats:
     coverages,
     threats,
     proximityPenalty,
-    (field, c) => field.metrics(c.x, c.y, { secondary: home ? dist(c.x, c.y, home.x, home.y) : 0 }),
+    (field, c) =>
+      field.metrics(c.x, c.y, {
+        secondary: home ? dist(c.x, c.y, home.x, home.y) : 0,
+        penalty: ditherPenalty(c, options),
+      }),
   )
   if (step === null) return null
 
@@ -154,4 +165,80 @@ export function aiKingGoal(ctx: SimContext, king: Entity, team: TeamId, threats:
   // rather than drift into a corner.
   if (current.primary < KING_STANDOFF && bestMetrics.primary > current.primary + 1e-9) return best
   return null
+}
+
+/** How close a threat must be before a king-only side stops holding and advances. */
+const LAST_STAND_RADIUS = 3
+
+export interface LoneKingOptions {
+  /** Both sides are king-only: seek the enemy king instead of holding post. */
+  enemyKingOnly?: boolean
+}
+
+/**
+ * Lone-king policy: a king with no field pieces left never runs, because it is
+ * faster than its attackers and dodging forever turned material wins into
+ * turn-cap draws. Instead, when a threat is inside `LAST_STAND_RADIUS` it walks
+ * straight at it, so the range-1 king guard (80% of max HP) becomes a real
+ * threat and the finish resolves either way. Otherwise it returns to its post —
+ * unless both sides are king-only, when it seeks the enemy king so an A-vs-A
+ * king duel cannot idle out to the turn cap.
+ */
+export function loneKingGoal(
+  ctx: SimContext,
+  king: Entity,
+  team: TeamId,
+  threats: Threat[],
+  options: LoneKingOptions = {},
+): Vec2 | null {
+  const kind = ctx.world.get(king, PieceType)?.kind
+  const def = kind ? PIECES[kind] : undefined
+  const cell = ctx.world.get(king, Cell)
+  if (!def || !cell) return null
+
+  const home = homeCell(ctx, team)
+  const goHome = (): Vec2 | null => (home && !vecEquals(cell, home) ? home : null)
+
+  let target: Vec2 | null = null
+  if (threats.length > 0) {
+    let nearest = threats[0]
+    let nearestGap = chebyshev(cell.x, cell.y, nearest.cell.x, nearest.cell.y)
+    for (const t of threats) {
+      const gap = chebyshev(cell.x, cell.y, t.cell.x, t.cell.y)
+      if (gap < nearestGap) {
+        nearest = t
+        nearestGap = gap
+      }
+    }
+    if (nearestGap <= 1) return null
+    if (nearestGap <= LAST_STAND_RADIUS) target = { x: nearest.cell.x, y: nearest.cell.y }
+  }
+  if (!target && options.enemyKingOnly) {
+    const enemyTeam: TeamId = team === 'red' ? 'blue' : 'red'
+    const enemyKing = kingOf(ctx.world, enemyTeam)
+    const ec = enemyKing !== null ? ctx.world.get(enemyKing, Cell) : null
+    if (ec) target = { x: ec.x, y: ec.y }
+  }
+  if (!target) return goHome()
+
+  const targetGap = chebyshev(cell.x, cell.y, target.x, target.y)
+  if (targetGap <= 1) return null
+
+  const selfFree = occupiedExcept(ctx.board, ctx.occupancy, king)
+  const coverages = buildCoverage(ctx, threats, selfFree)
+  const moves = moveDestinations(ctx.board, cell, def.move, team, makeOccupied(ctx.board, ctx.occupancy))
+  let best: Vec2 | null = null
+  let bestGap = targetGap
+  let bestDanger = Infinity
+  for (const c of moves) {
+    const gap = chebyshev(c.x, c.y, target.x, target.y)
+    if (gap >= targetGap) continue
+    const danger = dangerAt(coverages, threats, c.x, c.y)
+    if (best === null || gap < bestGap || (gap === bestGap && danger < bestDanger)) {
+      best = c
+      bestGap = gap
+      bestDanger = danger
+    }
+  }
+  return best
 }

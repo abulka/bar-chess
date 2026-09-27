@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Motion, Order, PieceType, Position, Stance, Team } from '../../src/ecs/components'
+import { Cell, Health, Motion, Order, PieceType, Position, Stance, Team } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { createPiece } from '../../src/game/factory'
 import { PIECES } from '../../src/game/pieces'
@@ -67,6 +67,20 @@ describe('advance system — chess-style capture step', () => {
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
     const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
     createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 2 }) // stands between them
+    kill(ctx, queen, victim)
+
+    advance.update(ctx)
+
+    expect(cellOf(ctx, queen)).toEqual({ x: 0, y: 0 })
+    expect(ctx.world.require(queen, Motion).moving).toBe(false)
+  })
+
+  it('skips an advance into fire that would kill the killer', () => {
+    const ctx = context()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
+    const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
+    createPiece(ctx, 'red', PIECES.rook, { x: 0, y: 7 }) // covers the landing square
+    ctx.world.require(queen, Health).cur = 10
     kill(ctx, queen, victim)
 
     advance.update(ctx)

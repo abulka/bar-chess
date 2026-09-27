@@ -28,6 +28,17 @@ export const CAPTURE_ADVANCE_FX_RADIUS = 0.8
 /** Colour of the capture-advance pulses. */
 export const CAPTURE_ADVANCE_FX_COLOR = '#ff3b30'
 
+/**
+ * Finish pressure: once a side is down to its king alone, incoming damage to
+ * that king ramps after a grace period so an attrition siege cannot run to the
+ * study turn cap. Fraction added per `FINISH_PRESSURE_PERIOD_TICKS`, capped at
+ * `FINISH_PRESSURE_MAX_BONUS`.
+ */
+export const FINISH_PRESSURE_GRACE_TICKS = 240
+export const FINISH_PRESSURE_PERIOD_TICKS = 180
+export const FINISH_PRESSURE_STEP = 0.25
+export const FINISH_PRESSURE_MAX_BONUS = 1
+
 /** HUD bottom-panel height as a fraction of the viewport, persisted as a pref. */
 export const BOTTOM_FRACTION_DEFAULT = 0.28
 export const BOTTOM_FRACTION_MIN = 0.1

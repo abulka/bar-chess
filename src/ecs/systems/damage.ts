@@ -1,7 +1,34 @@
-import { Cell, ChessKill, Dead, Health, Target, Team } from '../components'
+import {
+  FINISH_PRESSURE_GRACE_TICKS,
+  FINISH_PRESSURE_MAX_BONUS,
+  FINISH_PRESSURE_PERIOD_TICKS,
+  FINISH_PRESSURE_STEP,
+} from '../../game/constants'
+import { Cell, ChessKill, Dead, Health, Motion, PieceType, Target, Team } from '../components'
+import type { Entity } from '../world'
+import type { SimContext } from '../types'
 import type { System } from '../pipeline'
 
 const UNDER_FIRE_TICKS = 90
+
+/**
+ * Damage multiplier from finish pressure: a king whose side has no field pieces
+ * left takes progressively more after a grace period, so an attrition siege
+ * cannot outlast the study turn cap. Returns 1 when the rule is off.
+ */
+function finishMultiplier(ctx: SimContext, target: Entity): number {
+  if (!ctx.finishPressure) return 1
+  if (ctx.world.get(target, PieceType)?.kind !== 'king') return 1
+  const team = ctx.world.get(target, Team)
+  if (!team) return 1
+  const since = ctx.teams[team].kingOnlySince
+  // `>= 0` tolerates older snapshots that predate the field without producing NaN.
+  if (!(since >= 0)) return 1
+  const elapsed = ctx.tick - since
+  if (elapsed <= FINISH_PRESSURE_GRACE_TICKS) return 1
+  const steps = Math.floor((elapsed - FINISH_PRESSURE_GRACE_TICKS) / FINISH_PRESSURE_PERIOD_TICKS) + 1
+  return 1 + Math.min(FINISH_PRESSURE_MAX_BONUS, steps * FINISH_PRESSURE_STEP)
+}
 
 const system: System = {
   name: 'damage',
@@ -14,7 +41,10 @@ const system: System = {
 
       const amount = cmd.lethal
         ? health.cur
-        : Math.max(1, Math.round(cmd.amount * ctx.rng.range(0.9, 1.1)))
+        : Math.max(
+            1,
+            Math.round(cmd.amount * finishMultiplier(ctx, target) * ctx.rng.range(0.9, 1.1)),
+          )
       health.cur = Math.max(0, health.cur - amount)
 
       const targetComp = ctx.world.get(target, Target)
@@ -22,6 +52,10 @@ const system: System = {
         targetComp.lastAttacker = cmd.source
         targetComp.underFireUntil = ctx.tick + UNDER_FIRE_TICKS
       }
+      // Track consecutive hits since the last move so the preserve pass can
+      // react to sustained fire even while the HP threshold is not crossed.
+      const motion = ctx.world.get(target, Motion)
+      if (motion) motion.hitStreak++
 
       const team = ctx.world.get(target, Team)
       ctx.bus.emit('damage', `#${target} took ${amount} dmg (hp ${health.cur}/${health.max})`, {

@@ -334,6 +334,8 @@ export interface GameSnapshot {
   chessKills: boolean
   /** A pawn reaching the enemy back rank promotes to a queen. */
   promotion: boolean
+  /** The lone king's incoming damage ramps after a grace period. */
+  finishPressure: boolean
   /** Whether combat sound effects are enabled. */
   soundEnabled: boolean
   /** Whether the left/right side rails (games/turns, piece/info) are shown. */
@@ -414,6 +416,7 @@ function createTeamRuntime(controller: TeamController): TeamRuntime {
     deployed: 0,
     movesMade: 0,
     movesThisTurn: 0,
+    kingOnlySince: -1,
   }
 }
 
@@ -465,6 +468,8 @@ export class Game {
   chessKills = false
   /** A pawn reaching the enemy back rank promotes to a queen. */
   promotion = true
+  /** The lone king's incoming damage ramps after a grace period. */
+  finishPressure = true
   /** Transient BAR-style command awaiting the next left-click. */
   pendingCommand: StanceMode = 'none'
   /**
@@ -651,6 +656,7 @@ export class Game {
       autoPreserve: this.autoPreserve,
       captureAdvance: this.captureAdvance,
       promotion: this.promotion,
+      finishPressure: this.finishPressure,
     }
   }
 
@@ -1094,6 +1100,7 @@ export class Game {
     this.captureAdvance = settings.captureAdvance
     this.chessKills = settings.chessKills
     this.promotion = settings.promotion ?? true
+    this.finishPressure = settings.finishPressure ?? true
   }
 
   /** Re-apply commands that were pending at a recorded turn's start. */
@@ -1233,6 +1240,7 @@ export class Game {
       captureAdvance: this.captureAdvance,
       chessKills: this.chessKills,
       promotion: this.promotion,
+      finishPressure: this.finishPressure,
     }
   }
 
@@ -1279,6 +1287,7 @@ export class Game {
       captureAdvance: this.captureAdvance,
       chessKills: this.chessKills,
       promotion: this.promotion,
+      finishPressure: this.finishPressure,
       soundEnabled: this.soundEnabled,
       bottomFraction: this.bottomFraction,
       leftRailFraction: this.leftRailFraction,
@@ -1314,6 +1323,7 @@ export class Game {
     if (typeof settings.captureAdvance === 'boolean') this.captureAdvance = settings.captureAdvance
     if (typeof settings.chessKills === 'boolean') this.chessKills = settings.chessKills
     if (typeof settings.promotion === 'boolean') this.promotion = settings.promotion
+    if (typeof settings.finishPressure === 'boolean') this.finishPressure = settings.finishPressure
     if (typeof settings.soundEnabled === 'boolean') this.soundEnabled = settings.soundEnabled
     if (
       typeof settings.bottomFraction === 'number' &&
@@ -1369,6 +1379,13 @@ export class Game {
     this.liveEdit(() => {
       this.promotion = value
       this.bus.emit('info', `promotion ${value ? 'on' : 'off'}`)
+    })
+  }
+
+  setFinishPressure(value: boolean): void {
+    this.liveEdit(() => {
+      this.finishPressure = value
+      this.bus.emit('info', `finish pressure ${value ? 'on' : 'off'}`)
     })
   }
 
@@ -1432,6 +1449,7 @@ export class Game {
     this.ctx.autoPreserve = this.autoPreserve
     this.ctx.captureAdvance = this.captureAdvance
     this.ctx.promotion = this.promotion
+    this.ctx.finishPressure = this.finishPressure
     // A normal replay re-runs a serialized turn, so the one-move-per-turn gate
     // must apply. A mega-turn replay runs exactly like free play (turnActive
     // off) so its parallel movement is reproduced.
@@ -2636,6 +2654,7 @@ export class Game {
       captureAdvance: this.captureAdvance,
       chessKills: this.chessKills,
       promotion: this.promotion,
+      finishPressure: this.finishPressure,
       soundEnabled: this.soundEnabled,
       railsVisible: this.railsVisible,
       controlsCollapsed: this.controlsCollapsed,
