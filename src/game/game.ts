@@ -327,6 +327,8 @@ export interface GameSnapshot {
   advantage: number
   /** Specific breakdown of the evaluation, for the advantage-bar tooltip. */
   advantageTooltip: string
+  /** True when a side's king is in check with no legal move (checkmate). */
+  checkmate: Record<TeamId, boolean>
   overlays: OverlayFlags
   hudVisible: boolean
   autoPreserve: boolean
@@ -2739,6 +2741,7 @@ export class Game {
       winner: this.winner,
       advantage,
       advantageTooltip,
+      checkmate: { red: adv.lost.red, blue: adv.lost.blue },
       overlays: { ...this.overlays },
       hudVisible: this.hudVisible,
       autoPreserve: this.autoPreserve,

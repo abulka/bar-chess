@@ -100,6 +100,38 @@ input {
   color: var(--text);
 }
 
+/* A red "(☠️ side checkmate)" tag beside the turn text, shown while a king is
+   trapped with no legal move. */
+.checkmate-badge {
+  position: relative;
+  z-index: 1;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: #c62828;
+  color: #fff;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  animation: checkmate-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes checkmate-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.65;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .checkmate-badge {
+    animation: none;
+  }
+}
+
 .turnbar.active .turnbar-label,
 .turnbar.replay .turnbar-label {
   color: var(--turnbar);

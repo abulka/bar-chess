@@ -120,6 +120,9 @@ describe('position evaluation', () => {
     expect(detail.lost.red).toBe(true)
     expect(detail.score).toBeLessThan(-50)
     expect(describeAdvantage(detail)).toContain("Orange's king is trapped — checkmate")
+    // The snapshot exposes the flag for the turn-bar checkmate badge.
+    expect(game.snapshot().checkmate.red).toBe(true)
+    expect(game.snapshot().checkmate.blue).toBe(false)
   })
 
   it('does not treat a safe king with blocked squares as lost', () => {
@@ -130,6 +133,7 @@ describe('position evaluation', () => {
     place(game, 'queen', 'blue', 2, 1) // c7: does not check a8
 
     expect(advantageDetail(game).lost.red).toBe(false)
+    expect(game.snapshot().checkmate.red).toBe(false)
   })
 
   it('does not let weapon reload phase flip the evaluation', () => {

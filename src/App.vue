@@ -255,6 +255,16 @@ const turnLabel = computed(() => {
     : `${turn} · press space for a turn`
 })
 
+/** A "(☠️ side checkmate)" tag for the turn bar while a king is trapped. */
+const checkmateBadge = computed(() => {
+  if (snapshot.value.winner) return ''
+  const lost = snapshot.value.checkmate
+  if (lost.red && lost.blue) return '(☠️ both kings checkmate)'
+  if (lost.red) return `(☠️ ${snapshot.value.teams.red.name} checkmate)`
+  if (lost.blue) return `(☠️ ${snapshot.value.teams.blue.name} checkmate)`
+  return ''
+})
+
 const hover = computed(() => snapshot.value.hover)
 
 /** Describe a hovered piece's current activity: motion intent, else its order/stance. */
@@ -1029,6 +1039,11 @@ onBeforeUnmount(() => {
           :style="{ width: barProgress * 100 + '%' }"
         ></div>
         <span class="turnbar-label">{{ turnLabel }}</span>
+        <span
+          v-if="checkmateBadge"
+          class="checkmate-badge"
+          :title="snapshot.advantageTooltip"
+        >{{ checkmateBadge }}</span>
         <span
           v-if="snapshot.pendingCommand !== 'none'"
           class="pending-command"
