@@ -341,7 +341,7 @@ export interface GameSnapshot {
   finishPressure: boolean
   /** Whether combat sound effects are enabled. */
   soundEnabled: boolean
-  /** Whether the left/right side rails (games/turns, piece/info) are shown. */
+  /** Whether the left/right side rails (games/turns, piece/info/options) are shown. */
   railsVisible: boolean
   /** Whether the right-rail "controls" hints and "stance" legend are collapsed. */
   controlsCollapsed: boolean

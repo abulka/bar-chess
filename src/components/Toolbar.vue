@@ -23,25 +23,11 @@ const emit = defineEmits<{
   (e: 'open-maps'): void
   (e: 'toggle-editor'): void
   (e: 'toggle-hud'): void
-  (e: 'toggle-auto-preserve'): void
-  (e: 'toggle-capture-advance'): void
-  (e: 'toggle-chess-kills'): void
-  (e: 'toggle-promotion'): void
-  (e: 'toggle-finish-pressure'): void
 }>()
 
 const speeds = SPEEDS
 const overlayKeys: Array<{ key: keyof OverlayFlags; label: string }> = [
   { key: 'myOrders', label: 'my orders (o)' },
-  { key: 'enemyPlans', label: 'enemy plans' },
-  { key: 'moveCells', label: 'move' },
-  { key: 'attackCells', label: 'attack' },
-  { key: 'rangeArcs', label: 'range' },
-  { key: 'grid', label: 'grid' },
-  { key: 'health', label: 'health' },
-  { key: 'reload', label: 'firing recharge' },
-  { key: 'healing', label: 'show healing' },
-  { key: 'advantage', label: "who's winning" },
 ]
 
 // Blur after change so global hotkeys keep working when a toolbar control was
@@ -179,31 +165,6 @@ function onSoundChange(event: Event): void {
         @change="onOverlayChange(o.key, $event)"
       />
       {{ o.label }}
-    </label>
-
-    <label class="toggle" title="Hurt pieces step out of fire on their own, even without orders">
-      <input type="checkbox" :checked="props.snapshot.autoPreserve" @change="emit('toggle-auto-preserve')" />
-      auto-preserve
-    </label>
-
-    <label class="toggle" title="An idle killer steps onto the square of the piece it just killed (chess capture)">
-      <input type="checkbox" :checked="props.snapshot.captureAdvance" @change="emit('toggle-capture-advance')" />
-      capture advance
-    </label>
-
-    <label class="toggle" title="Insta-kill: ordering a move or attack kills instantly (next tick, pressed even when wounded) when the target is already within chess capture range">
-      <input type="checkbox" :checked="props.snapshot.chessKills" @change="emit('toggle-chess-kills')" />
-      chess kills
-    </label>
-
-    <label class="toggle" title="A pawn that reaches the enemy back rank becomes a queen">
-      <input type="checkbox" :checked="props.snapshot.promotion" @change="emit('toggle-promotion')" />
-      promotion
-    </label>
-
-    <label class="toggle" title="A king whose side has no field pieces left takes ramping damage after a grace period, so attrition sieges resolve">
-      <input type="checkbox" :checked="props.snapshot.finishPressure" @change="emit('toggle-finish-pressure')" />
-      finish pressure
     </label>
 
     <button class="ctl" @click="emit('toggle-hud')">{{ props.snapshot.hudVisible ? 'Hide HUD' : 'Show HUD' }}</button>

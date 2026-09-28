@@ -25,9 +25,12 @@ test('overlay options persist across a page reload', async ({ page }) => {
     })
   const before = await read()
 
-  await page.locator('label.toggle').filter({ hasText: 'range' }).click()
+  // Range arcs and firing recharge live in the right rail's options tab;
+  // my orders stays on the toolbar.
+  await page.getByRole('button', { name: 'options', exact: true }).click()
+  await page.locator('label.toggle').filter({ hasText: 'Weapon range arcs' }).click()
+  await page.locator('label.toggle').filter({ hasText: 'Firing recharge' }).click()
   await page.locator('label.toggle').filter({ hasText: 'my orders' }).click()
-  await page.locator('label.toggle').filter({ hasText: 'firing recharge' }).click()
   const toggled = await read()
   expect(toggled.rangeArcs).toBe(!before.rangeArcs)
   expect(toggled.myOrders).toBe(!before.myOrders)

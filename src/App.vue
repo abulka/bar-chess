@@ -7,6 +7,7 @@ import EditorPanel from './components/EditorPanel.vue'
 import EventLog from './components/EventLog.vue'
 import LegendIcon from './components/LegendIcon.vue'
 import MapsModal from './components/MapsModal.vue'
+import OptionsPanel from './components/OptionsPanel.vue'
 import PiecePanel from './components/PiecePanel.vue'
 import ReinforcementBar from './components/ReinforcementBar.vue'
 import StatsBar from './components/StatsBar.vue'
@@ -104,9 +105,9 @@ const bottomHeight = ref(clampBottomPx(game.bottomFraction * window.innerHeight)
 const leftWidth = ref(clampRailPx(game.leftRailFraction * window.innerWidth, 0))
 const rightWidth = ref(clampRailPx(game.rightRailFraction * window.innerWidth, leftWidth.value))
 
-/** Active sub-tab in each side rail (left: games/turns, right: piece/info). */
+/** Active sub-tab in each side rail (left: games/turns, right: piece/info/options). */
 const leftTab = ref<'games' | 'turns'>('games')
-const rightTab = ref<'piece' | 'info'>('piece')
+const rightTab = ref<'piece' | 'info' | 'options'>('piece')
 
 const gridRows = computed(() =>
   snapshot.value.hudVisible
@@ -1012,11 +1013,6 @@ onBeforeUnmount(() => {
       @open-maps="openMaps"
       @toggle-editor="onToggleEditor"
       @toggle-hud="onToggleHud"
-      @toggle-auto-preserve="onToggleAutoPreserve"
-      @toggle-capture-advance="onToggleCaptureAdvance"
-      @toggle-chess-kills="onToggleChessKills"
-      @toggle-promotion="onTogglePromotion"
-      @toggle-finish-pressure="onToggleFinishPressure"
     />
 
     <div class="topbars">
@@ -1226,6 +1222,14 @@ onBeforeUnmount(() => {
             >
               info
             </button>
+            <button
+              type="button"
+              class="rail-tab"
+              :class="{ active: rightTab === 'options' }"
+              @click="rightTab = 'options'"
+            >
+              options
+            </button>
           </div>
 
           <div v-show="rightTab === 'piece'" class="rail-tab-body">
@@ -1317,6 +1321,18 @@ onBeforeUnmount(() => {
                 <li><LegendIcon kind="line-potshot" /> pot shot (in range only)</li>
               </ul>
             </CollapsibleSection>
+          </div>
+
+          <div v-show="rightTab === 'options'" class="rail-tab-body">
+            <OptionsPanel
+              :snapshot="snapshot"
+              @toggle-overlay="onToggleOverlay"
+              @toggle-auto-preserve="onToggleAutoPreserve"
+              @toggle-capture-advance="onToggleCaptureAdvance"
+              @toggle-chess-kills="onToggleChessKills"
+              @toggle-promotion="onTogglePromotion"
+              @toggle-finish-pressure="onToggleFinishPressure"
+            />
           </div>
         </aside>
       </div>
