@@ -33,6 +33,32 @@ describe('previewFiringCell', () => {
     expect(cell).toEqual({ x: 2, y: 0 })
   })
 
+  it('prefers a firing cell whose route is clear over a blocked straight line', () => {
+    // Rook a1 ordered at d6. a6 (straight up the a-file) and d1 (along the back
+    // rank) tie on theoretical hops and total travel, but the a-file is blocked
+    // by two friendly pieces while the rank is clear.
+    const occ = occupiedCells([
+      { x: 0, y: 6 },
+      { x: 0, y: 5 },
+      { x: 3, y: 2 },
+    ])
+    const cell = previewFiringCell(flatBoard(), { x: 0, y: 7 }, { x: 3, y: 2 }, rookMove, rookWeapon, 'blue', occ)
+    expect(cell).toEqual({ x: 3, y: 7 }) // d1
+  })
+
+  it('falls back to the theoretical firing cell when every route is blocked', () => {
+    // The rook is boxed in, so no one-step firing cell exists; ranking must fall
+    // back to the straight-line cell a6 rather than returning nothing.
+    const occ = occupiedCells([
+      { x: 1, y: 7 },
+      { x: 0, y: 6 },
+      { x: 1, y: 6 },
+      { x: 3, y: 2 },
+    ])
+    const cell = previewFiringCell(flatBoard(), { x: 0, y: 7 }, { x: 3, y: 2 }, rookMove, rookWeapon, 'blue', occ)
+    expect(cell).toEqual({ x: 0, y: 2 }) // a6
+  })
+
   it('prefers the firing cell reached in fewest moves for a knight', () => {
     // Knight on c3 ordered at the pawn on d7. c5/f6 (both two hops) are blocked,
     // leaving b6 (two hops). The Euclidean-nearest firing cell e5 is four hops.

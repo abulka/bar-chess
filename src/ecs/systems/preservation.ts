@@ -1,3 +1,4 @@
+import { friendlyCoverageCells } from '../../game/defended'
 import { chebyshev, containsCell, fireCells } from '../../game/geometry'
 import { HEAL_RADIUS } from '../../game/healing'
 import { enemyCoverage } from '../../game/kingSafety'
@@ -169,6 +170,55 @@ export function nearestHealingCell(
       if ((free && !bestFree) || (free === bestFree && d < bestDist)) {
         best = { x, y }
         bestDist = d
+        bestFree = free
+      }
+    }
+  }
+  return best
+}
+
+/**
+ * The nearest reachable, passable square currently covered by a same-team
+ * weapon — a "defended" square a wounded piece can retreat to and regenerate on
+ * under the `defendedHeal` rule. Prefers a square no enemy weapon covers (a safe
+ * pocket), then an unoccupied one (a legal landing spot), then the closest.
+ * `piece` is excluded from the coverage so it cannot count as its own defender.
+ * Returns null when no defended square is within reach.
+ */
+export function nearestDefendedCell(
+  ctx: SimContext,
+  piece: Entity,
+  team: TeamId,
+  coverage?: Set<number>,
+): Vec2 | null {
+  const cell = ctx.world.get(piece, Cell)
+  const kind = ctx.world.get(piece, PieceType)?.kind
+  const def = kind ? PIECES[kind] : undefined
+  if (!cell || !def) return null
+  const covered = coverage ?? friendlyCoverageCells(ctx.board, ctx.world, ctx.occupancy, team, piece)
+  const reach = reachableCells(ctx.board, cell, def.move, team)
+  const enemyCovered = enemyCoverage(ctx.board, ctx.world, ctx.occupancy, piece, team)
+  let best: Vec2 | null = null
+  let bestDist = Infinity
+  let bestSafe = false
+  let bestFree = false
+  for (let y = 0; y < ctx.board.height; y++) {
+    for (let x = 0; x < ctx.board.width; x++) {
+      const idx = ctx.board.cellIndex(x, y)
+      if (!covered.has(idx)) continue
+      if (!ctx.board.passable(x, y)) continue
+      if (reach[idx] !== 1) continue
+      const safe = !enemyCovered.has(idx)
+      const free = !ctx.occupancy.has(idx)
+      const d = dist2(x, y, cell.x, cell.y)
+      const better =
+        (safe && !bestSafe) ||
+        (safe === bestSafe && free && !bestFree) ||
+        (safe === bestSafe && free === bestFree && d < bestDist)
+      if (best === null || better) {
+        best = { x, y }
+        bestDist = d
+        bestSafe = safe
         bestFree = free
       }
     }

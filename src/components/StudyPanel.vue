@@ -38,6 +38,7 @@ const captureAdvance = ref(true)
 const chessKills = ref(false)
 const promotion = ref(true)
 const finishPressure = ref(true)
+const defendedHeal = ref(true)
 const includeRecord = ref(false)
 const copied = ref(false)
 
@@ -91,6 +92,7 @@ function onRun(): void {
     chessKills: chessKills.value,
     promotion: promotion.value,
     finishPressure: finishPressure.value,
+    defendedHeal: defendedHeal.value,
   })
 }
 
@@ -163,6 +165,7 @@ async function copyPrompt(): Promise<void> {
       <label class="toggle"><input v-model="chessKills" type="checkbox" :disabled="state.running" /> chess kills</label>
       <label class="toggle"><input v-model="promotion" type="checkbox" :disabled="state.running" /> promotion</label>
       <label class="toggle" title="Once a side is down to only its king, attacks on that king deal more and more damage over time, so a siege cannot be dragged out forever"><input v-model="finishPressure" type="checkbox" :disabled="state.running" /> finish pressure</label>
+      <label class="toggle" title="A piece protected by a friendly weapon slowly regenerates, even away from the king"><input v-model="defendedHeal" type="checkbox" :disabled="state.running" /> defended heal</label>
       <label class="toggle" title="Include each game's replay record JSON (verbose)"><input v-model="includeRecord" type="checkbox" /> replay record</label>
     </div>
 

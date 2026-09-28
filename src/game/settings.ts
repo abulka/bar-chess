@@ -21,6 +21,8 @@ export interface SimSettings {
   promotion?: boolean
   /** Optional for older records; treated as true when absent. */
   finishPressure?: boolean
+  /** Optional for older records; treated as true when absent. */
+  defendedHeal?: boolean
 }
 
 /** UI/session preferences that should survive a reload or a server restart. */
@@ -35,6 +37,7 @@ export interface GameSettings {
   chessKills: boolean
   promotion: boolean
   finishPressure: boolean
+  defendedHeal: boolean
   soundEnabled: boolean
   /** HUD bottom-panel height as a fraction of the viewport. */
   bottomFraction: number
@@ -61,6 +64,7 @@ export interface SettingsPatch {
   chessKills?: boolean
   promotion?: boolean
   finishPressure?: boolean
+  defendedHeal?: boolean
   soundEnabled?: boolean
   bottomFraction?: number
   leftRailFraction?: number
@@ -107,6 +111,7 @@ export function loadSettings(): SettingsPatch | null {
   if (typeof parsed.chessKills === 'boolean') out.chessKills = parsed.chessKills
   if (typeof parsed.promotion === 'boolean') out.promotion = parsed.promotion
   if (typeof parsed.finishPressure === 'boolean') out.finishPressure = parsed.finishPressure
+  if (typeof parsed.defendedHeal === 'boolean') out.defendedHeal = parsed.defendedHeal
   if (typeof parsed.speed === 'number' && SPEEDS.includes(parsed.speed)) out.speed = parsed.speed
   if (typeof parsed.gameMode === 'string' && GAME_MODES.some((m) => m.id === parsed.gameMode)) {
     out.gameMode = parsed.gameMode as GameMode

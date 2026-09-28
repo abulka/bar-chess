@@ -15,6 +15,9 @@ export const HUMAN_HEAL_MULTIPLIER = 3
 /** Green used by the renderer for the aura, ring and healing tendrils. */
 export const HEAL_COLOR = '#4ad991'
 
+/** Vivid purple the far (healed) end of a healing tendril ramps into. */
+export const HEAL_TIP_COLOR = '#c04dff'
+
 export interface HealingField {
   /** The team's living king, the source of the aura. */
   king: Entity

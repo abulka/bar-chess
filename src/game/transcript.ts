@@ -144,6 +144,7 @@ export function formatTranscript(input: TranscriptInput): string {
       `chessKills=${record.settings.chessKills ? 'on' : 'off'} ` +
       `promotion=${record.settings.promotion === false ? 'off' : 'on'} ` +
       `finishPressure=${record.settings.finishPressure === false ? 'off' : 'on'} ` +
+      `defendedHeal=${record.settings.defendedHeal === false ? 'off' : 'on'} ` +
       `playerTeam=${record.playerTeam}`,
   )
   if (input.study) {

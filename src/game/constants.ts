@@ -26,7 +26,7 @@ export const ATTACK_LEASH = 8
  * Saves stamped with a different version load position-only (their turn history
  * is cleared) so a replay can never mix old recorded states with new rules.
  */
-export const SIM_VERSION = 2
+export const SIM_VERSION = 3
 
 /** Seconds a capture-advance step glides for (slower than a normal step). */
 export const CAPTURE_ADVANCE_TRAVEL = 0.75

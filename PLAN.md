@@ -536,9 +536,11 @@ colour for both), pulsing while playing.
 
 ## Rule bank (planned)
 
-Rules are named, serializable flags/numbers read by systems. Examples:
-`kingAura { hpMult, rangeBonus, radius }`, `pawnShield`, `fireWhileMoving`,
-`knightFlanking`, `rookCover`, alternate `cooldownModel`. Presets such as
+Rules are named, serializable flags/numbers read by systems. Shipped:
+`defendedHeal` (a piece covered by a friendly weapon slowly regenerates, default
+on; see `src/game/defended.ts`). Examples: `kingAura { hpMult, rangeBonus,
+radius }`, `pawnShield`, `fireWhileMoving`, `knightFlanking`, `rookCover`,
+alternate `cooldownModel`. Presets such as
 _Classic_, _Experimental_, _Siege_, _Chaos_ bundle rule combinations and persist
 to `localStorage`.
 

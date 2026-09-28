@@ -202,6 +202,7 @@ export interface StudyOptions {
   chessKills: boolean
   promotion: boolean
   finishPressure: boolean
+  defendedHeal: boolean
 }
 
 export interface StudyGameResult {
@@ -379,6 +380,7 @@ export class StudyController {
     this.game.chessKills = this.options.chessKills
     this.game.promotion = this.options.promotion
     this.game.finishPressure = this.options.finishPressure
+    this.game.defendedHeal = this.options.defendedHeal
     // Re-run the current template when the requested size matches it, so study
     // batches keep custom starting positions instead of resetting to the default.
     const template = this.game.currentMap

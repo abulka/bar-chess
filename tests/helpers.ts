@@ -70,6 +70,7 @@ export function makeContext(
     autoPreserve?: boolean
     promotion?: boolean
     finishPressure?: boolean
+    defendedHeal?: boolean
   },
 ): SimContext {
   return {
@@ -90,6 +91,7 @@ export function makeContext(
     captureAdvance: opts?.captureAdvance ?? false,
     promotion: opts?.promotion ?? true,
     finishPressure: opts?.finishPressure ?? true,
+    defendedHeal: opts?.defendedHeal ?? true,
   }
 }
 

@@ -1,5 +1,5 @@
 import type { Board } from './board'
-import { attackApproachCells, containsCell, fireCells } from './geometry'
+import { attackApproachCells, containsCell, fireCells, moveDestinations } from './geometry'
 import type { OccupiedFn } from './geometry'
 import { dist2, vecEquals } from './math'
 import { moveDistances, reachableCells } from './pathfind'
@@ -41,6 +41,11 @@ const RECENT_CELL_PENALTY = 0.5
  * shoots diagonally, a rook straight) instead of the nearest cell, which can sit
  * directly beside the target. `recent` (the cell just vacated) loses a tie so a
  * blocked shooter detours instead of oscillating one step back and forth.
+ *
+ * Among candidates, one the piece can step onto *this move* (on the live board)
+ * outranks one that is only reachable theoretically, so a firing cell whose
+ * straight-line route is currently blocked by a friendly does not beat an
+ * equally close cell with a clear route.
  */
 export function previewFiringCell(
   board: Board,
@@ -59,17 +64,35 @@ export function previewFiringCell(
     // The piece's own square is never a "move to" candidate (a caller that is
     // already in firing geometry handles the hold itself).
     .filter((c) => !vecEquals(c, from) && !occupied(c.x, c.y) && reach[board.cellIndex(c.x, c.y)])
+  // Firing cells the piece can step onto *right now* on the live board. A
+  // straight-line candidate that is currently blocked (a rook's own file behind
+  // a friendly pawn) should lose to an equally-good one whose route is clear.
+  // Lazy and a single `moveDestinations` sweep, so the "one flood fill, not one
+  // A* per candidate" performance contract is preserved.
+  let liveFirst: Set<number> | null = null
+  const isLiveFirst = (c: Vec2): boolean => {
+    if (liveFirst === null) {
+      liveFirst = new Set<number>()
+      for (const n of moveDestinations(board, from, moveGeom, team, occupied)) {
+        liveFirst.add(board.cellIndex(n.x, n.y))
+      }
+    }
+    return liveFirst.has(board.cellIndex(c.x, c.y))
+  }
   const rank = (cells: Vec2[]) =>
     cells
       .map((c) => ({
         c,
+        // Prefer a cell reachable this very move over one that is only reachable
+        // theoretically (currently blocked); theoretical hops break the rest.
+        blocked: isLiveFirst(c) ? 0 : 1,
         moves:
           moves[board.cellIndex(c.x, c.y)] +
           (recent && vecEquals(c, recent) ? RECENT_CELL_PENALTY : 0),
         // Euclidean total kept as a tie-break among equally-reachable cells.
         s: dist2(c.x, c.y, from.x, from.y) + dist2(c.x, c.y, targetCell.x, targetCell.y),
       }))
-      .sort((a, b) => a.moves - b.moves || a.s - b.s)
+      .sort((a, b) => a.blocked - b.blocked || a.moves - b.moves || a.s - b.s)
   // Prefer a firing cell clear of `avoid` (e.g. the 3×3 around an enemy king,
   // where the king's guard can one-shot the shooter); fall back to any firing
   // cell only when every option is inside that danger zone.

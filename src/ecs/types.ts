@@ -81,4 +81,6 @@ export interface SimContext {
   promotion: boolean
   /** when true, the lone king's incoming damage ramps after a grace period */
   finishPressure: boolean
+  /** when true, a piece covered by a friendly weapon slowly regenerates */
+  defendedHeal: boolean
 }

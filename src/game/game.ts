@@ -209,7 +209,7 @@ export interface OverlayFlags {
   attackCells: boolean
   rangeArcs: boolean
   reload: boolean
-  /** Draw the king's green healing aura and tendrils to healed pieces. */
+  /** Outline pieces healed by the king and draw tendrils to defended pieces. */
   healing: boolean
   /** Show the "who is winning" advantage bar over the top of the board. */
   advantage: boolean
@@ -339,6 +339,8 @@ export interface GameSnapshot {
   promotion: boolean
   /** The lone king's incoming damage ramps after a grace period. */
   finishPressure: boolean
+  /** A piece covered by a friendly weapon slowly regenerates, even away from the king. */
+  defendedHeal: boolean
   /** Whether combat sound effects are enabled. */
   soundEnabled: boolean
   /** Whether the left/right side rails (games/turns, piece/info/options) are shown. */
@@ -473,6 +475,8 @@ export class Game {
   promotion = true
   /** The lone king's incoming damage ramps after a grace period. */
   finishPressure = true
+  /** A piece covered by a friendly weapon slowly regenerates, even away from the king. */
+  defendedHeal = true
   /** Transient BAR-style command awaiting the next left-click. */
   pendingCommand: StanceMode = 'none'
   /**
@@ -669,6 +673,7 @@ export class Game {
       captureAdvance: this.captureAdvance,
       promotion: this.promotion,
       finishPressure: this.finishPressure,
+      defendedHeal: this.defendedHeal,
     }
   }
 
@@ -1147,6 +1152,7 @@ export class Game {
     this.chessKills = settings.chessKills
     this.promotion = settings.promotion ?? true
     this.finishPressure = settings.finishPressure ?? true
+    this.defendedHeal = settings.defendedHeal ?? true
   }
 
   /** Re-apply commands that were pending at a recorded turn's start. */
@@ -1287,6 +1293,7 @@ export class Game {
       chessKills: this.chessKills,
       promotion: this.promotion,
       finishPressure: this.finishPressure,
+      defendedHeal: this.defendedHeal,
     }
   }
 
@@ -1334,6 +1341,7 @@ export class Game {
       chessKills: this.chessKills,
       promotion: this.promotion,
       finishPressure: this.finishPressure,
+      defendedHeal: this.defendedHeal,
       soundEnabled: this.soundEnabled,
       bottomFraction: this.bottomFraction,
       leftRailFraction: this.leftRailFraction,
@@ -1370,6 +1378,7 @@ export class Game {
     if (typeof settings.chessKills === 'boolean') this.chessKills = settings.chessKills
     if (typeof settings.promotion === 'boolean') this.promotion = settings.promotion
     if (typeof settings.finishPressure === 'boolean') this.finishPressure = settings.finishPressure
+    if (typeof settings.defendedHeal === 'boolean') this.defendedHeal = settings.defendedHeal
     if (typeof settings.soundEnabled === 'boolean') this.soundEnabled = settings.soundEnabled
     if (
       typeof settings.bottomFraction === 'number' &&
@@ -1435,6 +1444,13 @@ export class Game {
     })
   }
 
+  setDefendedHeal(value: boolean): void {
+    this.liveEdit(() => {
+      this.defendedHeal = value
+      this.bus.emit('info', `defended heal ${value ? 'on' : 'off'}`)
+    })
+  }
+
   private frame = (now: number): void => {
     this.raf = requestAnimationFrame(this.frame)
     if (this.lastTime === 0) this.lastTime = now
@@ -1496,6 +1512,7 @@ export class Game {
     this.ctx.captureAdvance = this.captureAdvance
     this.ctx.promotion = this.promotion
     this.ctx.finishPressure = this.finishPressure
+    this.ctx.defendedHeal = this.defendedHeal
     // A normal replay re-runs a serialized turn, so the one-move-per-turn gate
     // must apply. A mega-turn replay runs exactly like free play (turnActive
     // off) so its parallel movement is reproduced.
@@ -2749,6 +2766,7 @@ export class Game {
       chessKills: this.chessKills,
       promotion: this.promotion,
       finishPressure: this.finishPressure,
+      defendedHeal: this.defendedHeal,
       soundEnabled: this.soundEnabled,
       railsVisible: this.railsVisible,
       controlsCollapsed: this.controlsCollapsed,

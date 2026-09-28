@@ -10,7 +10,7 @@ import { DEATH_FX_COLOR, HIT_FX_COLOR } from '../../src/game/constants'
 import { Game } from '../../src/game/game'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { WEAPONS } from '../../src/game/pieces'
-import { HEAL_COLOR } from '../../src/game/healing'
+import { HEAL_COLOR, HEAL_TIP_COLOR } from '../../src/game/healing'
 import { BAR_BG, POTSHOT_COLOR, PRESERVE_COLOR, RELOAD_FILL, healthColor } from '../../src/render/palette'
 import { Renderer } from '../../src/render/renderer'
 import { orderAttack, placePiece } from '../helpers'
@@ -36,10 +36,19 @@ interface Rect {
   style: string
 }
 
+interface DrawnImage {
+  x: number
+  y: number
+  w: number
+  h: number
+  alpha: number
+}
+
 class RecordingContext {
   strokes: Stroke[] = []
   rects: Rect[] = []
   fills: Rect[] = []
+  images: DrawnImage[] = []
   strokeStyle = ''
   fillStyle = ''
   lineWidth = 1
@@ -48,6 +57,7 @@ class RecordingContext {
   textBaseline = ''
   lineCap = ''
   globalAlpha = 1
+  globalCompositeOperation = 'source-over'
 
   private dash: number[] = []
   private points: { x: number; y: number }[] = []
@@ -94,7 +104,9 @@ class RecordingContext {
   measureText(text: string): { width: number } {
     return { width: text.length * 8 }
   }
-  drawImage(): void {}
+  drawImage(_image: unknown, x = 0, y = 0, w = 0, h = 0): void {
+    this.images.push({ x, y, w, h, alpha: this.globalAlpha })
+  }
   setLineDash(dash: number[]): void {
     this.dash = dash
   }
@@ -456,23 +468,69 @@ describe('Renderer hover coordinate label', () => {
 describe('Renderer healing overlay', () => {
   const AURA = 'rgba(74,217,145'
 
-  it('draws a green aura ring and a wavy tendril to a damaged piece', () => {
+  // happy-dom has no canvas 2D, but the healing outline bakes into an offscreen
+  // canvas: hand it a recording context so the bake + draw path runs, and keep
+  // the baked contexts so tests can read the ring colour they were filled with.
+  const bakes: RecordingContext[] = []
+  beforeEach(() => {
+    bakes.length = 0
+    ;(HTMLCanvasElement.prototype as unknown as { getContext: () => unknown }).getContext = () => {
+      const c = new RecordingContext()
+      bakes.push(c)
+      return c
+    }
+  })
+
+  /** The glow-ring images drawn this frame (the terrain blit has zero size). */
+  const ringImages = (ctx: RecordingContext) => ctx.images.filter((im) => im.w > 0)
+  const near = (im: DrawnImage, x: number, y: number, slack = TILE) =>
+    Math.abs(im.x + im.w / 2 - (x + 0.5) * TILE) < slack &&
+    Math.abs(im.y + im.h / 2 - (y + 0.5) * TILE) < slack
+  const bakedColors = () => bakes.map((b) => b.fillStyle)
+
+  it('outlines the king green and the healed piece purple while healing', () => {
     const { renderer, ctx, game } = setup()
     game.overlays.healing = true
-    placePiece(game, 'king', 'blue', { x: 4, y: 4 })
-    const pawn = placePiece(game, 'pawn', 'blue', { x: 5, y: 5 })
+    // Corner pair: the king is the pawn's only aura source and defender.
+    placePiece(game, 'king', 'blue', { x: 0, y: 0 })
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 1, y: 1 })
     game.world.require(pawn, Health).cur = 10
 
     ctx.strokes = []
+    ctx.images = []
     renderer.draw(game)
 
-    // The dashed boundary ring is an arc-only stroke in the aura colour.
+    // The circular aura: a dashed arc-only ring in the aura colour.
     expect(ctx.strokes.some((st) => st.style.startsWith(AURA) && st.points.length === 0)).toBe(true)
-    // The tendril is a multi-point wavy polyline in the healing green.
-    expect(ctx.strokes.some((st) => st.style === HEAL_COLOR && st.points.length > 2)).toBe(true)
+    // Two glyph-shaped glow rings: the green source (king) and the purple target.
+    const rings = ringImages(ctx)
+    expect(rings).toHaveLength(2)
+    expect(rings.some((im) => near(im, 0, 0))).toBe(true)
+    expect(rings.some((im) => near(im, 1, 1))).toBe(true)
+    // Source→target colour coding matches the tendrils.
+    expect(bakedColors()).toContain(HEAL_COLOR)
+    expect(bakedColors()).toContain(HEAL_TIP_COLOR)
+    // No wavy line from the king.
+    expect(ctx.strokes.some((st) => st.style === HEAL_COLOR && st.points.length > 2)).toBe(false)
   })
 
-  it('draws no aura or tendrils when the overlay is off', () => {
+  it('does not outline the king when nothing is being healed in the aura', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.healing = true
+    // In the aura but at full health: the aura is not healing anyone.
+    placePiece(game, 'king', 'blue', { x: 0, y: 0 })
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 1, y: 1 })
+    game.world.require(pawn, Health).cur = game.world.require(pawn, Health).max
+
+    ctx.strokes = []
+    ctx.images = []
+    renderer.draw(game)
+
+    expect(ringImages(ctx)).toHaveLength(0)
+    expect(bakedColors()).toHaveLength(0)
+  })
+
+  it('draws no aura, outline or tendrils when the overlay is off', () => {
     const { renderer, ctx, game } = setup()
     game.overlays.healing = false
     placePiece(game, 'king', 'blue', { x: 4, y: 4 })
@@ -480,10 +538,126 @@ describe('Renderer healing overlay', () => {
     game.world.require(pawn, Health).cur = 10
 
     ctx.strokes = []
+    ctx.images = []
     renderer.draw(game)
 
     expect(ctx.strokes.some((st) => st.style.startsWith(AURA))).toBe(false)
     expect(ctx.strokes.some((st) => st.style === HEAL_COLOR)).toBe(false)
+    expect(ctx.strokes.some((st) => st.style === HEAL_TIP_COLOR)).toBe(false)
+    expect(ringImages(ctx)).toHaveLength(0)
+  })
+
+  it('ramps a short (adjacent) defended tendril from green to purple', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.healing = true
+    game.defendedHeal = true
+    placePiece(game, 'king', 'blue', { x: 4, y: 7 }) // far: outside the aura
+    placePiece(game, 'rook', 'blue', { x: 4, y: 0 }) // adjacent defender on the rank
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 5, y: 0 })
+    game.world.require(pawn, Health).cur = 10
+
+    ctx.strokes = []
+    ctx.images = []
+    renderer.draw(game)
+
+    // Green at the healer end...
+    const base = ctx.strokes.find((st) => st.style === HEAL_COLOR && st.points.length > 2)
+    expect(base).toBeDefined()
+    // ...and enough purple that a one-square tendril still reads as tinted, not
+    // a uniform green (the old fraction-based ramp only tipped one chunk).
+    const purple = ctx.strokes.filter((st) => st.style === HEAL_TIP_COLOR && st.points.length > 2)
+    expect(purple.length).toBeGreaterThanOrEqual(4)
+    const pawnCenter = center(5, 0)
+    expect(Math.hypot(purple[0].points[0].x - pawnCenter.x, purple[0].points[0].y - pawnCenter.y)).toBeLessThan(TILE)
+    // Not in the aura: no piece outline.
+    expect(ringImages(ctx)).toHaveLength(0)
+  })
+
+  it('outlines an aura piece, and draws no king tendril, when defended by the king', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.healing = true
+    game.defendedHeal = true
+    // Corner pair: the king is the pawn's only aura source and defender.
+    placePiece(game, 'king', 'blue', { x: 0, y: 0 })
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 1, y: 1 })
+    game.world.require(pawn, Health).cur = 10
+
+    ctx.strokes = []
+    ctx.images = []
+    renderer.draw(game)
+
+    // The king (source) and pawn (target) are both outlined...
+    expect(ringImages(ctx)).toHaveLength(2)
+    // ...but the king's defence would duplicate its aura, so no tendril is drawn.
+    expect(ctx.strokes.some((st) => st.style === HEAL_COLOR && st.points.length > 2)).toBe(false)
+    expect(ctx.strokes.some((st) => st.style === HEAL_TIP_COLOR && st.points.length > 2)).toBe(false)
+  })
+
+  it('marks a defended piece outside the aura with a tendril when the rule is on', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.healing = true
+    game.defendedHeal = true
+    placePiece(game, 'king', 'blue', { x: 4, y: 7 }) // far from the pawn
+    placePiece(game, 'rook', 'blue', { x: 4, y: 0 }) // covers the rank
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 5, y: 0 })
+    game.world.require(pawn, Health).cur = 10
+
+    ctx.strokes = []
+    renderer.draw(game)
+
+    expect(ctx.strokes.some((st) => st.style === HEAL_COLOR && st.points.length > 2)).toBe(true)
+  })
+
+  it('draws the defended tendril even when the piece is also in the king aura', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.healing = true
+    game.defendedHeal = true
+    placePiece(game, 'king', 'blue', { x: 4, y: 2 }) // within Chebyshev 2 of the pawn
+    placePiece(game, 'rook', 'blue', { x: 4, y: 0 }) // covers the rank through (5,0)
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 5, y: 0 })
+    game.world.require(pawn, Health).cur = 10
+
+    ctx.strokes = []
+    ctx.images = []
+    renderer.draw(game)
+
+    // The king (source, green) and pawn (target, purple) are outlined, and the
+    // rook still draws its defended tendril.
+    expect(ringImages(ctx)).toHaveLength(2)
+    expect(ringImages(ctx).some((im) => near(im, 5, 0))).toBe(true)
+    const tendrils = ctx.strokes.filter((st) => st.style === HEAL_COLOR && st.points.length > 2)
+    expect(tendrils.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('draws one tendril per defender', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.healing = true
+    game.defendedHeal = true
+    placePiece(game, 'rook', 'blue', { x: 4, y: 3 }) // covers (4,4) up the file
+    placePiece(game, 'bishop', 'blue', { x: 3, y: 3 }) // covers (4,4) on the diagonal
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 4, y: 4 })
+    game.world.require(pawn, Health).cur = 10
+
+    ctx.strokes = []
+    renderer.draw(game)
+
+    const tendrils = ctx.strokes.filter((st) => st.style === HEAL_COLOR && st.points.length > 2)
+    expect(tendrils.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('draws no defended tendril when the rule is off', () => {
+    const { renderer, ctx, game } = setup()
+    game.overlays.healing = true
+    game.defendedHeal = false
+    placePiece(game, 'king', 'blue', { x: 4, y: 7 })
+    placePiece(game, 'rook', 'blue', { x: 4, y: 0 })
+    const pawn = placePiece(game, 'pawn', 'blue', { x: 5, y: 0 })
+    game.world.require(pawn, Health).cur = 10
+
+    ctx.strokes = []
+    renderer.draw(game)
+
+    expect(ctx.strokes.some((st) => st.style === HEAL_COLOR && st.points.length > 2)).toBe(false)
   })
 })
 

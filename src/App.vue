@@ -695,6 +695,12 @@ function onToggleFinishPressure(): void {
   refresh()
 }
 
+function onToggleDefendedHeal(): void {
+  game.setDefendedHeal(!game.defendedHeal)
+  persistSettings()
+  refresh()
+}
+
 function onReset(): void {
   game.reset()
   recorder.reset()
@@ -1332,6 +1338,7 @@ onBeforeUnmount(() => {
               @toggle-chess-kills="onToggleChessKills"
               @toggle-promotion="onTogglePromotion"
               @toggle-finish-pressure="onToggleFinishPressure"
+              @toggle-defended-heal="onToggleDefendedHeal"
             />
           </div>
         </aside>

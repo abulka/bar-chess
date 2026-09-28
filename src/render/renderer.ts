@@ -18,7 +18,8 @@ import { buildOccupancy, makeOccupied } from '../game/occupancy'
 import { fireCells, moveDestinations } from '../game/geometry'
 import type { OccupiedFn } from '../game/geometry'
 import { enemyCoverage } from '../game/kingSafety'
-import { HEAL_COLOR, HEAL_RADIUS, healingTargets } from '../game/healing'
+import { defendedMap } from '../game/defended'
+import { HEAL_COLOR, HEAL_RADIUS, HEAL_TIP_COLOR, healingTargets } from '../game/healing'
 import { healthRatio, dist, vecEquals } from '../game/math'
 import { PIECES, WEAPONS } from '../game/pieces'
 import { queueMarkers } from '../game/queue'
@@ -45,6 +46,7 @@ import {
   STANCE_MOVE_COLOR,
   TRACK_COLOR,
   UNREACHABLE_COLOR,
+  healTint,
   healthColor,
 } from './palette'
 import { bakeTerrain } from './terrain'
@@ -62,6 +64,8 @@ export class Renderer {
 
   private terrain: HTMLCanvasElement | null = null
   private terrainKey = ''
+  /** Cached outer-silhouette glow rings for the healing outline, by glyph/size. */
+  private healRings = new Map<string, HTMLCanvasElement>()
   private canvas: HTMLCanvasElement
   private worldW = 0
   private worldH = 0
@@ -992,16 +996,19 @@ export class Renderer {
   }
 
   /**
-   * King healing field: a pulsing green aura around each living king, a dashed
-   * ring marking the exact two-square boundary, and wavy green tendrils to every
-   * damaged piece actually gaining health inside it. Membership comes from the
-   * shared `healingTargets`, so the overlay matches the mechanic exactly.
+   * Healing overlay. King aura: a pulsing green glow and dashed two-square ring
+   * around each living king, and a pulsating green border traced around the
+   * glyph of every damaged piece actually regenerating inside it (the king is
+   * the source and never heals itself, so it is never outlined). Defended: a
+   * wavy green→purple tendril from every non-king defender to the damaged piece
+   * it protects. The king is never a recipient, so no tendril ever points at it.
+   * Membership comes from the shared `healingTargets`/`defendedMap` so the
+   * overlay matches the mechanic exactly.
    */
   private drawHealing(ctx: CanvasRenderingContext2D, game: Game): void {
     const t = game.board.tile
     const pulse = 0.5 + 0.5 * Math.sin(this.time * 3)
-    // Clip the glow, ring and tendrils to the board, so a king on an edge does
-    // not spill the aura over the border onto the surrounding canvas.
+    // Clip to the board so the aura, outlines and tendrils do not spill over.
     ctx.save()
     ctx.beginPath()
     ctx.rect(0, 0, game.board.pixelWidth, game.board.pixelHeight)
@@ -1031,26 +1038,142 @@ export class Renderer {
       ctx.stroke()
       ctx.setLineDash([])
 
-      let index = 0
+      // Damaged pieces actually regenerating this instant.
+      const healed: Entity[] = []
       for (const e of field.targets) {
         const health = game.world.get(e, Health)
         if (!health || health.cur <= 0 || health.cur >= health.max) continue
+        healed.push(e)
+      }
+      // Source glows green, targets purple — the same source→target coding as
+      // the tendrils. The king only glows while it is actually healing someone.
+      if (healed.length > 0) {
+        const krender = game.world.get(field.king, Render)
+        if (krender) this.drawHealOutline(ctx, kpos, krender, t, pulse, HEAL_COLOR)
+      }
+      for (const e of healed) {
         const pos = game.world.get(e, Position)
-        if (!pos) continue
-        this.drawHealingWave(ctx, kpos, pos, t * 0.18, this.time * 5 + index)
-        index++
+        const render = game.world.get(e, Render)
+        if (!pos || !render) continue
+        this.drawHealOutline(ctx, pos, render, t, pulse, HEAL_TIP_COLOR)
+      }
+    }
+    // Defended pieces regenerate wherever they stand — including inside the
+    // aura, where the two sources stack — so draw a tendril from each non-king
+    // defender. `defendedMap` already drops a king target (the king never heals),
+    // and a king defender is skipped here: its line would duplicate the aura.
+    if (game.defendedHeal) {
+      const occupancy = buildOccupancy(game.world, game.board)
+      let index = 0
+      for (const team of TEAM_IDS) {
+        const king = healingTargets(game.world, team)?.king ?? null
+        for (const [target, defenders] of defendedMap(game.board, game.world, occupancy, team)) {
+          if (target === king) continue
+          const health = game.world.get(target, Health)
+          if (!health || health.cur <= 0 || health.cur >= health.max) continue
+          const pos = game.world.get(target, Position)
+          if (!pos) continue
+          for (const defender of defenders) {
+            if (defender === king) continue
+            const from = game.world.get(defender, Position)
+            if (!from) continue
+            this.drawHealingWave(ctx, from, pos, t * 0.16, this.time * 5 + index, t)
+            index++
+          }
+        }
       }
     }
     ctx.restore()
   }
 
-  /** A sine wave from `from` to `to`, pinched at both ends, animated by `phase`. */
+  /**
+   * A pulsating glow (`color`) in the shape of the piece, offset a little from
+   * its silhouette: the outer border only, never the glyph's internal detail
+   * lines. Baked into an offscreen ring (dilate the glyph, punch out a slightly
+   * smaller dilation) and cached per glyph/size/colour; the pulse scales it
+   * outward and fades its alpha.
+   */
+  private drawHealOutline(
+    ctx: CanvasRenderingContext2D,
+    pos: { x: number; y: number },
+    render: { glyph: string; size: number },
+    tile: number,
+    pulse: number,
+    color: string,
+  ): void {
+    const size = render.size * tile
+    const font = `${size * 0.92}px "Segoe UI Symbol", "Apple Symbols", serif`
+    const ring = this.healRing(render.glyph, size, font, color)
+    if (!ring) return
+    const scale = 1 + 0.08 * pulse
+    const w = ring.width * scale
+    const centerY = pos.y + size * 0.04
+    ctx.save()
+    ctx.globalAlpha = 0.35 + 0.65 * pulse
+    ctx.drawImage(ring, pos.x - w / 2, centerY - w / 2, w, w)
+    ctx.restore()
+  }
+
+  /** Bake (or fetch) the outer-silhouette glow ring for a glyph. */
+  private healRing(glyph: string, size: number, font: string, color: string): HTMLCanvasElement | null {
+    const key = `${glyph}|${Math.round(size)}|${color}`
+    const cached = this.healRings.get(key)
+    if (cached) return cached
+    const inner = Math.max(0.75, size * 0.015)
+    const outer = inner + Math.max(1, size * 0.025)
+    const pad = outer + 2
+    const dim = Math.ceil(size * 1.8 + pad * 2)
+    const cv = document.createElement('canvas')
+    cv.width = dim
+    cv.height = dim
+    const c = cv.getContext('2d')
+    if (!c) return null
+    c.font = font
+    c.textAlign = 'center'
+    c.textBaseline = 'middle'
+    c.fillStyle = color
+    // Dilate the glyph to a solid silhouette, then erase a smaller dilation so
+    // only an outer band remains (internal glyph gaps are filled by the inner
+    // dilation and therefore never outlined).
+    this.stampGlyph(c, glyph, dim / 2, dim / 2, outer)
+    c.globalCompositeOperation = 'destination-out'
+    this.stampGlyph(c, glyph, dim / 2, dim / 2, inner)
+    c.globalCompositeOperation = 'source-over'
+    if (this.healRings.size > 32) this.healRings.clear()
+    this.healRings.set(key, cv)
+    return cv
+  }
+
+  /** Union of a glyph fill stamped at a ring of offsets, i.e. a dilation. */
+  private stampGlyph(
+    ctx: CanvasRenderingContext2D,
+    glyph: string,
+    x: number,
+    y: number,
+    radius: number,
+  ): void {
+    ctx.fillText(glyph, x, y)
+    const steps = Math.max(12, Math.ceil(radius * 10))
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2
+      ctx.fillText(glyph, x + Math.cos(a) * radius, y + Math.sin(a) * radius)
+    }
+  }
+
+  /**
+   * A healing tendril from `from` (the healer) to `to` (the healed piece): the
+   * pinched sine wave, tinted from base green to `HEAL_TIP_COLOR` toward the
+   * receiving end. The colour ramp — not a separate arrow — shows which way the
+   * healing flows. The purple tip is sized in world distance rather than as a
+   * fraction of the line, so even a one-square tendril turns clearly purple.
+   */
   private drawHealingWave(
     ctx: CanvasRenderingContext2D,
     from: { x: number; y: number },
     to: { x: number; y: number },
     amp: number,
     phase: number,
+    tile: number,
   ): void {
     const dx = to.x - from.x
     const dy = to.y - from.y
@@ -1058,18 +1181,40 @@ export class Renderer {
     const nx = -dy / len
     const ny = dx / len
     const segments = 24
-    ctx.strokeStyle = HEAL_COLOR
+    // Purple occupies the last `tipLen` of the line, ramping over `fadeLen`.
+    // Short tendrils get a proportional tip (so they still read purple); long
+    // ones keep a fixed ~0.6-tile tip. A sliver of green always remains at the
+    // healer end.
+    const tipLen = Math.min(0.5 * len, 0.6 * tile)
+    const fadeLen = Math.min(0.35 * len, 0.5 * tile)
+    const rampAt = (s: number): number => {
+      const d = (1 - s) * len
+      if (fadeLen <= 0) return d <= tipLen ? 1 : 0
+      return 1 - (d - tipLen) / fadeLen
+    }
+    // Draw in a few chunks so the stroke colour can ramp; the first chunk is the
+    // exact base green and the last the exact purple tip.
+    const chunks = 8
     ctx.globalAlpha = 0.7
     ctx.lineWidth = 2 / this.camera.zoom
-    ctx.beginPath()
-    ctx.moveTo(from.x, from.y)
-    for (let i = 1; i <= segments; i++) {
-      const s = i / segments
-      const envelope = Math.sin(s * Math.PI)
-      const offset = Math.sin(s * Math.PI * 4 - phase) * amp * envelope
-      ctx.lineTo(from.x + dx * s + nx * offset, from.y + dy * s + ny * offset)
+    for (let c = 0; c < chunks; c++) {
+      const s0 = c / chunks
+      const s1 = (c + 1) / chunks
+      // Sample at the chunk's far end: the first chunk is the exact base green,
+      // the last the exact purple tip.
+      ctx.strokeStyle = healTint(rampAt(s1))
+      ctx.beginPath()
+      for (let i = Math.round(s0 * segments); i <= Math.round(s1 * segments); i++) {
+        const s = i / segments
+        const envelope = Math.sin(s * Math.PI)
+        const offset = Math.sin(s * Math.PI * 4 - phase) * amp * envelope
+        const x = from.x + dx * s + nx * offset
+        const y = from.y + dy * s + ny * offset
+        if (i === Math.round(s0 * segments)) ctx.moveTo(x, y)
+        else ctx.lineTo(x, y)
+      }
+      ctx.stroke()
     }
-    ctx.stroke()
     ctx.globalAlpha = 1
   }
 

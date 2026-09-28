@@ -1,4 +1,5 @@
 import { ATTACK_LEASH, TEAM_IDS } from '../../game/constants'
+import { friendlyCoverageCells } from '../../game/defended'
 import { chebyshev } from '../../game/geometry'
 import { enemyCoverage } from '../../game/kingSafety'
 import { healthRatio, vecEquals } from '../../game/math'
@@ -24,6 +25,7 @@ import {
   escapeGoal,
   inHealingAura,
   isValuable,
+  nearestDefendedCell,
   nearestHealingCell,
   outgunned,
 } from './preservation'
@@ -45,6 +47,15 @@ function committedGoal(motion: MotionData, intent: MotionIntent, tick: number): 
     return null
   }
   return motion.goal
+}
+
+/** The closer of the king-aura and defended heal goals; ties prefer the aura. */
+function pickHealGoal(from: Vec2, aura: Vec2 | null, defended: Vec2 | null): Vec2 | null {
+  if (!aura) return defended
+  if (!defended) return aura
+  const da = chebyshev(from.x, from.y, aura.x, aura.y)
+  const dd = chebyshev(from.x, from.y, defended.x, defended.y)
+  return dd < da ? defended : aura
 }
 
 /** Assign a goal/intent, timestamping the change so commitment can hold it. */
@@ -225,6 +236,15 @@ const system: System = {
     }
     // Squares already earmarked for screening this turn, so guards spread out.
     const claimed = new Set<number>()
+    // Cells each team's weapons cover (chess-protected squares), when the
+    // defended-heal rule is on. Built once per tick from the tick-start
+    // occupancy this pass runs under and shared by every piece.
+    const friendlyCover: Record<TeamId, Set<number>> | null = ctx.defendedHeal
+      ? {
+          red: friendlyCoverageCells(ctx.board, ctx.world, ctx.occupancy, 'red'),
+          blue: friendlyCoverageCells(ctx.board, ctx.world, ctx.occupancy, 'blue'),
+        }
+      : null
 
     for (const e of ctx.world.query(Stance, Order, Motion, Cell, Team, Target)) {
       const stance = ctx.world.require(e, Stance)
@@ -334,22 +354,30 @@ const system: System = {
         const king = kings[team]
         const kc = king !== null ? ctx.world.get(king, Cell) : null
         const inAura = !!kc && chebyshev(cell.x, cell.y, kc.x, kc.y) <= HEAL_RADIUS
-        const shouldDodge = inAura
+        // A defended square (friendly weapon covering it) regenerates too, so it
+        // is a sanctuary exactly like the aura when the rule is on.
+        const defendedHere =
+          !!friendlyCover && friendlyCover[team].has(ctx.board.cellIndex(cell.x, cell.y))
+        const sanctuary = inAura || defendedHere
+        const shouldDodge = sanctuary
           ? outgunned(ctx, e, threats) || pressedByHits
           : shooters > 0 || underFire || pressedByHits
-        // Healing trip: a hurt or latched piece outside the aura walks to the
-        // nearest healing square. Computed before the act decision so a merely
-        // wounded piece that is not yet dodging still goes to heal instead of
-        // freezing where it stands.
-        const heal =
-          (holding || wounded) && !inAura && kc && kind !== 'pawn'
-            ? nearestHealingCell(ctx, e, team, kc)
-            : null
+        // Healing trip: a hurt or latched piece outside a sanctuary walks to the
+        // nearest one. The king aura is preferred on ties (a stable post); a
+        // defended square is the fallback when the aura is unreachable or closer.
+        // Computed before the act decision so a merely wounded piece that is not
+        // yet dodging still goes to heal instead of freezing where it stands.
+        let heal: { x: number; y: number } | null = null
+        if ((holding || wounded) && !sanctuary && kind !== 'pawn') {
+          const auraCell = kc ? nearestHealingCell(ctx, e, team, kc) : null
+          const defendedCell = friendlyCover ? nearestDefendedCell(ctx, e, team) : null
+          heal = pickHealGoal(cell, auraCell, defendedCell)
+        }
         // Act (heal trip, dodge or hold) while latched, while wounded/pressured
         // and either in danger or in the aura, or while a healing square is
         // reachable. Otherwise fall through and let the order resume.
         const act =
-          holding || heal !== null || ((wounded || pressured) && (shouldDodge || inAura))
+          holding || heal !== null || ((wounded || pressured) && (shouldDodge || sanctuary))
         if (act) {
           // A critically wounded piece holds until fully healed.
           if (hp && (wounded || pressured) && hpRatio < CRITICAL_WOUND) motion.holdUntilHp = hp.max
@@ -359,9 +387,17 @@ const system: System = {
           // the hold, instead of parking where it can never heal. An explicit move
           // order that already ends inside the aura is left to run, and only a
           // volley that would kill it this tick breaks it off to dodge.
-          const auraBound =
-            order.kind === 'goto' && order.dest !== null && !!kc && inHealingAura(order.dest, kc)
-          if (auraBound && !lethal) {
+          const destDefended =
+            order.dest !== null &&
+            !!friendlyCover &&
+            friendlyCoverageCells(ctx.board, ctx.world, ctx.occupancy, team, e).has(
+              ctx.board.cellIndex(order.dest.x, order.dest.y),
+            )
+          const sanctuaryBound =
+            order.kind === 'goto' &&
+            order.dest !== null &&
+            ((!!kc && inHealingAura(order.dest, kc)) || destDefended)
+          if (sanctuaryBound && !lethal) {
             // Fall through: honour the player's move order into the healing aura.
           } else {
             let goal: { x: number; y: number } | null = null
@@ -401,9 +437,9 @@ const system: System = {
             // roughly one more hit absorbed — rather than leaving the moment it
             // crosses the retreat trigger and walking straight back into the same
             // fire. A critical wound already latched to full health above, and
-            // `Math.max` keeps that. Pieces with no aura to reach do not latch, so
-            // they can never park waiting for a heal that cannot come.
-            const canHeal = inAura || heal !== null
+            // `Math.max` keeps that. Pieces with no sanctuary to reach do not
+            // latch, so they can never park waiting for a heal that cannot come.
+            const canHeal = sanctuary || heal !== null
             if (wounded && canHeal && hp && kind !== 'pawn') {
               motion.holdUntilHp = Math.max(motion.holdUntilHp, hp.max * recoverThreshold(kind))
             }

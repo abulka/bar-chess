@@ -13,7 +13,8 @@ const emit = defineEmits<{
       | 'toggle-capture-advance'
       | 'toggle-chess-kills'
       | 'toggle-promotion'
-      | 'toggle-finish-pressure',
+      | 'toggle-finish-pressure'
+      | 'toggle-defended-heal',
   ): void
 }>()
 
@@ -23,6 +24,7 @@ type RuleEvent =
   | 'toggle-chess-kills'
   | 'toggle-promotion'
   | 'toggle-finish-pressure'
+  | 'toggle-defended-heal'
 
 /**
  * Overlay options and their defaults (see Game.overlays). Each row is a
@@ -36,7 +38,7 @@ const overlays: Array<{ key: keyof OverlayFlags; label: string; desc: string; de
   { key: 'grid', label: 'Board grid', desc: 'Show the coordinate grid overlay', def: true },
   { key: 'health', label: 'Health bars', desc: 'Show hit-point bars above pieces', def: true },
   { key: 'reload', label: 'Firing recharge', desc: "Show each weapon's recharge timer", def: true },
-  { key: 'healing', label: 'Healing aura', desc: "Draw the king's aura and tendrils to healed pieces", def: false },
+  { key: 'healing', label: 'Healing effects', desc: 'Outline pieces healed by the king and draw tendrils to defended pieces', def: false },
   { key: 'advantage', label: 'Advantage bar', desc: "Show the \"who's winning\" bar over the board", def: true },
 ]
 
@@ -46,6 +48,7 @@ type RuleKey =
   | 'chessKills'
   | 'promotion'
   | 'finishPressure'
+  | 'defendedHeal'
 
 /**
  * Simulation rules and their defaults (see the matching Game fields). These
@@ -92,6 +95,13 @@ const rules: Array<{
     desc: 'Once a side is down to only its king, attacks on that king deal more and more damage over time, so a siege cannot be dragged out forever',
     def: true,
     event: 'toggle-finish-pressure',
+  },
+  {
+    key: 'defendedHeal',
+    label: 'Defended pieces heal',
+    desc: 'A piece protected by a friendly weapon slowly regenerates, even away from the king',
+    def: true,
+    event: 'toggle-defended-heal',
   },
 ]
 

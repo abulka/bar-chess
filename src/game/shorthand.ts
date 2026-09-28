@@ -63,7 +63,8 @@ Rules toggles: autoPreserve lets a wounded AI/Attack-stance piece retreat to hea
 lets an idle killer step onto a victim's now-empty square; chessKills enables the parked immediate
 chess kill (lands next tick, outranks self-preservation); promotion turns a pawn that reaches the
 enemy back rank into a queen; finishPressure ramps damage to a king whose side has no field pieces
-left, so an attrition siege resolves.
+left, so an attrition siege resolves; defendedHeal lets a piece protected by a friendly weapon (its
+square covered by a same-team firing pattern) slowly regenerate, even away from the king.
 Reading a position block:
   <r|b><PNBRQK> <cell>   one unit (r=red, b=blue); grid uses Upper=red, lower=blue
   hp<cur>/<max>          present only when damaged

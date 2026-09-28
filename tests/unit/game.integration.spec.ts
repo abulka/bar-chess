@@ -783,6 +783,9 @@ describe('Game integration — AI move budget', () => {
 
   it('retreats a wounded AI piece instead of letting an advance spend its only move', () => {
     const game = new Game(8, 'human-vs-ai')
+    // The two rooks share a rank, so with defended-heal on the wounded rook would
+    // be protected and hold; this test isolates self-preservation priority.
+    game.defendedHeal = false
     for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
     const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
     // A lower-id autonomous advance. Without self-preservation priority it takes

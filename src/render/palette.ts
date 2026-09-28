@@ -1,3 +1,5 @@
+import { HEAL_COLOR, HEAL_TIP_COLOR } from '../game/healing'
+
 /**
  * Shared colours and thresholds for the in-world health/recharge bars and the
  * inspector panel, kept in one place so both stay in sync. The scheme follows
@@ -52,4 +54,29 @@ export function healthColor(ratio: number): string {
   const r = Math.max(0, Math.min(1, ratio))
   if (r <= HEALTH_RED_AT) return HEALTH_RED
   return mix(HEALTH_EMPTY, HEALTH_FULL, (r - HEALTH_RED_AT) / (1 - HEALTH_RED_AT))
+}
+
+function rgbOf(hex: string): [number, number, number] {
+  return [
+    parseInt(hex.slice(1, 3), 16),
+    parseInt(hex.slice(3, 5), 16),
+    parseInt(hex.slice(5, 7), 16),
+  ]
+}
+
+const HEAL_BASE = rgbOf(HEAL_COLOR)
+const HEAL_TIP = rgbOf(HEAL_TIP_COLOR)
+
+/**
+ * A healing tendril's colour for a ramp position `u` (0 = base green at the
+ * healer end, 1 = vivid purple at the healed end). The renderer computes `u`
+ * from the distance to the target, not the raw fraction, so short tendrils
+ * still turn purple. The ends return the exact constants so callers and tests
+ * can compare against `HEAL_COLOR`/`HEAL_TIP_COLOR`.
+ */
+export function healTint(u: number): string {
+  const k = Math.max(0, Math.min(1, u))
+  if (k <= 0) return HEAL_COLOR
+  if (k >= 1) return HEAL_TIP_COLOR
+  return mix(HEAL_BASE, HEAL_TIP, k)
 }

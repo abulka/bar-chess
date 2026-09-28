@@ -614,14 +614,18 @@ cell/reservation during movement validation and path planning.
   current HP, gains the queen's max/weapon/glyph, clears its orders and updates
   the team's living counts). Exposed by the persisted **promotion** toolbar
   toggle (default on), so a won pawn endgame can convert.
-- **healing** — king aura regeneration: same-team pieces within two Chebyshev
-  cells of their living king (excluding the king itself, which is the aura source
-  and never regenerates) regain 5% of max HP per second, or 3× that for
-  human-controlled teams, clamped at max and never reviving a piece at zero HP.
-  Membership comes from `healingTargets` (`src/game/healing.ts`), shared with the
-  renderer so the overlay matches the mechanic. Deterministic (advances only by
-  `ctx.dt`), so it is captured by turn snapshots and replays like every other
-  system.
+- **healing** — regeneration from two sources, both 3× faster for human-controlled
+  teams, clamped at max and never reviving a piece at zero HP. (1) King aura:
+  same-team pieces within two Chebyshev cells of their living king (excluding the
+  king itself, the aura source) regain 5% of max HP per second; membership comes
+  from `healingTargets` (`src/game/healing.ts`), shared with the renderer so the
+  overlay matches the mechanic. (2) Defended healing (rule `defendedHeal`, default
+  on): a piece whose square is covered by a friendly weapon — chess-protected —
+  regains 2.5% of max HP per second (`DEFENDED_HEAL_RATE`), wherever it stands.
+  Coverage comes from `friendlyCoverageCells`/`defendedMap`
+  (`src/game/defended.ts`); the king is never a recipient. The two sources stack.
+  Deterministic (advances only by `ctx.dt`), so captured by turn snapshots and
+  replays like every other system.
 
 ---
 
@@ -794,16 +798,24 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   order" banner while a standing attack is interrupted, and a "target unreachable
   — moving to the nearest point / at the nearest point" note for an impossible
   target.
-- **Healing** (`show healing`, off by default) — a pulsing green aura around each
-  living king, a dashed ring at the two-square boundary, and wavy tendrils to the
-  damaged same-team pieces inside it. This toggle is display-only: the
-  regeneration itself always runs.
+- **Healing** (`show healing`, off by default) — a pulsing green radial aura plus
+  a dashed two-square ring around each living king, and a pulsating glow hugging
+  the outer silhouette of every damaged piece regenerating inside it (baked as a
+  glyph dilation minus a smaller one, so internal detail lines are excluded). The
+  source/target colour coding matches the tendrils: the king glows green while it
+  is actually healing someone, each healed piece glows purple, and when nothing in
+  the aura is being healed the king does not glow. When the `defendedHeal` rule is
+  on, damaged defended pieces also get a wavy tendril from every non-king
+  defender; the king is never a recipient. Each tendril is tinted with `healTint`
+  along its length — green near the healer, vivid purple at the healed piece — and
+  the purple tip is sized in world distance so even a one-square tendril reads as
+  directional. This toggle is display-only: the regeneration itself always runs.
 - Army scope shows paths, destinations and targets; reach/attack shading and
   range arcs are reserved for selected pieces so the board stays readable.
 
 `overlays` flags: `grid`, `health`, `myOrders`, `enemyPlans`, `moveCells`,
 `attackCells`, `rangeArcs`, `reload` (firing-recharge bars over pieces), `healing`
-(king aura + tendrils).
+(king aura + glyph outlines on healed pieces + defended tendrils).
 `rangeArcs` is off by default; movement cells, attack cells and range arcs are
 drawn for selected pieces only; the health and recharge bars are drawn for every
 piece (each gated by its toggle), and army scopes show paths/goals/targets. Bars

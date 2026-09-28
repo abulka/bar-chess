@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { Health } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { createPiece } from '../../src/game/factory'
+import { DEFENDED_HEAL_RATE } from '../../src/game/defended'
 import { HEAL_RATE, HUMAN_HEAL_MULTIPLIER } from '../../src/game/healing'
 import { PIECES } from '../../src/game/pieces'
 import healing from '../../src/ecs/systems/healing'
@@ -10,9 +11,12 @@ import { clearComponents, makeContext } from '../helpers'
 /** One tick of base-rate healing, so a max-HP piece gains `max * HEAL_RATE * dt`. */
 const perTick = (max: number, dt: number) => max * HEAL_RATE * dt
 
-/** A context whose teams are AI-controlled, so healing uses the base rate. */
+/**
+ * A context whose teams are AI-controlled, so healing uses the base rate. The
+ * defended-heal rule is off: this suite isolates the king aura.
+ */
 function aiContext(): SimContext {
-  const ctx = makeContext()
+  const ctx = makeContext({ defendedHeal: false })
   ctx.teams.red.controller = 'ai'
   ctx.teams.blue.controller = 'ai'
   return ctx
@@ -117,7 +121,7 @@ describe('healing system — king aura regeneration', () => {
   })
 
   it('heals a human-controlled team HUMAN_HEAL_MULTIPLIER times faster', () => {
-    const ctx = makeContext()
+    const ctx = makeContext({ defendedHeal: false })
     ctx.teams.red.controller = 'ai' // blue stays human
     createPiece(ctx, 'blue', PIECES.king, { x: 4, y: 4 })
     const blue = createPiece(ctx, 'blue', PIECES.pawn, { x: 5, y: 5 })
@@ -133,6 +137,104 @@ describe('healing system — king aura regeneration', () => {
     const blueGain = blueHealth.cur - 10
     const redGain = redHealth.cur - 10
     expect(redGain).toBeCloseTo(perTick(redHealth.max, ctx.dt), 6)
+    expect(blueGain).toBeCloseTo(redGain * HUMAN_HEAL_MULTIPLIER, 6)
+  })
+})
+
+describe('healing system — defended regeneration', () => {
+  beforeEach(() => clearComponents())
+
+  /** A context with the defended-heal rule on (the shipped default), both AI. */
+  function defendedContext(): SimContext {
+    const ctx = makeContext()
+    ctx.teams.red.controller = 'ai'
+    ctx.teams.blue.controller = 'ai'
+    return ctx
+  }
+
+  const defendedTick = (max: number, dt: number) => max * DEFENDED_HEAL_RATE * dt
+
+  it('heals a piece covered by a friendly weapon, far from any king', () => {
+    const ctx = defendedContext()
+    createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 4 })
+    const pawn = createPiece(ctx, 'blue', PIECES.pawn, { x: 5, y: 4 }) // rook covers along the rank
+    const health = ctx.world.require(pawn, Health)
+    health.cur = 10
+
+    healing.update(ctx)
+
+    expect(health.cur).toBeCloseTo(10 + defendedTick(health.max, ctx.dt), 6)
+  })
+
+  it('leaves an undefended piece untouched', () => {
+    const ctx = defendedContext()
+    createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 4 })
+    const pawn = createPiece(ctx, 'blue', PIECES.pawn, { x: 5, y: 6 }) // not on the rook's lines
+    const health = ctx.world.require(pawn, Health)
+    health.cur = 10
+
+    healing.update(ctx)
+
+    expect(health.cur).toBe(10)
+  })
+
+  it('does not heal when the rule is off', () => {
+    const ctx = defendedContext()
+    ctx.defendedHeal = false
+    createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 4 })
+    const pawn = createPiece(ctx, 'blue', PIECES.pawn, { x: 5, y: 4 })
+    const health = ctx.world.require(pawn, Health)
+    health.cur = 10
+
+    healing.update(ctx)
+
+    expect(health.cur).toBe(10)
+  })
+
+  it('does not heal the king even when a friendly piece covers it', () => {
+    const ctx = defendedContext()
+    const king = createPiece(ctx, 'blue', PIECES.king, { x: 4, y: 4 })
+    createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 3 }) // rook covers the king's file
+    const health = ctx.world.require(king, Health)
+    health.cur = 100
+
+    healing.update(ctx)
+
+    expect(health.cur).toBe(100)
+  })
+
+  it('stacks with the king aura', () => {
+    const ctx = defendedContext()
+    createPiece(ctx, 'blue', PIECES.king, { x: 4, y: 4 })
+    createPiece(ctx, 'blue', PIECES.rook, { x: 5, y: 0 }) // covers the file through (5,5)
+    const pawn = createPiece(ctx, 'blue', PIECES.pawn, { x: 5, y: 5 }) // in aura (Chebyshev 1) and defended
+    const health = ctx.world.require(pawn, Health)
+    health.cur = 10
+
+    healing.update(ctx)
+
+    const expected = 10 + health.max * (HEAL_RATE + DEFENDED_HEAL_RATE) * ctx.dt
+    expect(health.cur).toBeCloseTo(expected, 6)
+  })
+
+  it('heals a human-controlled defended team HUMAN_HEAL_MULTIPLIER times faster', () => {
+    const ctx = defendedContext()
+    ctx.teams.red.controller = 'ai'
+    ctx.teams.blue.controller = 'human'
+    createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 4 })
+    const blue = createPiece(ctx, 'blue', PIECES.pawn, { x: 5, y: 4 })
+    createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
+    const red = createPiece(ctx, 'red', PIECES.pawn, { x: 5, y: 0 })
+    const blueHealth = ctx.world.require(blue, Health)
+    const redHealth = ctx.world.require(red, Health)
+    blueHealth.cur = 10
+    redHealth.cur = 10
+
+    healing.update(ctx)
+
+    const blueGain = blueHealth.cur - 10
+    const redGain = redHealth.cur - 10
+    expect(redGain).toBeCloseTo(defendedTick(redHealth.max, ctx.dt), 6)
     expect(blueGain).toBeCloseTo(redGain * HUMAN_HEAL_MULTIPLIER, 6)
   })
 })
