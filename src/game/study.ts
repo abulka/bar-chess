@@ -39,6 +39,14 @@ export const DEFAULT_STUDY_TUNING: StudyPolicyTuning = {
 /** Ticks one fast frame may simulate, so the page never freezes for long. */
 const FAST_STEPS_PER_FRAME = 2000
 
+/**
+ * Turns a both-kings-only standoff is allowed to run before it is stopped as a
+ * draw. A lone king can no longer force a win (the no-check rule keeps the two
+ * kings apart), so the fight is decided; this lets any already-committed attack
+ * land before ending it, instead of grinding out the remaining turns.
+ */
+const KING_ONLY_DRAW_TURNS = 4
+
 function piecesOf(game: Game, team: TeamId): number[] {
   const out: number[] = []
   for (const e of game.world.query(Cell, Team, PieceType, Health)) {
@@ -246,6 +254,8 @@ export class StudyController {
   private index = -1
   /** Scripted-policy randomness, kept separate so the battle's RNG is untouched. */
   private policyRng = new Rng()
+  /** Turn both sides were first seen reduced to lone kings (-1 = not yet). */
+  private kingOnlyAtTurn = -1
 
   constructor(game: Game, recorder: Recorder) {
     this.game = game
@@ -262,6 +272,7 @@ export class StudyController {
     this.results = []
     this.running = true
     this.index = -1
+    this.kingOnlyAtTurn = -1
     this.startNext()
   }
 
@@ -287,7 +298,7 @@ export class StudyController {
       return
     }
     if (this.game.turnActive || this.game.isReplaying) return
-    if (this.game.winner !== null || this.game.turn >= this.options.maxTurns) {
+    if (this.game.winner !== null || this.game.turn >= this.options.maxTurns || this.kingOnlyDrawReached()) {
       this.finishGame()
       return
     }
@@ -302,12 +313,26 @@ export class StudyController {
         this.game.runTicks(1)
         continue
       }
-      if (this.game.winner !== null || this.game.turn >= this.options.maxTurns) {
+      if (this.game.winner !== null || this.game.turn >= this.options.maxTurns || this.kingOnlyDrawReached()) {
         this.finishGame()
         continue
       }
       this.startNextTurn()
     }
+  }
+
+  /**
+   * True once a both-kings-only standoff has run its grace turns. Records the
+   * turn the standoff began; clears it if field pieces ever return (undo/editor),
+   * so a later standoff is measured afresh.
+   */
+  private kingOnlyDrawReached(): boolean {
+    if (!isKingOnlyDraw(this.game)) {
+      this.kingOnlyAtTurn = -1
+      return false
+    }
+    if (this.kingOnlyAtTurn < 0) this.kingOnlyAtTurn = this.game.turn
+    return this.game.turn >= this.kingOnlyAtTurn + KING_ONLY_DRAW_TURNS
   }
 
   private startNextTurn(): void {
@@ -346,6 +371,7 @@ export class StudyController {
       this.index = -1
       return
     }
+    this.kingOnlyAtTurn = -1
     const seed = this.options.seedBase + this.index
     this.game.setGameMode(this.options.mode)
     this.game.autoPreserve = this.options.autoPreserve

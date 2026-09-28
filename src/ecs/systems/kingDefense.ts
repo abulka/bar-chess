@@ -176,6 +176,8 @@ const LAST_STAND_RADIUS = 3
 export interface LoneKingOptions {
   /** Both sides are king-only: seek the enemy king instead of holding post. */
   enemyKingOnly?: boolean
+  /** The last cell the king vacated, penalised so an escape cannot shuffle A→B→A. */
+  prevCell?: Vec2 | null
 }
 
 /**
@@ -184,6 +186,12 @@ export interface LoneKingOptions {
  * turn-cap draws. Instead, when a threat is inside `LAST_STAND_RADIUS` it walks
  * toward it, so the range-1 king guard (80% of max HP) becomes a real threat
  * and the finish resolves either way. Otherwise it returns to its post.
+ *
+ * The one exception is being *in check*: holding on a covered square is a
+ * passive death, so the king steps to the safest legal square — including one
+ * farther from the shooter, since a bishop or rook can cover every sideways and
+ * forward escape. Among safe squares it still prefers one that keeps closing on
+ * the shooter, so it last-stands rather than kites when both are available.
  *
  * Kings obey the no-check rule, so candidates covered by an enemy weapon are
  * never chosen: against the enemy king (both sides king-only) this naturally
@@ -206,20 +214,58 @@ export function loneKingGoal(
   const home = homeCell(ctx, team)
   const goHome = (): Vec2 | null => (home && !vecEquals(cell, home) ? home : null)
 
-  let target: Vec2 | null = null
-  if (threats.length > 0) {
-    let nearest = threats[0]
-    let nearestGap = chebyshev(cell.x, cell.y, nearest.cell.x, nearest.cell.y)
-    for (const t of threats) {
-      const gap = chebyshev(cell.x, cell.y, t.cell.x, t.cell.y)
-      if (gap < nearestGap) {
-        nearest = t
-        nearestGap = gap
+  // Nearest threat, for ranking escape squares.
+  let nearest: Threat | null = null
+  let nearestGap = Infinity
+  for (const t of threats) {
+    const gap = chebyshev(cell.x, cell.y, t.cell.x, t.cell.y)
+    if (gap < nearestGap) {
+      nearest = t
+      nearestGap = gap
+    }
+  }
+
+  const selfFree = occupiedExcept(ctx.board, ctx.occupancy, king)
+  const coverages = buildCoverage(ctx, threats, selfFree)
+  const covered = enemyCoverage(ctx.board, ctx.world, ctx.occupancy, king, team)
+  const moves = moveDestinations(ctx.board, cell, def.move, team, makeOccupied(ctx.board, ctx.occupancy)).filter(
+    (c) => !covered.has(ctx.board.cellIndex(c.x, c.y)),
+  )
+
+  // In check: step off the covered square. *Any* legal square counts, even one
+  // farther from the shooter — holding in a firing line is a passive death, and
+  // the side/forward escapes can all be covered (e.g. a bishop on the diagonal
+  // covers both). Among safe squares, prefer one that keeps closing on the
+  // shooter so the king still last-stands rather than kites, and penalise the
+  // square it just vacated so it cannot shuffle A→B→A.
+  if (covered.has(ctx.board.cellIndex(cell.x, cell.y)) && nearest !== null) {
+    let escape: Vec2 | null = null
+    let escapeDanger = Infinity
+    let escapeRetreat = 1
+    let escapeGap = Infinity
+    for (const c of moves) {
+      const danger = dangerAt(coverages, threats, c.x, c.y) + ditherPenalty(c, { prevCell: options.prevCell })
+      const gap = chebyshev(c.x, c.y, nearest.cell.x, nearest.cell.y)
+      const retreat = gap > nearestGap ? 1 : 0
+      if (
+        escape === null ||
+        danger < escapeDanger ||
+        (danger === escapeDanger &&
+          (retreat < escapeRetreat || (retreat === escapeRetreat && gap < escapeGap)))
+      ) {
+        escape = c
+        escapeDanger = danger
+        escapeRetreat = retreat
+        escapeGap = gap
       }
     }
-    if (nearestGap <= 1) return null
-    if (nearestGap <= LAST_STAND_RADIUS) target = { x: nearest.cell.x, y: nearest.cell.y }
+    return escape
   }
+
+  // Not in check: last-stand toward a nearby threat, else return to post.
+  if (nearestGap <= 1) return null
+  let target: Vec2 | null =
+    nearest !== null && nearestGap <= LAST_STAND_RADIUS ? { x: nearest.cell.x, y: nearest.cell.y } : null
   if (!target && options.enemyKingOnly) {
     const enemyTeam: TeamId = team === 'red' ? 'blue' : 'red'
     const enemyKing = kingOf(ctx.world, enemyTeam)
@@ -230,13 +276,6 @@ export function loneKingGoal(
 
   const targetGap = chebyshev(cell.x, cell.y, target.x, target.y)
   if (targetGap <= 1) return null
-
-  const selfFree = occupiedExcept(ctx.board, ctx.occupancy, king)
-  const coverages = buildCoverage(ctx, threats, selfFree)
-  const covered = enemyCoverage(ctx.board, ctx.world, ctx.occupancy, king, team)
-  const moves = moveDestinations(ctx.board, cell, def.move, team, makeOccupied(ctx.board, ctx.occupancy)).filter(
-    (c) => !covered.has(ctx.board.cellIndex(c.x, c.y)),
-  )
   let best: Vec2 | null = null
   let bestGap = targetGap
   let bestDanger = Infinity

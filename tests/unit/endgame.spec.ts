@@ -221,3 +221,47 @@ describe('king-only draw classification', () => {
     expect(isKingOnlyDraw(game)).toBe(false)
   })
 })
+
+describe('lone king under ranged check', () => {
+  beforeEach(() => clearComponents())
+
+  it('steps off the firing line instead of holding to death', () => {
+    const game = new Game(8, 'human-vs-ai', 2654435769)
+    stripArmy(game)
+    // The reported position: red has only its king on f7, checked down the
+    // h5–f7 diagonal by the blue queen, which also covers both closing squares.
+    // The king cannot reach the queen, so it must step out of the line.
+    const king = createPiece(shim(game), 'red', PIECES.king, { x: 5, y: 1 })
+    createPiece(shim(game), 'blue', PIECES.queen, { x: 7, y: 3 })
+    game.teams.red.alive = { king: 1 }
+    game.teams.blue.alive = { queen: 1, king: 1 }
+
+    game.beginTurn()
+    let guard = 0
+    while (game.turnActive && guard++ < 4000) game.runTicks(1)
+
+    const after = game.world.require(king, Cell)
+    expect(after.x !== 5 || after.y !== 1).toBe(true)
+  })
+
+  it('retreats out of check when the sideways escapes are covered', () => {
+    const game = new Game(8, 'human-vs-ai', 2654435769)
+    stripArmy(game)
+    // The reported corner: f7 is checked by the queen (h5), the bishop (d4)
+    // covers f6 and g7, and the rook (h8) covers f8/g8/e8 — leaving only e7/e6,
+    // both farther from the queen. The king must still step out.
+    const king = createPiece(shim(game), 'red', PIECES.king, { x: 5, y: 1 })
+    createPiece(shim(game), 'blue', PIECES.queen, { x: 7, y: 3 })
+    createPiece(shim(game), 'blue', PIECES.bishop, { x: 3, y: 4 })
+    createPiece(shim(game), 'blue', PIECES.rook, { x: 7, y: 0 })
+    game.teams.red.alive = { king: 1 }
+    game.teams.blue.alive = { queen: 1, bishop: 1, rook: 1, king: 1 }
+
+    game.beginTurn()
+    let guard = 0
+    while (game.turnActive && guard++ < 4000) game.runTicks(1)
+
+    const after = game.world.require(king, Cell)
+    expect(after.x !== 5 || after.y !== 1).toBe(true)
+  })
+})

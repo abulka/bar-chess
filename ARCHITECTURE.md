@@ -384,9 +384,15 @@ cell/reservation during movement validation and path planning.
   of its own back rank once the board is clear. It still fires at adjacent
   enemies via combat. **`loneKingGoal`** handles a side with no field pieces:
   it never kites (it is faster than every attacker, so dodging forever turned
-  material wins into turn-cap draws) and never retreats — when a field threat is
+  material wins into turn-cap draws) — when a field threat is
   inside `LAST_STAND_RADIUS = 3` it works toward it on legal squares (taking any
   uncovered adjacent square it can reach); otherwise it returns to its post.
+  The exception is being *in check*: holding on a covered square would be a
+  passive death, so it steps to the safest legal square, *including one farther
+  from the shooter* — a bishop or rook can cover every sideways and forward
+  escape, leaving only retreats. Among safe squares it prefers one that keeps
+  closing on the threat (so it still last-stands when both are available), and
+  penalises the square it just vacated so it cannot shuffle `A→B→A`.
   When both sides are king-only it seeks the enemy king and settles at chess
   **opposition** (distance 2), a draw. A player king last-stands only in Attack
   stance; None/Move keep the current dodge/hold behaviour. All three policies run
@@ -1020,7 +1026,11 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   new seed, resets the `Recorder`, auto-advances turns with `queueTurn()`, and
   optionally applies the gentle **random human** policy before each turn (it
   orders a few random pieces to make short moves or reachable attacks, using its
-  own RNG so replay stays exact). It samples a per-turn **piece trace**
+  own RNG so replay stays exact). When both sides are down to a lone king the
+  standoff is unwinnable (the no-check rule keeps the kings apart), so it is
+  allowed `KING_ONLY_DRAW_TURNS = 4` turns for any committed attack to land and
+  then recorded as a draw rather than grinding out the turn cap. It samples a
+  per-turn **piece trace**
   (`src/game/trace.ts`) and collects the event stream. `Stop game` keeps the
   current (partial) recording and moves to the next seed; `Cancel all` discards
   everything. The trace makes behaviour that leaves no event — a piece that

@@ -530,6 +530,7 @@ const system: System = {
         const threats = kingThreats(ctx, e, team, kingThreatMemo)
         const goal = loneKingGoal(ctx, e, team, threats, {
           enemyKingOnly: enemyKing !== null && fieldCount[enemyTeam] === 0,
+          prevCell: motion.prevCell,
         })
         setGoal(motion, goal, goal === null ? 'none' : 'defense', ctx.tick)
         continue
@@ -542,7 +543,7 @@ const system: System = {
         const threats = kingThreats(ctx, e, team, kingThreatMemo)
         const goal =
           endgame && enemyKing !== null
-            ? loneKingGoal(ctx, e, team, threats, { enemyKingOnly: true })
+            ? loneKingGoal(ctx, e, team, threats, { enemyKingOnly: true, prevCell: motion.prevCell })
             : aiKingGoal(ctx, e, team, threats, {
                 prevCell: motion.prevCell,
                 sticky: committedGoal(motion, 'defense', ctx.tick),

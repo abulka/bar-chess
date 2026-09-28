@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { Cell, PieceType } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
 import { Recorder } from '../../src/game/record'
 import { StudyController } from '../../src/game/study'
@@ -163,6 +164,25 @@ describe('StudyController', () => {
       // Each chosen piece records a clear plus one order.
       expect(turn.intents.length).toBeLessThanOrEqual(4)
     }
+  })
+
+  it('ends a two-kings-only standoff as a draw after a short grace', () => {
+    study.start(options({ games: 1, maxTurns: 60 }))
+    study.tick()
+    drainTurn(game)
+    // Strip every non-king piece so only the two kings remain, then let the batch
+    // run: it must stop as a draw soon after, not grind to the turn cap.
+    for (const e of [...game.world.query(Cell)]) {
+      if (game.world.get(e, PieceType)?.kind !== 'king') game.world.destroy(e)
+    }
+    pump(study, game)
+
+    const [result] = study.state.results
+    expect(result.winner).toBeNull()
+    expect(result.drawn).toBe(true)
+    expect(result.partial).toBe(false)
+    expect(result.turns).toBeLessThan(60)
+    study.dispose()
   })
 
   it('fast mode reproduces watch mode exactly', () => {

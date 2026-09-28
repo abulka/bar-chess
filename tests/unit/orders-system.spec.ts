@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { Health, Motion, Order, Stance, Target } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { chebyshev } from '../../src/game/geometry'
+import { enemyCoverage } from '../../src/game/kingSafety'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { createPiece } from '../../src/game/factory'
 import { PIECES } from '../../src/game/pieces'
@@ -129,16 +130,19 @@ describe('orders system — AI king defense', () => {
     expect(goal!.x).not.toBe(4)
   })
 
-  it('holds its post once it is the last piece', () => {
+  it('escapes the firing line even as the last piece', () => {
     const ctx = defenseContext()
     const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 7 })
     createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 0 }) // covers the file
 
     run(ctx)
 
-    // No field pieces left, so the king stops kiting and stands; dodging
-    // forever was turning material wins into turn-cap draws.
-    expect(ctx.world.require(king, Motion).goal).toBeNull()
+    // A lone king no longer stands in a shooter's line: with no field pieces
+    // left it steps off the covered square rather than absorbing fire. The
+    // both-kings draw grace endgames the resulting standoffs.
+    const goal = ctx.world.require(king, Motion).goal
+    expect(goal).not.toBeNull()
+    expect(goal!.x).not.toBe(4)
   })
 
   it('reacts to a last attacker even without a current line', () => {
@@ -956,14 +960,54 @@ describe('orders system — damage-aware retreats and last stand', () => {
     expect(chebyshev(motion.goal!.x, motion.goal!.y, 4, 1)).toBeLessThan(3)
   })
 
+  it('escapes check when a ranged shooter pins it out of last-stand range', () => {
+    const ctx = makeContext()
+    ctx.teams.red.controller = 'ai'
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 5, y: 1 }) // f7
+    createPiece(ctx, 'blue', PIECES.queen, { x: 7, y: 3 }) // h5, checks along h5–e8
+
+    // The queen covers f7 (check) and both closing squares (f6, g6), so the king
+    // cannot work toward it on a legal square. Previously it held in the line and
+    // was shot down; now it must step out of check.
+    run(ctx)
+
+    const motion = ctx.world.require(king, Motion)
+    expect(motion.goal).not.toBeNull()
+    expect(motion.goal).not.toEqual({ x: 5, y: 1 })
+    const covered = enemyCoverage(ctx.board, ctx.world, ctx.occupancy, king, 'red')
+    expect(covered.has(ctx.board.cellIndex(motion.goal!.x, motion.goal!.y))).toBe(false)
+  })
+
+  it('retreats out of check when every non-retreating square is covered', () => {
+    const ctx = makeContext()
+    ctx.teams.red.controller = 'ai'
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 5, y: 1 }) // f7
+    createPiece(ctx, 'blue', PIECES.queen, { x: 7, y: 3 }) // h5 checks f7, covers g6/e8
+    createPiece(ctx, 'blue', PIECES.bishop, { x: 3, y: 4 }) // d4 covers f6 and g7
+    createPiece(ctx, 'blue', PIECES.rook, { x: 7, y: 0 }) // h8 covers f8/g8/e8
+
+    // The only legal squares (e7/e6) are farther from the queen than f7 is, so
+    // the king must be willing to retreat rather than hold in the line.
+    run(ctx)
+
+    const motion = ctx.world.require(king, Motion)
+    expect(motion.goal).not.toBeNull()
+    const goal = motion.goal!
+    expect(goal).not.toEqual({ x: 5, y: 1 })
+    expect(chebyshev(goal.x, goal.y, 7, 3)).toBeGreaterThan(2)
+    const covered = enemyCoverage(ctx.board, ctx.world, ctx.occupancy, king, 'red')
+    expect(covered.has(ctx.board.cellIndex(goal.x, goal.y))).toBe(false)
+  })
+
   it('holds its post when the nearest threat is out of last-stand range', () => {
     const ctx = makeContext()
     ctx.teams.red.controller = 'ai'
     const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 7 })
-    createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 0 }) // gap 7, sniping
+    createPiece(ctx, 'blue', PIECES.rook, { x: 0, y: 0 }) // gap 7, off the king's lines
 
     run(ctx)
 
+    // Far away and not covering the king, so there is nothing to react to.
     expect(ctx.world.require(king, Motion).goal).toBeNull()
   })
 

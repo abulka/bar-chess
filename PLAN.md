@@ -234,7 +234,8 @@ can therefore never be adjacent; a king cannot attack a queen (every neighbour
 is covered), but can still catch knights/pawns from their dead squares and
 rooks/bishops from safe angles. There is no checkmate or stalemate: a king in
 check with no legal square holds and fights, and the battle still ends only when
-a king dies (a king-only standoff is recorded as a draw). The rule is enforced
+a king dies (a king-only standoff is recorded as a draw, ended about four turns
+after both sides are reduced to kings in study batches). The rule is enforced
 both when planning (pathfinding routes around checked squares, move-cell
 overlays hide illegal steps, escape and king policies never pick a covered
 square) and at the movement gate itself, so no order can walk a king into a
@@ -361,9 +362,13 @@ that can survive one king guard hit (`hp > 0.8 × maxHp`) may also enter the
 enemy king's 3×3 to trap it instead of shooting from outside the ring; one that
 would die there keeps its distance. A lone king never kites (it
 is faster than every attacker, and dodging forever turned material
-wins into turn-cap draws) and never retreats either: when a field threat is
+wins into turn-cap draws): when a field threat is
 inside `LAST_STAND_RADIUS = 3` it works toward it on legal squares, taking any
-uncovered adjacent square it can reach; otherwise it returns to its post. A
+uncovered adjacent square it can reach; otherwise it returns to its post. The
+exception is being in check: it escapes to the safest legal square, including
+one farther from the shooter (a bishop or rook can cover every sideways and
+forward escape, leaving only retreats), preferring a square that still closes
+on the threat and avoiding the square it just vacated. A
 player king last-stands only in Attack stance; None/Move keep the player in
 control. With both kings obeying check, a king-only ending settles into
 opposition and is a draw.

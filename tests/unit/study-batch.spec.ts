@@ -79,9 +79,11 @@ describe('study batch reference', () => {
             .join(',')}`,
       )
     }
-    // At most one unresolved game, and no piece pinned under fire for a long run.
+    // At most one turn-cap partial. Every other game must actually be decided —
+    // a win, or a genuine kings-only draw (no winning material left) — and no
+    // piece may sit under fire for a long run.
     expect(summary.timeouts).toBeLessThanOrEqual(1)
-    expect(results.filter((r) => r.winner !== null).length).toBeGreaterThanOrEqual(4)
+    expect(summary.redWins + summary.blueWins + summary.draws).toBeGreaterThanOrEqual(4)
     const maxHoldStreak = Math.max(
       0,
       ...results.flatMap((r) => r.analysis.heldUnderFire.map((h) => h.maxStreak)),
