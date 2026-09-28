@@ -4,6 +4,7 @@ import { lerp, vecEquals } from '../../game/math'
 import { buildOccupancy, occupiedExcept } from '../../game/occupancy'
 import { PIECES } from '../../game/pieces'
 import { Cell, Motion, Order, PieceType, Position, Team } from '../components'
+import type { Entity } from '../world'
 import type { System } from '../pipeline'
 
 const system: System = {
@@ -24,7 +25,22 @@ const system: System = {
       }
     }
 
-    for (const e of ctx.world.query(Motion, Cell, Position, PieceType, Team, Order)) {
+    const movers = ctx.world.query(Motion, Cell, Position, PieceType, Team, Order)
+    // Self-preservation is a reaction to fire, not part of the AI's matching-moves
+    // exchange. When the budget is in play, serve a retreating AI piece before
+    // every other mover so an earlier autonomous advance cannot spend the turn's
+    // only allowance and leave a piece that is being shot sitting in the line.
+    // Scoped to an AI team facing a human so free and AI-vs-AI play are untouched;
+    // entity id breaks ties, keeping the order deterministic across replays.
+    const retreatFirst = (e: Entity): boolean => {
+      if (ctx.world.get(e, Motion)?.intent !== 'preserve') return false
+      const t = ctx.world.get(e, Team)
+      if (!t || ctx.teams[t].controller !== 'ai') return false
+      return ctx.teams[t === 'red' ? 'blue' : 'red'].controller === 'human'
+    }
+    movers.sort((a, b) => (retreatFirst(a) ? 0 : 1) - (retreatFirst(b) ? 0 : 1) || a - b)
+
+    for (const e of movers) {
       const motion = ctx.world.require(e, Motion)
       const cell = ctx.world.require(e, Cell)
       const pos = ctx.world.require(e, Position)

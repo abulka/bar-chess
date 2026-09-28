@@ -555,10 +555,15 @@ cell/reservation during movement validation and path planning.
   turn (with a floor of one move so a passive player cannot freeze it; nothing
   carries over between turns). The cap also applies during continuous "mega"
   play, whose beat counters are reset in `beginMegaTurn`, so free play cannot
-  swarm a passive player. The cap is lifted once either side is king-only
-  (the finishing phase), so the AI can press the kill and its own king can
-  last-stand even against a passive player. A player-issued order
-  (`Order.kind !== 'none'`)
+  swarm a passive player. Within that cap, when an AI team faces a human, a piece
+  whose `Motion.intent` is `preserve` is served before every other mover, so a
+  self-preservation retreat takes the turn's move instead of an earlier
+  autonomous advance spending it and leaving a piece that is being shot sitting
+  in the line; the cap itself is unchanged, so the AI still never out-moves the
+  player. The cap is lifted once
+  either side is king-only (the finishing phase), so the AI can press the kill
+  and its own king can last-stand even against a passive player. A player-issued
+  order (`Order.kind !== 'none'`)
   bypasses the budget; only pieces whose team is under human control can be
   commanded (your own team in Human-vs-AI, both teams in Human-vs-Human, none in
   AI-vs-AI).

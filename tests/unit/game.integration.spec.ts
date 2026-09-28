@@ -780,6 +780,32 @@ describe('Game integration — AI move budget', () => {
     expect(game.teams.blue.movesMade).toBe(1)
     expect(game.teams.red.movesMade).toBeLessThanOrEqual(game.teams.blue.movesMade)
   })
+
+  it('retreats a wounded AI piece instead of letting an advance spend its only move', () => {
+    const game = new Game(8, 'human-vs-ai')
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    // A lower-id autonomous advance. Without self-preservation priority it takes
+    // the turn's single move, and the wounded rook below never budges.
+    createPiece(shim, 'red', PIECES.rook, { x: 3, y: 1 }) // d7, rally route open
+    const rook = createPiece(shim, 'red', PIECES.rook, { x: 7, y: 1 }) // h7
+    const queen = createPiece(shim, 'blue', PIECES.queen, { x: 7, y: 6 }) // h2, same file
+    createPiece(shim, 'red', PIECES.king, { x: 4, y: 0 }) // e8
+    createPiece(shim, 'blue', PIECES.king, { x: 4, y: 7 }) // e1
+    game.teams.red.alive = { rook: 2, king: 1 }
+    game.teams.blue.alive = { queen: 1, king: 1 }
+
+    game.world.require(rook, Health).cur = 60 // wounded, but survives a queen volley
+    const target = game.world.require(rook, Target)
+    target.lastAttacker = queen
+    target.underFireUntil = game.tick + 90
+
+    const before = { ...game.world.require(rook, Cell) }
+    runTurn(game)
+
+    const after = game.world.require(rook, Cell)
+    expect(after.x !== before.x || after.y !== before.y).toBe(true)
+  })
 })
 
 describe('Game integration — free-play (mega) AI move budget', () => {
