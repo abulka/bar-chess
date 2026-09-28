@@ -67,7 +67,7 @@ const rules: Array<{
   },
   {
     key: 'captureAdvance',
-    label: 'Chess capture advance',
+    label: 'Chess kill (by advancing)',
     desc: 'An idle killer steps onto the square of the piece it just killed',
     def: true,
     event: 'toggle-capture-advance',
@@ -89,7 +89,7 @@ const rules: Array<{
   {
     key: 'finishPressure',
     label: 'Finish pressure',
-    desc: 'A king whose side has no field pieces left takes ramping damage after a grace period',
+    desc: 'Once a side is down to only its king, attacks on that king deal more and more damage over time, so a siege cannot be dragged out forever',
     def: true,
     event: 'toggle-finish-pressure',
   },

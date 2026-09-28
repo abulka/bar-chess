@@ -162,7 +162,7 @@ async function copyPrompt(): Promise<void> {
       <label class="toggle"><input v-model="captureAdvance" type="checkbox" :disabled="state.running" /> capture advance</label>
       <label class="toggle"><input v-model="chessKills" type="checkbox" :disabled="state.running" /> chess kills</label>
       <label class="toggle"><input v-model="promotion" type="checkbox" :disabled="state.running" /> promotion</label>
-      <label class="toggle" title="A king whose side has no field pieces takes ramping damage after a grace period"><input v-model="finishPressure" type="checkbox" :disabled="state.running" /> finish pressure</label>
+      <label class="toggle" title="Once a side is down to only its king, attacks on that king deal more and more damage over time, so a siege cannot be dragged out forever"><input v-model="finishPressure" type="checkbox" :disabled="state.running" /> finish pressure</label>
       <label class="toggle" title="Include each game's replay record JSON (verbose)"><input v-model="includeRecord" type="checkbox" /> replay record</label>
     </div>
 
