@@ -5,6 +5,7 @@ import {
   CHESS_TRACER_COLOR,
   DEATH_FX_COLOR,
   DEATH_FX_TTL,
+  DEATH_TREMBLE_TTL,
   HIT_FX_COLOR,
   HIT_FX_MAX_ACTIVE,
 } from '../../src/game/constants'
@@ -27,7 +28,7 @@ describe('FxLayer — render-only effects', () => {
       y: 20,
       radiusTiles: 1.6,
     })
-    expect(fx.effects[0].maxTtl).toBeCloseTo(DEATH_FX_TTL)
+    expect(fx.effects[0].maxTtl).toBeCloseTo(DEATH_TREMBLE_TTL + DEATH_FX_TTL)
   })
 
   it('uses the capture pulse for a chess-rule kill', () => {
@@ -58,6 +59,36 @@ describe('FxLayer — render-only effects', () => {
     const fx = new FxLayer()
     fx.handle(event('advance', { x: 3, y: 4, chess: true, fromX: 0, fromY: 0, color: '#5ab0ff' }))
     expect(fx.effects[0]).toMatchObject({ kind: 'tracer', color: '#5ab0ff' })
+  })
+
+  it('carries the victim glyph on a death effect so it can tremble', () => {
+    const fx = new FxLayer()
+    fx.handle(
+      event('explosion', { capture: true, x: 10, y: 20, glyph: '♛', tint: '#ff9f43', sizeTiles: 1.1 }),
+    )
+    expect(fx.effects[0]).toMatchObject({
+      kind: 'capture',
+      x: 10,
+      y: 20,
+      glyph: '♛',
+      tint: '#ff9f43',
+      sizeTiles: 1.1,
+    })
+  })
+
+  it('does not tag the advancing killer (the target shakes, not the attacker)', () => {
+    const fx = new FxLayer()
+    fx.handle({
+      seq: 1,
+      tick: 0,
+      phase: 'test',
+      type: 'advance',
+      msg: '',
+      entity: 7,
+      data: { x: 3, y: 4, chess: true, fromX: 0, fromY: 0 },
+    })
+    expect(fx.effects[0].kind).toBe('tracer')
+    expect(fx.effects[0].target).toBeNull()
   })
 
   it('spawns a pink hit effect carrying the target', () => {

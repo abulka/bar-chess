@@ -9,6 +9,7 @@ import {
   DEATH_FX_COLOR,
   DEATH_FX_RADIUS_TILES,
   DEATH_FX_TTL,
+  DEATH_TREMBLE_TTL,
   HIT_FX_COLOR,
   HIT_FX_MAX_ACTIVE,
   HIT_FX_MAX_RADIUS,
@@ -36,6 +37,11 @@ export interface FxEffect {
   maxTtl: number
   /** For a hit: the piece to flash/tremble (followed while it lives). */
   target: Entity | null
+  /** For a death/capture: the victim's glyph, tint and size, so the renderer can
+   * tremble the piece as it dies (the entity itself is already removed). */
+  glyph?: string
+  tint?: string
+  sizeTiles?: number
 }
 
 function num(value: unknown, fallback = 0): number {
@@ -60,21 +66,28 @@ export class FxLayer {
     const data = record.data as Record<string, unknown> | undefined
     if (record.type === 'explosion') {
       const capture = data?.capture === true
+      // The effect starts with a tremble (the victim's distress) and only then
+      // blasts, so total lifetime is the tremble plus the blast.
+      const blast = capture ? CAPTURE_ADVANCE_FX_TTL : DEATH_FX_TTL
       this.effects.push({
         kind: capture ? 'capture' : 'death',
         x: num(data?.x),
         y: num(data?.y),
         radiusTiles: num(data?.radiusTiles, capture ? CAPTURE_ADVANCE_FX_RADIUS : DEATH_FX_RADIUS_TILES),
         color: capture ? CAPTURE_ADVANCE_FX_COLOR : DEATH_FX_COLOR,
-        ttl: capture ? CAPTURE_ADVANCE_FX_TTL : DEATH_FX_TTL,
-        maxTtl: capture ? CAPTURE_ADVANCE_FX_TTL : DEATH_FX_TTL,
+        ttl: DEATH_TREMBLE_TTL + blast,
+        maxTtl: DEATH_TREMBLE_TTL + blast,
         target: null,
+        glyph: typeof data?.glyph === 'string' ? data.glyph : undefined,
+        tint: typeof data?.tint === 'string' ? data.tint : undefined,
+        sizeTiles: typeof data?.sizeTiles === 'number' ? data.sizeTiles : undefined,
       })
       return
     }
     if (record.type === 'advance') {
       // A chess kill shows a tracer from the killer to the victim's square; an
-      // ordinary capture shows the small red advance pulse.
+      // ordinary capture shows the small red advance pulse. The victim itself
+      // trembles from its own death effect, not from the advance.
       if (data?.chess === true) {
         this.effects.push({
           kind: 'tracer',

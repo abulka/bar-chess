@@ -26,7 +26,7 @@ export const ATTACK_LEASH = 8
  * Saves stamped with a different version load position-only (their turn history
  * is cleared) so a replay can never mix old recorded states with new rules.
  */
-export const SIM_VERSION = 4
+export const SIM_VERSION = 3
 
 /** Seconds a capture-advance step glides for (slower than a normal step). */
 export const CAPTURE_ADVANCE_TRAVEL = 0.75
@@ -52,6 +52,13 @@ export const CHESS_TRACER_COLOR = '#ffd166'
 export const DEATH_FX_COLOR = '#ff3b30'
 export const DEATH_FX_TTL = 0.5
 export const DEATH_FX_RADIUS_TILES = 1.6
+/**
+ * How long a dying piece trembles in place before its blast, so the player can
+ * register the killing blow rather than seeing the piece vanish instantly. It
+ * runs longer than the projectile-hit tremble (`HIT_FX_TTL`) because this is the
+ * fatal one. During this window the explosion is held back.
+ */
+export const DEATH_TREMBLE_TTL = 0.45
 
 /**
  * Hit-impact feedback: a significant non-fatal hit (at least

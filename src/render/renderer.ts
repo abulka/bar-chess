@@ -25,7 +25,7 @@ import { PIECES, WEAPONS } from '../game/pieces'
 import { queueMarkers } from '../game/queue'
 import { resolveGeometry } from '../game/types'
 import { coordName, fileLabel } from '../game/coords'
-import { TEAM_IDS } from '../game/constants'
+import { DEATH_TREMBLE_TTL, TEAM_IDS } from '../game/constants'
 import type { Game } from '../game/game'
 import { Camera } from './camera'
 import { drawEditorCursor } from './editor'
@@ -926,6 +926,67 @@ export class Renderer {
     for (const fx of this.fx.effects) {
       const t = fx.maxTtl > 0 ? 1 - fx.ttl / fx.maxTtl : 1
       const radius = fx.radiusTiles * tile
+      const death = fx.kind === 'death' || fx.kind === 'capture'
+      if (death) {
+        const elapsed = fx.maxTtl - fx.ttl
+        // Phase 1: the victim's glyph trembles in place for a clear beat, so the
+        // fatal blow is registerable before the explosion. The entity itself is
+        // already removed, so this is a render-only ghost.
+        if (elapsed < DEATH_TREMBLE_TTL) {
+          if (fx.glyph) {
+            const u = Math.min(1, Math.max(0, elapsed / DEATH_TREMBLE_TTL))
+            const amp = (1 - u) * (1 - u) * tile * 0.16
+            const gx = fx.x + Math.sin(this.time * 72) * amp
+            const gy = fx.y + Math.cos(this.time * 65) * amp
+            const size = (fx.sizeTiles ?? 1) * tile
+            ctx.fillStyle = fx.tint ?? fx.color
+            ctx.font = `${size * 0.92}px "Segoe UI Symbol", "Apple Symbols", serif`
+            ctx.textAlign = 'center'
+            ctx.textBaseline = 'middle'
+            ctx.fillText(fx.glyph, gx, gy + size * 0.04)
+          }
+          continue
+        }
+        // Phase 2: the explosion, timed from the end of the tremble.
+        const span = Math.max(1e-6, fx.maxTtl - DEATH_TREMBLE_TTL)
+        const bt = Math.min(1, (elapsed - DEATH_TREMBLE_TTL) / span)
+        if (fx.kind === 'capture') {
+          // Chess-rule capture: three quick red pulses racing the killer's glide.
+          const pulses = 3
+          ctx.strokeStyle = fx.color
+          ctx.lineWidth = 2 / this.camera.zoom
+          for (let i = 0; i < pulses; i++) {
+            const phase = (bt * pulses + i / pulses) % 1
+            ctx.globalAlpha = Math.max(0, 1 - bt) * (1 - phase) * 0.9
+            ctx.beginPath()
+            ctx.arc(fx.x, fx.y, radius * (0.35 + phase * 1.1), 0, Math.PI * 2)
+            ctx.stroke()
+          }
+          ctx.globalAlpha = Math.max(0, 1 - bt) * 0.9
+          ctx.fillStyle = fx.color
+          ctx.beginPath()
+          ctx.arc(fx.x, fx.y, radius * 0.3 * (1 - bt * 0.5), 0, Math.PI * 2)
+          ctx.fill()
+          ctx.globalAlpha = 1
+          continue
+        }
+        const blastRadius = radius * (0.35 + bt * 0.9)
+        const alpha = Math.max(0, 1 - bt)
+        ctx.globalAlpha = alpha * 0.8
+        // Death explosions are red, never team/orange-tinted.
+        ctx.fillStyle = fx.color
+        ctx.beginPath()
+        ctx.arc(fx.x, fx.y, blastRadius, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.globalAlpha = alpha
+        ctx.strokeStyle = fx.color
+        ctx.lineWidth = 2 / this.camera.zoom
+        ctx.beginPath()
+        ctx.arc(fx.x, fx.y, blastRadius * 0.9, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.globalAlpha = 1
+        continue
+      }
       if (fx.kind === 'hit') {
         // Significant hit: a small pink burst plus a flash on the damaged piece
         // in its OWN colour (following it if it moves). The piece also trembles
@@ -981,41 +1042,6 @@ export class Renderer {
         ctx.globalAlpha = 1
         continue
       }
-      if (fx.kind === 'capture') {
-        // Capture advance: three quick red pulses racing the killer's glide.
-        const pulses = 3
-        ctx.strokeStyle = fx.color
-        ctx.lineWidth = 2 / this.camera.zoom
-        for (let i = 0; i < pulses; i++) {
-          const phase = (t * pulses + i / pulses) % 1
-          ctx.globalAlpha = Math.max(0, 1 - t) * (1 - phase) * 0.9
-          ctx.beginPath()
-          ctx.arc(fx.x, fx.y, radius * (0.35 + phase * 1.1), 0, Math.PI * 2)
-          ctx.stroke()
-        }
-        ctx.globalAlpha = Math.max(0, 1 - t) * 0.9
-        ctx.fillStyle = fx.color
-        ctx.beginPath()
-        ctx.arc(fx.x, fx.y, radius * 0.3 * (1 - t * 0.5), 0, Math.PI * 2)
-        ctx.fill()
-        ctx.globalAlpha = 1
-        continue
-      }
-      const blastRadius = radius * (0.35 + t * 0.9)
-      const alpha = Math.max(0, 1 - t)
-      ctx.globalAlpha = alpha * 0.8
-      // Death explosions are red, never team/orange-tinted.
-      ctx.fillStyle = fx.color
-      ctx.beginPath()
-      ctx.arc(fx.x, fx.y, blastRadius, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.globalAlpha = alpha
-      ctx.strokeStyle = fx.color
-      ctx.lineWidth = 2 / this.camera.zoom
-      ctx.beginPath()
-      ctx.arc(fx.x, fx.y, blastRadius * 0.9, 0, Math.PI * 2)
-      ctx.stroke()
-      ctx.globalAlpha = 1
     }
   }
 

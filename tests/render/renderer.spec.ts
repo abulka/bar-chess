@@ -6,7 +6,7 @@ vi.mock('../../src/render/terrain', () => ({
 }))
 
 import { Health, Motion, PieceType, Render, Stance, Target, Weapon } from '../../src/ecs/components'
-import { DEATH_FX_COLOR, HIT_FX_COLOR } from '../../src/game/constants'
+import { DEATH_FX_COLOR, DEATH_TREMBLE_TTL, HIT_FX_COLOR } from '../../src/game/constants'
 import { Game } from '../../src/game/game'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { WEAPONS } from '../../src/game/pieces'
@@ -351,6 +351,8 @@ describe('Renderer hit impact fx', () => {
       msg: '',
       data: { capture: false, radiusTiles: 1.6, x: 100, y: 100 },
     })
+    // Let the victim's tremble phase elapse so the blast is drawn.
+    renderer.fx.update(DEATH_TREMBLE_TTL + 0.05)
 
     ctx.strokes = []
     renderer.draw(game)
