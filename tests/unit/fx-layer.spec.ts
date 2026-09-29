@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { EventRecord, EventType } from '../../src/ecs/events'
 import {
   CAPTURE_ADVANCE_FX_COLOR,
+  CHESS_TRACER_COLOR,
   DEATH_FX_COLOR,
   DEATH_FX_TTL,
   HIT_FX_COLOR,
@@ -36,13 +37,27 @@ describe('FxLayer — render-only effects', () => {
     expect(fx.effects[0]).toMatchObject({ kind: 'capture', color: CAPTURE_ADVANCE_FX_COLOR })
   })
 
-  it('adds an advance pulse for an ordinary capture but not a chess one', () => {
+  it('adds a capture pulse for an ordinary advance and a tracer for a chess kill', () => {
     const fx = new FxLayer()
     fx.handle(event('advance', { x: 1, y: 2, chess: false }))
-    fx.handle(event('advance', { x: 3, y: 4, chess: true }))
+    fx.handle(event('advance', { x: 3, y: 4, chess: true, fromX: 0, fromY: 0 }))
 
-    expect(fx.effects).toHaveLength(1)
+    expect(fx.effects).toHaveLength(2)
     expect(fx.effects[0].kind).toBe('capture')
+    expect(fx.effects[1]).toMatchObject({
+      kind: 'tracer',
+      x: 3,
+      y: 4,
+      fromX: 0,
+      fromY: 0,
+      color: CHESS_TRACER_COLOR,
+    })
+  })
+
+  it('uses the killer tint for a chess tracer when the event carries one', () => {
+    const fx = new FxLayer()
+    fx.handle(event('advance', { x: 3, y: 4, chess: true, fromX: 0, fromY: 0, color: '#5ab0ff' }))
+    expect(fx.effects[0]).toMatchObject({ kind: 'tracer', color: '#5ab0ff' })
   })
 
   it('spawns a pink hit effect carrying the target', () => {

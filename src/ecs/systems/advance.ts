@@ -5,7 +5,7 @@ import { vecEquals } from '../../game/math'
 import { buildOccupancy, makeOccupied, occupiedExcept } from '../../game/occupancy'
 import { clearMotion } from '../../game/queue'
 import { PIECES, WEAPONS } from '../../game/pieces'
-import { Cell, Health, Motion, Order, PieceType, Position, Stance, Team } from '../components'
+import { Cell, Health, Motion, Order, PieceType, Position, Render, Stance, Team } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
@@ -69,20 +69,27 @@ const system: System = {
       const cell = ctx.world.require(killer, Cell)
       const order = ctx.world.require(killer, Order)
       const motion = ctx.world.require(killer, Motion)
-      if (order.queue.length > 0) continue
-      if (motion.moving || motion.path.length > 0 || motion.reserved !== null || motion.goal !== null) continue
-      // A preserve-latched piece is healing up, not pressing an advance.
-      if (motion.holdUntilHp > 0 || motion.intent === 'preserve') continue
-      // A standing order blocks the advance, except the attack order that just
-      // killed this victim: it is about to complete, so the capture still lands.
-      const attackOrderOnVictim = order.kind === 'attack' && order.target === intent.victim
-      if (order.kind !== 'none' && !attackOrderOnVictim) continue
-
-      // Capture advance is an Attack-mode behaviour only: a passive (none/move)
-      // piece is never pulled off a safe or healing square by a kill.
       const team = ctx.world.require(killer, Team)
-      const stance = ctx.world.get(killer, Stance)
-      if (ctx.teams[team].controller !== 'ai' && stance?.mode !== 'attack' && order.kind !== 'attack') continue
+      // A chess kill is a capture: it always pulls the killer onto the victim's
+      // square, whatever its stance, order or safe-hold, because taking the
+      // square is the whole point of the rule. Ordinary kills keep the passive
+      // guards below so a piece is never dragged off a safe or healing square.
+      const chess = intent.chess === true
+      if (!chess) {
+        if (order.queue.length > 0) continue
+        if (motion.moving || motion.path.length > 0 || motion.reserved !== null || motion.goal !== null) continue
+        // A preserve-latched piece is healing up, not pressing an advance.
+        if (motion.holdUntilHp > 0 || motion.intent === 'preserve') continue
+        // A standing order blocks the advance, except the attack order that just
+        // killed this victim: it is about to complete, so the capture still lands.
+        const attackOrderOnVictim = order.kind === 'attack' && order.target === intent.victim
+        if (order.kind !== 'none' && !attackOrderOnVictim) continue
+
+        // Capture advance is an Attack-mode behaviour only: a passive (none/move)
+        // piece is never pulled off a safe or healing square by a kill.
+        const stance = ctx.world.get(killer, Stance)
+        if (ctx.teams[team].controller !== 'ai' && stance?.mode !== 'attack' && order.kind !== 'attack') continue
+      }
 
       const dest = intent.cell
       if (vecEquals(dest, cell)) continue
@@ -93,14 +100,16 @@ const system: System = {
 
       const def = PIECES[ctx.world.require(killer, PieceType).kind]
       if (!def) continue
-      // The victim stood on a firing ray; re-check the line is still clear so
-      // the killer steps along a legal capture line, not over another piece.
-      const occupied = makeOccupied(board, occupancy)
-      if (!containsCell(fireCells(board, cell, WEAPONS[def.weapon].geometry, team, occupied), dest.x, dest.y)) {
-        continue
+      if (!chess) {
+        // The victim stood on a firing ray; re-check the line is still clear so
+        // the killer steps along a legal capture line, not over another piece.
+        const occupied = makeOccupied(board, occupancy)
+        if (!containsCell(fireCells(board, cell, WEAPONS[def.weapon].geometry, team, occupied), dest.x, dest.y)) {
+          continue
+        }
+        // Don't step into a firing envelope that would kill the killer.
+        if (!advanceSafe(ctx, killer, dest)) continue
       }
-      // Don't step into a firing envelope that would kill the killer.
-      if (!advanceSafe(ctx, killer, dest)) continue
       // A king never capture-advances into check.
       if (ctx.world.require(killer, PieceType).kind === 'king') {
         const covered = enemyCoverage(board, ctx.world, ctx.occupancy, killer, team)
@@ -130,11 +139,21 @@ const system: System = {
       used.add(killer)
 
       // The capture pulse is render-only (FxLayer): it shows for ordinary
-      // captures; a chess-rule kill already pulsed red with its explosion.
+      // captures; a chess-rule kill draws a tracer from the killer to the
+      // victim instead, so an instant kill still reads as a shot.
+      const tint = ctx.world.get(killer, Render)?.tint
       ctx.bus.emit('advance', `#${killer} advanced to ${dest.x},${dest.y}`, {
         entity: killer,
         team,
-        data: { cell: dest, x: center.x, y: center.y, chess: intent.chess === true },
+        data: {
+          cell: dest,
+          x: center.x,
+          y: center.y,
+          fromX,
+          fromY,
+          color: tint,
+          chess,
+        },
       })
     }
 

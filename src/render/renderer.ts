@@ -20,7 +20,7 @@ import type { OccupiedFn } from '../game/geometry'
 import { enemyCoverage } from '../game/kingSafety'
 import { defendedMap } from '../game/defended'
 import { HEAL_COLOR, HEAL_RADIUS, HEAL_TIP_COLOR, healingTargets } from '../game/healing'
-import { healthRatio, dist, vecEquals } from '../game/math'
+import { healthRatio, dist, lerp, vecEquals } from '../game/math'
 import { PIECES, WEAPONS } from '../game/pieces'
 import { queueMarkers } from '../game/queue'
 import { resolveGeometry } from '../game/types'
@@ -953,6 +953,30 @@ export class Renderer {
         ctx.globalAlpha = fade
         ctx.beginPath()
         ctx.arc(px, py, ring * 0.3 * (1 - t * 0.6), 0, Math.PI * 2)
+        ctx.fill()
+        ctx.globalAlpha = 1
+        continue
+      }
+      if (fx.kind === 'tracer') {
+        // Chess kill: a quick streak from the killer to the victim's square,
+        // with a bright head racing along it, so the kill reads as a shot.
+        const fromX = fx.fromX ?? fx.x
+        const fromY = fx.fromY ?? fx.y
+        const fade = Math.max(0, 1 - t)
+        const head = Math.min(1, t * 1.8)
+        const hx = lerp(fromX, fx.x, head)
+        const hy = lerp(fromY, fx.y, head)
+        ctx.globalAlpha = fade * 0.85
+        ctx.strokeStyle = fx.color
+        ctx.lineWidth = 2.5 / this.camera.zoom
+        ctx.beginPath()
+        ctx.moveTo(fromX, fromY)
+        ctx.lineTo(hx, hy)
+        ctx.stroke()
+        ctx.globalAlpha = fade
+        ctx.fillStyle = fx.color
+        ctx.beginPath()
+        ctx.arc(hx, hy, 3 / this.camera.zoom, 0, Math.PI * 2)
         ctx.fill()
         ctx.globalAlpha = 1
         continue

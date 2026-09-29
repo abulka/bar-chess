@@ -26,7 +26,7 @@ export const ATTACK_LEASH = 8
  * Saves stamped with a different version load position-only (their turn history
  * is cleared) so a replay can never mix old recorded states with new rules.
  */
-export const SIM_VERSION = 3
+export const SIM_VERSION = 4
 
 /** Seconds a capture-advance step glides for (slower than a normal step). */
 export const CAPTURE_ADVANCE_TRAVEL = 0.75
@@ -35,6 +35,14 @@ export const CAPTURE_ADVANCE_FX_TTL = 0.75
 export const CAPTURE_ADVANCE_FX_RADIUS = 0.8
 /** Colour of the capture-advance pulses. */
 export const CAPTURE_ADVANCE_FX_COLOR = '#ff3b30'
+
+/**
+ * Chess-kill tracer: a quick streak from the killer to the victim so an instant
+ * chess kill still reads as a shot, not just a blast on the victim's square. It
+ * is render-only and plays even while the simulation is frozen by a win.
+ */
+export const CHESS_TRACER_TTL = 0.28
+export const CHESS_TRACER_COLOR = '#ffd166'
 
 /**
  * Normal death explosion colour. Red, never the team tint: the orange/amber

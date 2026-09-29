@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Health, Order, Projectile, Target, Weapon } from '../../src/ecs/components'
+import { Cell, Health, Motion, Order, Projectile, Stance, Target, Weapon } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
@@ -145,6 +145,78 @@ describe('traditional chess kills', () => {
     game.orderAt({ x: 4, y: 5 }, 'move')
 
     expect(game.world.require(pawn, Order).chessKill).toBeNull()
+  })
+
+  it('always pulls the killer onto the victim, even from a move order in Move stance', () => {
+    const { game, shim } = emptyGame()
+    const queen = createPiece(shim, 'blue', PIECES.queen, { x: 4, y: 4 })
+    createPiece(shim, 'red', PIECES.pawn, { x: 4, y: 5 })
+    game.chessKills = true
+    game.setCaptureAdvance(true)
+    game.world.require(queen, Stance).mode = 'move'
+    game.selected = [queen]
+
+    // A goto order (not an attack), which the ordinary advance would refuse.
+    game.orderAt({ x: 4, y: 5 }, 'move')
+    expect(game.world.require(queen, Order).kind).toBe('goto')
+
+    game.runTicks(1)
+
+    // The capture takes the square with a free advance, not the ordered step.
+    const motion = game.world.require(queen, Motion)
+    expect(motion.freeAdvance).toBe(true)
+    expect(motion.moving).toBe(true)
+
+    let guard = 0
+    while (game.world.require(queen, Motion).moving && guard++ < 200) game.runTicks(1)
+    expect(game.world.require(queen, Cell)).toEqual({ x: 4, y: 5 })
+  })
+
+  it('glides the killer onto a fatal chess capture, then wins, and replays it', () => {
+    const { game, shim } = emptyGame()
+    const queen = createPiece(shim, 'blue', PIECES.queen, { x: 4, y: 4 })
+    const king = createPiece(shim, 'red', PIECES.king, { x: 4, y: 5 })
+    game.chessKills = true
+    game.setCaptureAdvance(true)
+    game.selected = [queen]
+    game.orderAt({ x: 4, y: 5 })
+    expect(game.world.require(queen, Order).chessKill).toBe(king)
+
+    game.beginTurn()
+    let guard = 0
+    while (game.turnActive && guard++ < 2000) game.runTicks(1)
+    expect(guard).toBeLessThan(2000)
+
+    // The win waits for the glide, so the queen finishes on the king's square.
+    expect(game.winner).toBe('blue')
+    expect(game.world.require(queen, Motion).moving).toBe(false)
+    expect(game.world.require(queen, Cell)).toEqual({ x: 4, y: 5 })
+
+    // The glide is part of the recorded turn, so a replay lands on the same state.
+    game.replayTurn()
+    guard = 0
+    while (game.replaying && guard++ < 2000) game.runTicks(1)
+    expect(game.winner).toBe('blue')
+    expect(game.world.require(queen, Cell)).toEqual({ x: 4, y: 5 })
+  })
+
+  it('does not advance a chess kill when capture-advance is off', () => {
+    const { game, shim } = emptyGame()
+    const queen = createPiece(shim, 'blue', PIECES.queen, { x: 4, y: 4 })
+    createPiece(shim, 'red', PIECES.king, { x: 4, y: 5 })
+    game.chessKills = true
+    game.setCaptureAdvance(false)
+    game.selected = [queen]
+    game.orderAt({ x: 4, y: 5 })
+
+    game.beginTurn()
+    let guard = 0
+    while (game.turnActive && guard++ < 2000) game.runTicks(1)
+    expect(guard).toBeLessThan(2000)
+
+    // The king still dies, but the killer stays put: the toggle applies.
+    expect(game.winner).toBe('blue')
+    expect(game.world.require(queen, Cell)).toEqual({ x: 4, y: 4 })
   })
 })
 

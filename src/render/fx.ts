@@ -4,6 +4,8 @@ import {
   CAPTURE_ADVANCE_FX_COLOR,
   CAPTURE_ADVANCE_FX_RADIUS,
   CAPTURE_ADVANCE_FX_TTL,
+  CHESS_TRACER_COLOR,
+  CHESS_TRACER_TTL,
   DEATH_FX_COLOR,
   DEATH_FX_RADIUS_TILES,
   DEATH_FX_TTL,
@@ -20,10 +22,13 @@ import {
  * changes can never invalidate a save or alter a replay.
  */
 export interface FxEffect {
-  kind: 'death' | 'capture' | 'hit'
+  kind: 'death' | 'capture' | 'hit' | 'tracer'
   /** World-space position in pixels. */
   x: number
   y: number
+  /** For a tracer: the shot's origin in world-space pixels. */
+  fromX?: number
+  fromY?: number
   /** Radius in tiles, scaled by the renderer's board tile size. */
   radiusTiles: number
   color: string
@@ -68,9 +73,23 @@ export class FxLayer {
       return
     }
     if (record.type === 'advance') {
-      // A chess kill already pulsed red with its explosion; only ordinary
-      // captures add the advance pulse.
-      if (data?.chess === true) return
+      // A chess kill shows a tracer from the killer to the victim's square; an
+      // ordinary capture shows the small red advance pulse.
+      if (data?.chess === true) {
+        this.effects.push({
+          kind: 'tracer',
+          x: num(data?.x),
+          y: num(data?.y),
+          fromX: num(data?.fromX),
+          fromY: num(data?.fromY),
+          radiusTiles: 0,
+          color: typeof data?.color === 'string' ? data.color : CHESS_TRACER_COLOR,
+          ttl: CHESS_TRACER_TTL,
+          maxTtl: CHESS_TRACER_TTL,
+          target: null,
+        })
+        return
+      }
       this.effects.push({
         kind: 'capture',
         x: num(data?.x),

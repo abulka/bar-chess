@@ -2,6 +2,7 @@ import { EventBus } from '../ecs/events'
 import type { EventRecord } from '../ecs/events'
 import { Pipeline } from '../ecs/pipeline'
 import { createPipeline } from '../ecs/systems'
+import movement from '../ecs/systems/movement'
 import { wouldSelfPreserve } from '../ecs/systems/orders'
 import { World } from '../ecs/world'
 import type { Entity, WorldSnapshot } from '../ecs/world'
@@ -571,6 +572,20 @@ export class Game {
   private replayTotal = 0
   /** True when the current replay is reproducing a continuous (mega) turn. */
   private replayContinuous = false
+  /**
+   * A king has fallen this turn, so the winner is decided for good. Prevents a
+   * stray death during the capture outro from turning the result into a draw.
+   * Derived from the state, so it is set identically on live play and replay.
+   */
+  private winnerLocked = false
+  /**
+   * True while a fatal capture is playing out: the battle has a winner but one
+   * or more pieces are still gliding onto a victim's square. Only movement runs
+   * during this window, so the outcome cannot change, and the extra ticks are
+   * recorded so a replay reproduces the glide.
+   */
+  private captureOutro = false
+  private captureOutroTicks = 0
   // Continuous "mega" turn in progress: its exact start state, pending commands
   // and elapsed ticks. Closed into a `continuous` HistoryEntry on pause, a
   // player command, or a king death.
@@ -613,6 +628,11 @@ export class Game {
   private static readonly NOMINAL_MOVE_TICKS = 5
   /** Cap on buffered space-bar turns, so a held key cannot queue a runaway. */
   private static readonly MAX_QUEUED_TURNS = 3
+  /**
+   * Safety cap on the capture outro (a fatal capture's glide). Longer than any
+   * legal `CAPTURE_ADVANCE_TRAVEL` so it only ever catches a stuck piece.
+   */
+  private static readonly CAPTURE_OUTRO_MAX_TICKS = 90
 
   fps = 0
   private tps = 0
@@ -903,6 +923,9 @@ export class Game {
     // The turn decides the orders that were given; a pending override prompt is
     // now too late to matter.
     this.noPreservePrompt = null
+    this.winnerLocked = false
+    this.captureOutro = false
+    this.captureOutroTicks = 0
     // Snapshot after the setup mutations: replay must start from the exact
     // turn-start state, including the orders/stances issued while paused (which
     // never create a history boundary) and the cleared cooldowns/movedThisTurn.
@@ -926,6 +949,9 @@ export class Game {
   beginMegaTurn(): void {
     if (this.megaActive || this.turnActive || this.replaying || this.winner !== null) return
     this.noPreservePrompt = null
+    this.winnerLocked = false
+    this.captureOutro = false
+    this.captureOutroTicks = 0
     // A fresh turn number so a mega turn is a first-class beat in the recorder,
     // live log and turn counter, exactly like a normal turn.
     this.turn++
@@ -1339,6 +1365,9 @@ export class Game {
       this.teams[id] = structuredClone(state.teams[id])
     }
     this.winner = state.winner
+    this.winnerLocked = false
+    this.captureOutro = false
+    this.captureOutroTicks = 0
     // Re-run undo/redo/replay under the rules the turn was captured with, not
     // whatever is toggled now.
     if (state.settings) this.applySimSettings(state.settings)
@@ -1532,8 +1561,11 @@ export class Game {
 
   private step(): void {
     // Once a winner is decided the battle is frozen; undo (or redo) rewinds it.
-    // A replay is exempt so it can reproduce the fatal turn exactly.
-    if (this.winner !== null && !this.replaying) return
+    // A replay is exempt so it can reproduce the fatal turn exactly. The capture
+    // outro is the one exception: a fatal capture still glides the killer onto
+    // the victim's square before the freeze.
+    const outro = this.captureOutroActive()
+    if (this.winner !== null && !this.replaying && !outro) return
     this.ctx.tick = this.tick
     this.ctx.turn = this.turn
     this.ctx.verbosePhases = this.pipeline.verbose
@@ -1554,7 +1586,14 @@ export class Game {
     // them out of the live buffer/stats, but still deliver them to observers
     // (audio plays the replay's shots).
     this.bus.replaying = this.replaying
-    this.pipeline.run(this.ctx)
+    if (outro) {
+      // Only movement runs during the outro: it finishes the killer's capture
+      // glide while every other system stays out, so the decided result cannot
+      // change and no stray fire can muddy the final frame.
+      movement.update(this.ctx)
+    } else {
+      this.pipeline.run(this.ctx)
+    }
     this.bus.replaying = false
     this.tick++
     this.ticksThisSecond++
@@ -1565,15 +1604,38 @@ export class Game {
       this.megaTicks++
     }
     const before = this.winner
-    this.updateWinner()
+    // Lock the result the moment a king falls, so the capture outro cannot turn
+    // a win into a draw. This is derived from the state, so live play and replay
+    // reach it on the same tick.
+    if (!this.winnerLocked) {
+      this.updateWinner()
+      if (this.winner !== null) this.winnerLocked = true
+    }
 
-    // A king just fell during a live turn: close the turn (so the history
-    // boundary is the pre-fatal state) and freeze. Undo reopens the game.
+    // A king just fell during a live turn: let a capture glide finish first,
+    // then close the turn (so the history boundary includes the glide) and
+    // freeze. Undo reopens the game.
     if (this.winner !== null && before === null && !this.replaying) {
+      if (this.hasFreeAdvance()) {
+        this.captureOutro = true
+        this.captureOutroTicks = 0
+        if (this.turnActive) this.turnTicks++
+        return
+      }
       // This tick ran but returns before `advanceTurn`, so count it explicitly —
       // otherwise a first-tick death records 0 ticks and cannot be replayed.
       if (this.turnActive) this.turnTicks++
       this.endGame(this.winner)
+      return
+    }
+
+    if (this.captureOutro && !this.replaying) {
+      if (this.turnActive) this.turnTicks++
+      this.captureOutroTicks++
+      if (!this.hasFreeAdvance() || this.captureOutroTicks > Game.CAPTURE_OUTRO_MAX_TICKS) {
+        this.captureOutro = false
+        if (this.winner !== null) this.endGame(this.winner)
+      }
       return
     }
 
@@ -1625,6 +1687,20 @@ export class Game {
     if (this.turnActive) this.advanceTurn()
   }
 
+  /** True while any piece is still gliding onto a capture victim's square. */
+  private hasFreeAdvance(): boolean {
+    for (const e of this.world.query(Motion)) {
+      const motion = this.world.get(e, Motion)
+      if (motion?.moving && motion.freeAdvance) return true
+    }
+    return false
+  }
+
+  /** A winner is set and a capture glide is still playing. */
+  private captureOutroActive(): boolean {
+    return this.winner !== null && this.hasFreeAdvance()
+  }
+
   /**
    * Chess-style decisive condition: a team is defeated the moment it has no
    * living king. If both kings fall on the same tick the battle is a draw and
@@ -1655,6 +1731,8 @@ export class Game {
     this.turnActive = false
     this.replaying = false
     this.replayContinuous = false
+    this.captureOutro = false
+    this.captureOutroTicks = 0
     this.barProgress = 1
     this.paused = true
     this.queuedTurns = 0
@@ -1697,6 +1775,9 @@ export class Game {
     this.rng.reset(this.seed)
     this.selected = []
     this.winner = null
+    this.winnerLocked = false
+    this.captureOutro = false
+    this.captureOutroTicks = 0
     this.turnActive = false
     this.replaying = false
     this.replayContinuous = false
