@@ -59,6 +59,16 @@ export interface OrderData {
    * deterministically.
    */
   chessKill: Entity | null
+  /**
+   * First turn on which self-preservation may run again for this order; `-1`
+   * when the player has not insisted on the order. Set by an Alt-clicked order
+   * to suspend the wounded-retreat behaviour for a few turns — see
+   * `src/game/noPreserve.ts`. It ends when the order is replaced, completed or
+   * cleared, so a promoted queued step does not inherit it. Kept on the order
+   * (not in `cmds`) so it is part of the world snapshot and replays
+   * deterministically, like `resumeTurn`/`chessKill`.
+   */
+  noPreserveUntil: number
   /** For an attack order: whether the target is positionally reachable at all. */
   reachable: boolean
   /** Attack target parked while a goto suspends the attack; resumed on arrival. */

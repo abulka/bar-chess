@@ -6,6 +6,7 @@ import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
 import { PIECE_LIST, PIECES, WEAPONS, weaponDamage } from '../../src/game/pieces'
 import { MAX_ORDER_LOG, noteOrder } from '../../src/game/queue'
+import { orderInsists } from '../../src/game/noPreserve'
 import { clearComponents, duelSetup, orderAttack, placePiece } from '../helpers'
 
 function runTurn(game: Game): void {
@@ -724,6 +725,64 @@ describe('Game integration — healing-aware self-preservation', () => {
   })
 })
 
+describe('Game integration — no-preserve prompt', () => {
+  beforeEach(() => clearComponents())
+
+  /** A blue rook at b3, badly wounded and under fire from a red rook at a8. */
+  function woundedGame(): { game: Game; piece: number } {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    createPiece(shim, 'blue', PIECES.king, { x: 4, y: 7 })
+    const piece = createPiece(shim, 'blue', PIECES.rook, { x: 1, y: 5 })
+    game.world.require(piece, Health).cur = 8
+    const rook = createPiece(shim, 'red', PIECES.rook, { x: 0, y: 0 })
+    const target = game.world.require(piece, Target)
+    target.lastAttacker = rook
+    target.underFireUntil = 9999
+    game.selected = [piece]
+    return { game, piece }
+  }
+
+  it('offers the override when an order would be countered by a retreat', () => {
+    const { game, piece } = woundedGame()
+    game.orderAt({ x: 1, y: 4 }, 'move')
+
+    const prompt = game.snapshot().noPreservePrompt
+    expect(prompt).not.toBeNull()
+    expect(prompt!.entities).toContain(piece)
+    expect(prompt!.label).toMatch(/rook/i)
+  })
+
+  it('arms the override on confirm and clears the prompt', () => {
+    const { game, piece } = woundedGame()
+    game.orderAt({ x: 1, y: 4 }, 'move')
+    game.confirmNoPreservePrompt()
+
+    expect(game.world.require(piece, Order).noPreserveUntil).toBeGreaterThan(0)
+    expect(game.snapshot().noPreservePrompt).toBeNull()
+  })
+
+  it('leaves the order alone on dismiss', () => {
+    const { game, piece } = woundedGame()
+    game.orderAt({ x: 1, y: 4 }, 'move')
+    game.dismissNoPreservePrompt()
+
+    expect(game.world.require(piece, Order).noPreserveUntil).toBe(-1)
+    expect(game.snapshot().noPreservePrompt).toBeNull()
+  })
+
+  it('does not prompt for a healthy piece', () => {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    const piece = createPiece(shim, 'blue', PIECES.rook, { x: 1, y: 5 })
+    game.selected = [piece]
+    game.orderAt({ x: 1, y: 4 }, 'move')
+    expect(game.snapshot().noPreservePrompt).toBeNull()
+  })
+})
+
 describe('Game integration — AI move budget', () => {
   beforeEach(() => clearComponents())
 
@@ -1354,5 +1413,39 @@ describe('Game mega turns', () => {
     expect(guard).toBeLessThan(2000)
     expect(game.playing).toBe(true)
     expect(game.snapshot().queuedPlay).toBe(false)
+  })
+
+  it('an Alt-clicked order suspends self-preservation for two turns', () => {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    // A king steps one square per turn, so the move stays active long enough to
+    // observe the whole two-turn override window.
+    const king = createPiece(shim, 'blue', PIECES.king, { x: 4, y: 4 })
+    game.playerTeam = 'blue'
+    game.teams.blue.controller = 'human'
+    game.selected = [king]
+    game.orderAt({ x: 4, y: 0 }, 'move', true)
+
+    const order = game.world.require(king, Order)
+    // Active at issue and through the next two simulated turns, then lapsed.
+    expect(orderInsists(order, game.turn)).toBe(true)
+    runTurn(game)
+    expect(orderInsists(order, game.turn)).toBe(true)
+    runTurn(game)
+    expect(orderInsists(order, game.turn)).toBe(true)
+    runTurn(game)
+    expect(orderInsists(order, game.turn)).toBe(false)
+    expect(order.noPreserveUntil).toBe(-1)
+  })
+
+  it('a plain order does not arm the no-preserve override', () => {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    const queen = createPiece(shim, 'blue', PIECES.queen, { x: 4, y: 4 })
+    game.selected = [queen]
+    game.orderAt({ x: 4, y: 0 }, 'move')
+    expect(game.world.require(queen, Order).noPreserveUntil).toBe(-1)
   })
 })

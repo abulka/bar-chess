@@ -54,6 +54,19 @@ const instaKillName = INSTA_KILL_NAME
 const preserveOverride = computed(
   () => info.value?.order.kind === 'attack' && intent.value === 'preserve',
 )
+/**
+ * Remaining turns of a player "no-preserve" insist order (0 when none). The
+ * order stores the first turn self-preservation may run again, so the count is
+ * that turn minus the current one. While play is paused the current turn has not
+ * run yet, so one is subtracted to keep the readout honest ("2 turns" when the
+ * order is given, not 3).
+ */
+const noPreserveLeft = computed(() => {
+  const until = info.value?.order.noPreserveUntil ?? -1
+  if (until < 0) return 0
+  const base = until - props.snapshot.turn
+  return Math.max(0, props.snapshot.turnActive ? base : base - 1)
+})
 
 function pct(ratio: number): string {
   return `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`
@@ -150,6 +163,10 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
       </p>
       <p v-if="preserveOverride" class="line warn">
         self-preservation overriding the attack order — resumes after healing
+      </p>
+      <p v-if="noPreserveLeft > 0" class="line no-preserve">
+        <b>no-preserve</b> · self-preservation off for
+        {{ noPreserveLeft }} more turn{{ noPreserveLeft === 1 ? '' : 's' }} — pressing this order
       </p>
       <p
         v-else-if="info.order.kind === 'attack' && !info.order.reachable"
@@ -290,6 +307,11 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
 
 .line.warn {
   color: #ff9f43;
+}
+
+/* No-preserve insist override: gold, distinct from the preserve cyan/orange. */
+.line.no-preserve {
+  color: #ffd166;
 }
 
 /* Insta-kill (immediate chess kill): red like the ordered-target reticle. */

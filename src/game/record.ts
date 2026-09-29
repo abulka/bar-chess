@@ -18,7 +18,8 @@ const RECORD_VERSION = 2
  * issued — the chess-notation equivalent of naming the square.
  */
 export type GameCommandIntent =
-  | { t: 'order'; from: Vec2; to: Vec2; command?: 'move' | 'attack' }
+  | { t: 'order'; from: Vec2; to: Vec2; command?: 'move' | 'attack'; force?: boolean }
+  | { t: 'no-preserve'; from: Vec2 }
   | { t: 'stance'; from: Vec2; mode: StanceMode }
   | { t: 'clear'; from: Vec2 }
   | { t: 'deploy'; team: TeamId; key: string }
@@ -307,7 +308,12 @@ function applyIntents(game: Game, intents: GameCommandIntent[]): void {
         const e = at(intent.from)
         if (e === null) break
         game.selected = [e]
-        game.orderAt(intent.to, intent.command)
+        game.orderAt(intent.to, intent.command, intent.force)
+        break
+      }
+      case 'no-preserve': {
+        const e = at(intent.from)
+        if (e !== null) game.insistOn(e)
         break
       }
       case 'stance': {

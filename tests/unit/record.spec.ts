@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Health, PieceType, Team } from '../../src/ecs/components'
+import { Cell, Health, Order, PieceType, Target, Team } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
 import { exportMap } from '../../src/game/map'
 import {
@@ -130,6 +130,57 @@ describe('game record', () => {
     expect(record.turns[0].settings?.chessKills).toBe(true)
     expect(record.settings.chessKills).toBe(false)
 
+    const replay = replayRecord(record)
+    expect(JSON.stringify(replay.game.toDebugJson())).toBe(before)
+  })
+
+  it('replays a forced (no-preserve) order', () => {
+    const game = new Game(8, 'human-vs-ai', 42)
+    const recorder = new Recorder(game)
+    const [e] = bluePieces(game)
+    const cell = game.world.require(e, Cell)
+    game.selected = [e]
+    game.orderAt({ x: cell.x, y: 0 }, 'move', true)
+    game.selected = []
+
+    // The override rides the order and the command records that Alt was held.
+    expect(game.world.require(e, Order).noPreserveUntil).toBeGreaterThan(0)
+    expect(recorder.record.turns[0].intents[0]).toMatchObject({ t: 'order', force: true })
+
+    playTurns(game, 3)
+    const before = JSON.stringify(game.toDebugJson())
+    const record = recorder.finish({ turns: game.turn, ticks: game.tick })
+    const replay = replayRecord(record)
+    expect(JSON.stringify(replay.game.toDebugJson())).toBe(before)
+  })
+
+  it('replays a confirmed no-preserve prompt', () => {
+    const game = new Game(8, 'human-vs-ai', 42)
+    const [e] = bluePieces(game)
+    const cell = game.world.require(e, Cell)
+    // Wounded and under fire, so ordering it raises the override prompt. The
+    // recorder is built after these edits so its baseline captures them.
+    const hp = game.world.require(e, Health)
+    hp.cur = Math.max(1, Math.floor(hp.max * 0.2))
+    const enemy = [...game.world.query(Cell, Team)].find(
+      (x) => game.world.require(x, Team) === 'red',
+    )
+    if (enemy === undefined) throw new Error('no enemy piece')
+    const target = game.world.require(e, Target)
+    target.lastAttacker = enemy
+    target.underFireUntil = 9999
+
+    const recorder = new Recorder(game)
+    game.selected = [e]
+    game.orderAt({ x: cell.x, y: 0 }, 'move')
+    expect(game.snapshot().noPreservePrompt).not.toBeNull()
+    game.confirmNoPreservePrompt()
+    game.selected = []
+
+    playTurns(game, 2)
+    const before = JSON.stringify(game.toDebugJson())
+    const record = recorder.finish({ turns: game.turn, ticks: game.tick })
+    expect(record.turns.some((t) => t.intents.some((i) => i.t === 'no-preserve'))).toBe(true)
     const replay = replayRecord(record)
     expect(JSON.stringify(replay.game.toDebugJson())).toBe(before)
   })

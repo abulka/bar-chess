@@ -170,6 +170,10 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
     if (hasInstaKill(order)) {
       flags.push(`kill=${refName(game, height, order.chessKill)}`)
     }
+    // Player "insist" override: self-preservation is suspended on this order.
+    if (order.noPreserveUntil >= 0 && game.turn < order.noPreserveUntil) {
+      flags.push(`nopres=${order.noPreserveUntil}`)
+    }
     if (order.queue.length > 0) {
       const steps = order.queue
         .map((step) =>

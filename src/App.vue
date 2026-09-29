@@ -7,6 +7,7 @@ import EditorPanel from './components/EditorPanel.vue'
 import EventLog from './components/EventLog.vue'
 import LegendIcon from './components/LegendIcon.vue'
 import MapsModal from './components/MapsModal.vue'
+import NoPreservePrompt from './components/NoPreservePrompt.vue'
 import OptionsPanel from './components/OptionsPanel.vue'
 import PiecePanel from './components/PiecePanel.vue'
 import ReinforcementBar from './components/ReinforcementBar.vue'
@@ -586,6 +587,18 @@ function onClearOrders(): void {
   refresh()
 }
 
+/** Accept the "override self-preservation?" prompt. */
+function onConfirmNoPreserve(): void {
+  game.confirmNoPreservePrompt()
+  refresh()
+}
+
+/** Dismiss the prompt and let the piece retreat as usual. */
+function onDismissNoPreserve(): void {
+  game.dismissNoPreservePrompt()
+  refresh()
+}
+
 function onSetSpeed(speed: number): void {
   game.setSpeed(speed)
   persistSettings()
@@ -1052,7 +1065,7 @@ onBeforeUnmount(() => {
           :class="snapshot.pendingCommand"
         >
           {{ snapshot.pendingCommand === 'attack' ? 'ATTACK — left-click a target' : 'MOVE — left-click a square' }}
-          · shift to queue · esc to cancel
+          · shift to queue · alt to insist (no-preserve) · esc to cancel
         </span>
       </div>
 
@@ -1189,6 +1202,12 @@ onBeforeUnmount(() => {
             :editor="snapshot.editorMode"
             @changed="refresh"
             @ordered="onOrdered"
+          />
+          <NoPreservePrompt
+            v-if="snapshot.noPreservePrompt"
+            :prompt="snapshot.noPreservePrompt"
+            @confirm="onConfirmNoPreserve"
+            @dismiss="onDismissNoPreserve"
           />
         </div>
       </div>

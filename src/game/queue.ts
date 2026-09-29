@@ -33,6 +33,9 @@ export function clearOrder(order: OrderData, opts?: { queue?: boolean }): void {
   order.target = null
   order.targetCell = null
   order.chessKill = null
+  // Dropping the active order also drops the player's "insist" override, so a
+  // completed or replaced order stops suspending self-preservation.
+  order.noPreserveUntil = -1
   order.resumeTarget = null
   order.resumeTurn = -1
   if (opts?.queue) order.queue.length = 0
@@ -127,6 +130,9 @@ export function rechainQueue(
 export function promoteNext(order: OrderData, motion: MotionData): boolean {
   const next = order.queue.shift()
   if (!next) return false
+  // The insist override belongs to the order that was clicked, not to the queue:
+  // a promoted step reverts to normal self-preservation.
+  order.noPreserveUntil = -1
   if (next.kind === 'goto') {
     order.kind = 'goto'
     order.dest = next.dest

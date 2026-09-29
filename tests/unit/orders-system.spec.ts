@@ -7,6 +7,7 @@ import { buildOccupancy } from '../../src/game/occupancy'
 import { createPiece } from '../../src/game/factory'
 import { PIECES } from '../../src/game/pieces'
 import orders from '../../src/ecs/systems/orders'
+import { wouldSelfPreserve } from '../../src/ecs/systems/orders'
 import { clearComponents, makeContext } from '../helpers'
 
 function run(ctx: SimContext): void {
@@ -306,6 +307,54 @@ describe('orders system — automatic self-preservation', () => {
     expect(ctx.world.require(queen, Motion).goal).toBeNull()
   })
 
+  it('lets an insist (no-preserve) order suppress the retreat', () => {
+    const ctx = hurtContext(true)
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 }) // covers the c-file
+    ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.45)
+    const order = ctx.world.require(queen, Order)
+    order.kind = 'goto'
+    order.dest = { x: 0, y: 4 }
+    order.noPreserveUntil = ctx.turn + 3 // active on the next two turns
+    fireOn(ctx, queen, rook)
+
+    run(ctx)
+
+    const motion = ctx.world.require(queen, Motion)
+    // The clicked square wins over the safer square it would normally pick.
+    expect(motion.intent).toBe('order')
+    expect(motion.goal).toEqual({ x: 0, y: 4 })
+    expect(motion.holdUntilHp).toBe(0)
+  })
+
+  it('logs the override and restores self-preservation once it lapses', () => {
+    const ctx = hurtContext(true)
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
+    ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.45)
+    fireOn(ctx, queen, rook)
+
+    run(ctx)
+    expect(ctx.world.require(queen, Motion).intent).toBe('preserve')
+    const order = ctx.world.require(queen, Order)
+
+    // Player insists: the retreat is suppressed and the order history says so.
+    order.kind = 'goto'
+    order.dest = { x: 0, y: 4 }
+    order.noPreserveUntil = ctx.turn + 2
+    run(ctx)
+
+    expect(ctx.world.require(queen, Motion).intent).toBe('order')
+    expect(order.log.some((n) => n.text.includes('self-preservation suppressed'))).toBe(true)
+
+    // The window lapses: normal preservation returns and the log closes the story.
+    ctx.turn = order.noPreserveUntil
+    run(ctx)
+    expect(order.noPreserveUntil).toBe(-1)
+    expect(order.log.some((n) => n.text.includes('no-preserve over'))).toBe(true)
+    expect(ctx.world.require(queen, Motion).intent).toBe('preserve')
+  })
+
   it('lets cheap pieces hold where expensive ones bail', () => {
     const ctx = hurtContext(true)
     const pawn = createPiece(ctx, 'blue', PIECES.pawn, { x: 4, y: 4 })
@@ -317,6 +366,20 @@ describe('orders system — automatic self-preservation', () => {
     run(ctx)
 
     expect(ctx.world.require(pawn, Motion).goal).toBeNull()
+  })
+
+  it('forecasts a retreat for a wounded piece under fire, not a healthy one', () => {
+    const ctx = hurtContext(true)
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
+    ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.45)
+    fireOn(ctx, queen, rook)
+    ctx.occupancy = buildOccupancy(ctx.world, ctx.board)
+
+    expect(wouldSelfPreserve(ctx, queen)).toBe(true)
+    // A healthy queen out of danger has no reason to pull back.
+    const healthy = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 4 })
+    expect(wouldSelfPreserve(ctx, healthy)).toBe(false)
   })
 
   it('lets a non-pawn flee when a single shooter would kill it', () => {

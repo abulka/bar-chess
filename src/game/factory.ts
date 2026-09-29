@@ -23,6 +23,7 @@ export function createPiece(ctx: SimContext, team: 'red' | 'blue', def: PieceDef
     target: null,
     targetCell: null,
     chessKill: null,
+    noPreserveUntil: -1,
     reachable: true,
     resumeTarget: null,
     resumeTurn: -1,

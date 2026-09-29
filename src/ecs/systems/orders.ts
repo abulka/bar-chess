@@ -12,6 +12,7 @@ import type { PieceDef } from '../../game/pieces'
 import { destReachable as canReach } from '../../game/pathfind'
 import { noteOrder, clearMotion, clearOrder, promoteNext, rechainQueue } from '../../game/queue'
 import { hasInstaKill, instaKillLandedNote } from '../../game/instaKill'
+import { orderInsists, noPreserveEndedNote, noPreserveSuppressedNote } from '../../game/noPreserve'
 import { Cell, Health, Motion, Order, PieceType, Stance, Target, Team, hasLiveCell } from '../components'
 import type { MotionData, MotionIntent, OrderData } from '../components'
 import type { Entity } from '../world'
@@ -186,6 +187,92 @@ function rally(ctx: SimContext, team: 'red' | 'blue'): { x: number; y: number } 
   return kc ? { x: kc.x, y: kc.y } : ctx.board.laneMidpoint(enemy)
 }
 
+/**
+ * Would self-preservation pull this piece off its order right now? This mirrors
+ * the gate and act decision in `update` (pass 0) and is used by the game to
+ * offer the player the "no-preserve" insist prompt when they give an order. It
+ * is a forecast for a hint, not the simulation, so keep it in step with the
+ * pass below when that changes.
+ */
+export function wouldSelfPreserve(ctx: SimContext, e: Entity): boolean {
+  if (!ctx.autoPreserve) return false
+  const order = ctx.world.get(e, Order)
+  const motion = ctx.world.get(e, Motion)
+  const target = ctx.world.get(e, Target)
+  const stance = ctx.world.get(e, Stance)
+  const hp = ctx.world.get(e, Health)
+  const cell = ctx.world.get(e, Cell)
+  const team = ctx.world.get(e, Team)
+  const kind = ctx.world.get(e, PieceType)?.kind
+  if (!order || !motion || !target || !stance || !hp || !cell || !team || !kind) return false
+  if (hasInstaKill(order)) return false
+  if (orderInsists(order, ctx.turn)) return false
+
+  const enemyTeam: TeamId = team === 'red' ? 'blue' : 'red'
+  const kings = { red: kingOf(ctx.world, 'red'), blue: kingOf(ctx.world, 'blue') }
+  const fieldCount: Record<TeamId, number> = { red: 0, blue: 0 }
+  for (const o of ctx.world.query(PieceType, Team, Health)) {
+    if (ctx.world.require(o, PieceType).kind === 'king') continue
+    if (ctx.world.require(o, Health).cur <= 0) continue
+    fieldCount[ctx.world.require(o, Team)]++
+  }
+  const controller = ctx.teams[team].controller
+  const mode = controller === 'ai' ? 'attack' : stance.mode
+  const isKing = kind === 'king'
+  const lastStandKing = isKing && fieldCount[team] === 0 && (controller === 'ai' || mode === 'attack')
+  const enemyKing = kings[enemyTeam]
+  const endgame = enemyKing !== null && fieldCount[enemyTeam] === 0
+  if (endgame || lastStandKing || (controller === 'ai' && isKing)) return false
+
+  const hpRatio = healthRatio(hp, 1)
+  const preserve = preserveThreshold(kind)
+  const valuable = isValuable(kind)
+  const holding = motion.holdUntilHp > 0 && hp.cur < motion.holdUntilHp
+  const attacker = target.lastAttacker
+  const underFire =
+    attacker !== null && ctx.tick < target.underFireUntil && hasLiveCell(ctx.world, attacker)
+  if (!(valuable || underFire || hpRatio < preserve || holding)) return false
+
+  const threats = coverageThreats(ctx, e, team, new Map(), { proximityRadius: COVER_RADIUS })
+  const shooters = threats.reduce((n, t) => n + (t.canHitNow ? 1 : 0), 0)
+  const pressedByHits = kind !== 'pawn' && motion.hitStreak >= HIT_STREAK_TRIGGER
+  const lethal = outgunned(ctx, e, threats)
+  const pressured = lethal || (valuable && shooters >= 2) || pressedByHits
+  const wounded = hpRatio < preserve
+
+  const king = kings[team]
+  const kc = king !== null ? ctx.world.get(king, Cell) : null
+  const inAura = !!kc && chebyshev(cell.x, cell.y, kc.x, kc.y) <= HEAL_RADIUS
+  const friendlyCover = ctx.defendedHeal
+    ? friendlyCoverageCells(ctx.board, ctx.world, ctx.occupancy, team, e)
+    : null
+  const defendedHere = !!friendlyCover?.has(ctx.board.cellIndex(cell.x, cell.y))
+  const sanctuary = inAura || defendedHere
+  // A move that ends inside a sanctuary is honoured, not overridden, unless the
+  // volley would kill the piece — the same exception the pass makes.
+  const destDefended =
+    order.dest !== null &&
+    !!friendlyCover &&
+    friendlyCover.has(ctx.board.cellIndex(order.dest.x, order.dest.y))
+  const sanctuaryBound =
+    order.kind === 'goto' &&
+    order.dest !== null &&
+    ((!!kc && inHealingAura(order.dest, kc)) || destDefended)
+  if (sanctuaryBound && !lethal) return false
+
+  let heal: Vec2 | null = null
+  if ((holding || wounded) && !sanctuary && kind !== 'pawn') {
+    const auraCell = kc ? nearestHealingCell(ctx, e, team, kc) : null
+    const defendedCell = friendlyCover ? nearestDefendedCell(ctx, e, team, friendlyCover) : null
+    heal = pickHealGoal(cell, auraCell, defendedCell)
+  }
+
+  const shouldDodge = sanctuary
+    ? lethal || pressedByHits
+    : shooters > 0 || underFire || pressedByHits
+  return holding || heal !== null || ((wounded || pressured) && (shouldDodge || sanctuary))
+}
+
 const system: System = {
   name: 'orders',
   update(ctx) {
@@ -326,6 +413,18 @@ const system: System = {
       // the king directly and ignore self-preservation; the lone king holds.
       const enemyKing = kings[enemyTeam]
       const endgame = enemyKing !== null && fieldCount[enemyTeam] === 0
+      // A player can insist on an order (Alt-click): self-preservation is
+      // suspended until `noPreserveUntil`, and a healing hold latched before the
+      // order was given is released so it cannot veto the order anyway. When the
+      // window lapses, restore normal behaviour and record it once so the order
+      // history tells the whole story. See `src/game/noPreserve.ts`.
+      const insists = orderInsists(order, ctx.turn)
+      if (insists) {
+        motion.holdUntilHp = 0
+      } else if (order.noPreserveUntil >= 0 && ctx.turn >= order.noPreserveUntil) {
+        noteOrder(order, ctx.tick, noPreserveEndedNote())
+        order.noPreserveUntil = -1
+      }
       if (
         ctx.autoPreserve &&
         !instaKill &&
@@ -333,6 +432,7 @@ const system: System = {
         !lastStandKing &&
         kind &&
         !(controller === 'ai' && isKing) &&
+        !insists &&
         (valuable || underFire || hpRatio < preserve || holding)
       ) {
         // Judge the escape against every enemy currently covering this piece, not
@@ -479,11 +579,13 @@ const system: System = {
         noteOrder(
           order,
           ctx.tick,
-          order.kind === 'none'
-            ? 'self-preservation: no longer needed — holding'
-            : order.kind === 'attack' && !order.reachable
-              ? 'self-preservation: no longer needed — holding (target unreachable)'
-              : 'self-preservation: no longer needed — resuming order',
+          insists
+            ? noPreserveSuppressedNote(order.noPreserveUntil)
+            : order.kind === 'none'
+              ? 'self-preservation: no longer needed — holding'
+              : order.kind === 'attack' && !order.reachable
+                ? 'self-preservation: no longer needed — holding (target unreachable)'
+                : 'self-preservation: no longer needed — resuming order',
         )
       }
 
@@ -631,11 +733,14 @@ const system: System = {
         }
       }
 
-      if (targetValid && hpRatio < preserveThreshold(kind ?? '')) {
+      if (!insists && targetValid && hpRatio < preserveThreshold(kind ?? '')) {
         // Low HP (auto-preserve off): seek nearby cover, keeping the shot if free.
         // Pawns cannot retreat, so they hold and fire instead. Only retreat when
         // something is actually covering the piece — with no threats, falling
         // through keeps it fighting instead of parked on the spot.
+        // The `!insists` guard is defensive: this section only runs for an order
+        // of kind `none`, which `clearOrder`/`promoteNext` already strip of the
+        // flag, but it keeps a future refactor from silently re-exposing it.
         const threats = coverageThreats(ctx, e, team, pieceThreatMemo, { proximityRadius: COVER_RADIUS })
         if (threats.length > 0) {
           const goal =

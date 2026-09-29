@@ -2,6 +2,7 @@ import { EventBus } from '../ecs/events'
 import type { EventRecord } from '../ecs/events'
 import { Pipeline } from '../ecs/pipeline'
 import { createPipeline } from '../ecs/systems'
+import { wouldSelfPreserve } from '../ecs/systems/orders'
 import { World } from '../ecs/world'
 import type { Entity, WorldSnapshot } from '../ecs/world'
 import type { Commands, SimContext, TeamController, TeamRuntime } from '../ecs/types'
@@ -56,6 +57,7 @@ import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { destReachable, findPath } from './pathfind'
 import { anchorFor, clearMotion, clearOrder, noteOrder, planStep } from './queue'
 import { instaKillOrderedNote } from './instaKill'
+import { NO_PRESERVE_TURNS, armNoPreserve, noPreserveOrderedNote } from './noPreserve'
 import {
   buildBoard,
   buildWorldSnapshot,
@@ -148,6 +150,8 @@ export interface PieceInfo {
     reachable: boolean
     /** Pending insta-kill (immediate chess kill) victim, set only while parked. */
     instaKill: PieceRef | null
+    /** First turn self-preservation may run again, or -1 when not insisting. */
+    noPreserveUntil: number
     regrouping: boolean
     parked: PieceRef | null
     queue: Array<{ kind: OrderStep['kind']; label: string; source: 'manual'; reachable: boolean }>
@@ -298,6 +302,20 @@ export interface TurnSummary {
   losses: number
 }
 
+/**
+ * A pending prompt asking whether the player wants to override the automatic
+ * self-preservation retreat for the pieces they just ordered. Set when an order
+ * would be countered; cleared on confirm, dismiss, or when the next turn starts.
+ */
+export interface NoPreservePrompt {
+  /** Pieces whose order self-preservation would override. */
+  entities: Entity[]
+  /** Human label for the affected pieces (names or a count). */
+  label: string
+  /** Board coordinates of those pieces, for a compact description. */
+  coords: string[]
+}
+
 export interface GameSnapshot {
   running: boolean
   paused: boolean
@@ -383,6 +401,8 @@ export interface GameSnapshot {
   stanceSummary: StanceSummary
   /** Focused selected piece (first in the selection), for the properties panel. */
   pieceInfo: PieceInfo | null
+  /** Pending "override self-preservation?" prompt, or null when none is open. */
+  noPreservePrompt: NoPreservePrompt | null
   terrainVersion: number
   /** Per-boundary metadata for the turn list, oldest first. */
   turns: TurnSummary[]
@@ -485,6 +505,13 @@ export class Game {
    * deterministic outcome, so the UI warns about it before discarding the future.
    */
   ordersTouched = false
+
+  /**
+   * Pieces whose freshly-issued order self-preservation would counter, waiting
+   * for the player to confirm the "no-preserve" override. UI-only; never part of
+   * a snapshot/replay (the confirmation itself is recorded as a command).
+   */
+  private noPreservePrompt: NoPreservePrompt | null = null
 
   /** The saved map this battle was loaded from, if any (used to re-run study). */
   currentMap: SavedMap | null = null
@@ -873,6 +900,9 @@ export class Game {
     if (this.turnActive || this.replaying || this.winner !== null) return
     if (this.megaActive) this.endMegaTurn()
     if (this.turnActive) return
+    // The turn decides the orders that were given; a pending override prompt is
+    // now too late to matter.
+    this.noPreservePrompt = null
     // Snapshot after the setup mutations: replay must start from the exact
     // turn-start state, including the orders/stances issued while paused (which
     // never create a history boundary) and the cleared cooldowns/movedThisTurn.
@@ -895,6 +925,7 @@ export class Game {
    */
   beginMegaTurn(): void {
     if (this.megaActive || this.turnActive || this.replaying || this.winner !== null) return
+    this.noPreservePrompt = null
     // A fresh turn number so a mega turn is a first-class beat in the recorder,
     // live log and turn counter, exactly like a normal turn.
     this.turn++
@@ -1897,6 +1928,7 @@ export class Game {
    * fires in range, so it is the way to disengage a previously attacking piece.
    */
   setPieceStance(mode: StanceMode): void {
+    this.noPreservePrompt = null
     this.liveEdit(() => {
       let n = 0
       this.forEachCommandable((e) => {
@@ -1988,15 +2020,25 @@ export class Game {
    * parked at the closest legal point) replaces it; otherwise the click appends a
    * queued step. A move on an un-queued attacker suspends/regroups instead of
    * queueing behind it.
+   *
+   * `force` (Alt-click) makes each ordered piece insist on this order: it
+   * suspends self-preservation for the next few turns and releases any healing
+   * hold, so a wounded piece presses the clicked square instead of retreating.
    */
-  orderAt(cell: Vec2, command?: 'move' | 'attack'): void {
+  orderAt(cell: Vec2, command?: 'move' | 'attack', force = false): void {
     if (!this.board.inBounds(cell.x, cell.y)) return
-    this.liveEdit(() => this.applyOrderAt(cell, command))
+    this.liveEdit(() => this.applyOrderAt(cell, command, force))
   }
 
-  private applyOrderAt(cell: Vec2, command?: 'move' | 'attack'): void {
+  private applyOrderAt(cell: Vec2, command?: 'move' | 'attack', force = false): void {
     const occ = buildOccupancy(this.world, this.board)
     const occupant = occ.get(this.board.cellIndex(cell.x, cell.y))
+    // Any new order replaces a pending override prompt; a fresh one is raised
+    // below when the click lands on a piece self-preservation would pull back.
+    this.noPreservePrompt = null
+    // The forecast judges line of sight, so give it the occupancy this click sees.
+    this.ctx.occupancy = occ
+    const wouldCounter: Entity[] = []
     let n = 0
     let skippedAttack = false
     for (const e of this.selected) {
@@ -2050,9 +2092,26 @@ export class Game {
       // Insta-kill: an active order against a piece already in capture range
       // kills it on the next tick.
       if (started && enemyOccupied && occupant !== undefined) this.maybeInstaKill(e, occupant, order, occ)
+      // Alt-clicked order: insist on it. Self-preservation is suspended for the
+      // next few turns and any healing hold is released so the piece presses the
+      // clicked square. Recorded on the order so it replays with the world state.
+      if (force) {
+        armNoPreserve(order, motion, this.turn, NO_PRESERVE_TURNS)
+        noteOrder(order, this.tick, noPreserveOrderedNote(NO_PRESERVE_TURNS))
+      } else if (this.autoPreserve && !this.replaying && wouldSelfPreserve(this.ctx, e)) {
+        // This order will be countered by a self-preservation retreat: collect
+        // the piece so the player can be asked whether to insist.
+        wouldCounter.push(e)
+      }
       const from = this.world.get(e, Cell)
       if (from) {
-        this.onCommand?.({ t: 'order', from: { x: from.x, y: from.y }, to: { x: cell.x, y: cell.y }, command })
+        this.onCommand?.({
+          t: 'order',
+          from: { x: from.x, y: from.y },
+          to: { x: cell.x, y: cell.y },
+          command,
+          force: force || undefined,
+        })
       }
       n++
     }
@@ -2061,11 +2120,71 @@ export class Game {
       return
     }
     if (n > 0) this.ordersTouched = true
+    // Raise the override prompt when at least one ordered piece would retreat.
+    if (wouldCounter.length > 0) this.setNoPreservePrompt(wouldCounter)
     if (occupant !== undefined && this.world.get(occupant, Team) !== undefined) {
       this.bus.emit('info', `orders: ${n} at ${coordName(cell.x, cell.y, this.board.height)}`)
     } else {
       this.bus.emit('info', `orders: ${n} move toward ${coordName(cell.x, cell.y, this.board.height)}`)
     }
+  }
+
+  /** Build and store the pending override prompt for the given pieces. */
+  private setNoPreservePrompt(entities: Entity[]): void {
+    const refs = entities
+      .map((e) => this.pieceRef(e))
+      .filter((ref): ref is PieceRef => ref !== null)
+    if (refs.length === 0) {
+      this.noPreservePrompt = null
+      return
+    }
+    this.noPreservePrompt = {
+      entities: [...entities],
+      label: refs.length <= 3 ? refs.map((r) => r.name).join(', ') : `${refs.length} pieces`,
+      coords: refs.map((r) => r.coord),
+    }
+  }
+
+  /**
+   * Arm the player's no-preserve insist on one piece's current order. Public so
+   * the replay path (`record.ts`) can reproduce a confirmed prompt.
+   */
+  insistOn(e: Entity): boolean {
+    const order = this.world.get(e, Order)
+    const motion = this.world.get(e, Motion)
+    if (!order || !motion || order.kind === 'none') return false
+    armNoPreserve(order, motion, this.turn, NO_PRESERVE_TURNS)
+    noteOrder(order, this.tick, noPreserveOrderedNote(NO_PRESERVE_TURNS))
+    return true
+  }
+
+  /**
+   * Accept the pending "override self-preservation?" prompt: arm the override on
+   * every affected piece and record it as a command, so a replay reproduces it.
+   */
+  confirmNoPreservePrompt(): void {
+    const prompt = this.noPreservePrompt
+    if (!prompt) return
+    this.liveEdit(() => {
+      let n = 0
+      for (const e of prompt.entities) {
+        if (!this.world.isAlive(e)) continue
+        if (!this.insistOn(e)) continue
+        const cell = this.world.get(e, Cell)
+        if (cell) this.onCommand?.({ t: 'no-preserve', from: { x: cell.x, y: cell.y } })
+        n++
+      }
+      this.noPreservePrompt = null
+      if (n > 0) {
+        this.ordersTouched = true
+        this.bus.emit('info', `no-preserve: ${n} piece(s) will press their order`)
+      }
+    })
+  }
+
+  /** Dismiss the pending prompt without arming the override. */
+  dismissNoPreservePrompt(): void {
+    this.noPreservePrompt = null
   }
 
   /**
@@ -2196,6 +2315,7 @@ export class Game {
   }
 
   clearOrders(): void {
+    this.noPreservePrompt = null
     this.liveEdit(() => {
       let n = 0
       this.forEachCommandable((e) => {
@@ -2294,6 +2414,7 @@ export class Game {
               reachable: order.reachable,
               resumeTarget: order.resumeTarget,
               resumeTurn: order.resumeTurn,
+              noPreserveUntil: order.noPreserveUntil,
               queue: order.queue,
               log: order.log,
             }
@@ -2800,6 +2921,13 @@ export class Game {
       selectionCount: this.selected.filter((e) => this.world.isAlive(e)).length,
       stanceSummary,
       pieceInfo,
+      noPreservePrompt: this.noPreservePrompt
+        ? {
+            entities: [...this.noPreservePrompt.entities],
+            label: this.noPreservePrompt.label,
+            coords: [...this.noPreservePrompt.coords],
+          }
+        : null,
       terrainVersion: this.terrainVersion,
       turns: this.getTurnSummaries(),
       historyIndex: this.cursor,
@@ -2933,6 +3061,7 @@ export class Game {
               ? gotoReachable(order.dest)
               : true,
         instaKill: order?.chessKill != null ? this.pieceRef(order.chessKill) : null,
+        noPreserveUntil: order?.noPreserveUntil ?? -1,
         regrouping: (order?.resumeTarget ?? null) !== null && (order?.resumeTurn ?? -1) >= 0,
         parked: order?.resumeTarget != null ? this.pieceRef(order.resumeTarget) : null,
         queue,
