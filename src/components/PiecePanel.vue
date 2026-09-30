@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { GameSnapshot } from '../game/game'
-import type { StanceMode } from '../game/types'
 import { INTENT_LABELS } from '../game/intent'
 import { INSTA_KILL_NAME } from '../game/instaKill'
 import { selfPreservationThresholds } from '../game/selfPreservation'
@@ -12,39 +11,44 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'set-stance', mode: StanceMode): void
   (e: 'clear-orders'): void
 }>()
 
-const stances: Array<{ id: StanceMode; label: string; title: string }> = [
-  { id: 'none', label: 'None', title: 'None: stand ground, fire only at enemies already in range' },
-  { id: 'move', label: 'Move', title: 'Move: travel, return fire only' },
-  { id: 'attack', label: 'Attack', title: 'Attack: auto-engage nearby enemies, flee when low' },
-]
-
 /** Human labels for the source of the current motion goal. */
 const info = computed(() => props.snapshot.pieceInfo)
-const summary = computed(() => props.snapshot.stanceSummary)
-const activeStance = computed<StanceMode | null>(() =>
-  info.value && !summary.value.mixed ? info.value.stance : null,
-)
 const intent = computed(() => info.value?.motion.intent ?? 'none')
 const intentLabel = computed(() => INTENT_LABELS[intent.value] ?? intent.value)
 /** An autonomous goal (not a player order) — shown as an "auto" pseudo-order. */
 const isAuto = computed(() => intent.value !== 'none' && intent.value !== 'order')
 const orderIdle = computed(() => !info.value || info.value.order.kind === 'none')
+
 /**
- * A committed piece will pursue its target: an AI controller always does, a
- * human piece in Attack stance does, and so does any piece with an active
- * attack order (a standing chase). A None/Move piece with only an auto-acquired
- * target fires at whatever is already in range and never follows it — a
- * stationary "pot shot".
+ * The piece's current task, derived from its order (and the AI's own motion):
+ * Move with its destination, Attack with its target, Idle, or Auto for an AI
+ * piece that acts on its own. Read-only: orders are given on the board.
+ */
+const status = computed<{ label: string; detail: string } | null>(() => {
+  const i = info.value
+  if (!i) return null
+  if (!i.commandable) {
+    return { label: 'Auto', detail: intent.value === 'none' ? '' : intentLabel.value }
+  }
+  if (i.order.kind === 'goto') return { label: 'Move', detail: i.order.destCoord ?? '' }
+  if (i.order.kind === 'attack') return { label: 'Attack', detail: i.order.target?.coord ?? '' }
+  return { label: 'Idle', detail: '' }
+})
+
+/**
+ * A committed piece will pursue its target: an AI controller always does, and a
+ * human piece does while it has an attack order (a standing chase). An idle
+ * piece with only an auto-acquired target fires at whatever is already in range
+ * and never follows it — a stationary "pot shot".
  */
 const committed = computed(() => {
   const i = info.value
   if (!i) return true
   if (!i.commandable) return true
-  return i.stance === 'attack' || i.order.kind === 'attack'
+  return i.order.kind === 'attack'
 })
 const targetHeading = computed(() =>
   info.value?.target ? (committed.value ? 'engaging' : 'pot shot') : 'target',
@@ -182,22 +186,10 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
         <span class="num">{{ !info.weapon.fired || info.weapon.ready ? 'ready' : info.weapon.left.toFixed(1) + 's' }}</span>
       </div>
 
-      <div class="sub">stance</div>
-      <div class="stance-row">
-        <button
-          v-for="s in stances"
-          :key="s.id"
-          class="ctl small"
-          :class="{ active: activeStance === s.id }"
-          :title="s.title"
-          :disabled="!info.commandable"
-          @click="emit('set-stance', s.id)"
-        >
-          {{ s.label }}
-        </button>
-      </div>
-      <p v-if="summary.mixed" class="line muted tiny">
-        mixed selection — {{ summary.none }} none · {{ summary.move }} move · {{ summary.attack }} attack
+      <div class="sub">status</div>
+      <p v-if="status" class="status-pill" :class="status.label.toLowerCase()">
+        <b>{{ status.label }}</b>
+        <span v-if="status.detail" class="muted"> · {{ status.detail }}</span>
       </p>
       <p v-if="!info.commandable" class="line muted tiny">not under your control</p>
 
@@ -451,9 +443,26 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
   color: var(--muted);
 }
 
-.stance-row {
-  display: flex;
-  gap: 4px;
+.status-pill {
+  display: inline-block;
+  margin: 0;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.status-pill.move {
+  border-color: #4ad991;
+}
+
+.status-pill.attack {
+  border-color: #ff3b30;
+}
+
+.status-pill.auto {
+  border-style: dashed;
 }
 
 .queue {

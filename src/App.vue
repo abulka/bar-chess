@@ -41,7 +41,7 @@ import { buildGamePrompt, buildSnapshotPrompt } from './game/studyPrompt'
 import { loadSettings, saveSettings } from './game/settings'
 import { deleteSlot, listSlots, loadSlot, saveSlot } from './game/storage'
 import type { SlotMeta } from './game/storage'
-import type { StanceMode, TeamId } from './game/types'
+import type { TeamId } from './game/types'
 
 const game = new Game(8)
 game.applySettings(loadSettings() ?? {})
@@ -248,6 +248,9 @@ const turnLabel = computed(() => {
   if (snapshot.value.winner) {
     return `GAME OVER — ${snapshot.value.teams[snapshot.value.winner].name} wins (u to undo)`
   }
+  if (snapshot.value.drawn) {
+    return 'GAME OVER — draw, only the kings remain (u to undo)'
+  }
   const turn = `${snapshot.value.megaTurn ? 'MEGA TURN' : 'TURN'} ${snapshot.value.turn}`
   const queued = snapshot.value.queuedTurns > 0 ? ` · +${snapshot.value.queuedTurns} queued` : ''
   const playQueued = snapshot.value.queuedPlay ? ' · play queued' : ''
@@ -267,7 +270,7 @@ const turnLabel = computed(() => {
 
 /** A "(☠️ side checkmate)" tag for the turn bar while a king is trapped. */
 const checkmateBadge = computed(() => {
-  if (snapshot.value.winner) return ''
+  if (snapshot.value.winner || snapshot.value.drawn) return ''
   const lost = snapshot.value.checkmate
   if (lost.red && lost.blue) return '(☠️ both kings checkmate)'
   if (lost.red) return `(☠️ ${snapshot.value.teams.red.name} checkmate)`
@@ -277,13 +280,13 @@ const checkmateBadge = computed(() => {
 
 const hover = computed(() => snapshot.value.hover)
 
-/** Describe a hovered piece's current activity: motion intent, else its order/stance. */
+/** Describe a hovered piece's current activity: motion intent, else its order. */
 function hoverIntent(info: HoverInfo | null): string {
   const piece = info?.piece
   if (!piece) return ''
   if (piece.intent !== 'none') return INTENT_LABELS[piece.intent]
   if (piece.orderKind !== 'none') return piece.orderKind === 'attack' ? 'ordered attack' : 'ordered move'
-  return piece.stance === 'none' ? 'idle' : `${piece.stance} stance`
+  return 'idle'
 }
 
 function refresh(): void {
@@ -430,6 +433,11 @@ function onCancelEditor(): void {
 
 function onToggleErase(): void {
   game.setEditorBrush(game.editorBrush?.kind === 'erase' ? null : { kind: 'erase' })
+  refresh()
+}
+
+function onClearPieces(): void {
+  game.clearPieces()
   refresh()
 }
 
@@ -586,11 +594,6 @@ function onStudyStop(): void {
 function onStudyCancel(): void {
   study.cancel()
   liveLog.begin()
-  refresh()
-}
-
-function onSetPieceStance(mode: StanceMode): void {
-  game.setPieceStance(mode)
   refresh()
 }
 
@@ -818,6 +821,14 @@ function onCancelContinue(): void {
   refresh()
 }
 
+/** Restore the orders recorded at the boundary in view, keeping the redo branch. */
+function onRestoreOrders(): void {
+  game.discardOrderChanges()
+  liveLog.rewind(game.turn)
+  recorder.rewindTo(game.turn)
+  refresh()
+}
+
 // Any timeline move or order edit invalidates a pending fork confirmation or
 // continue prompt (the stashed action no longer matches the boundary in view).
 watch(
@@ -973,6 +984,9 @@ async function onImportFile(event: Event): Promise<void> {
 function onKey(event: KeyboardEvent): void {
   const target = event.target
   if (target instanceof HTMLInputElement || target instanceof HTMLSelectElement) return
+  // Leave browser/OS shortcuts alone (⌘C copy, ⌘R reload, ⌘F find, …): the game
+  // hotkeys below are bare keys only, so a modifier means the browser's keystroke.
+  if (event.metaKey || event.ctrlKey || event.altKey) return
   if (game.editorMode) {
     if (event.key === 'Escape') {
       game.setEditorBrush(null)
@@ -1153,6 +1167,7 @@ onBeforeUnmount(() => {
             @new-map="onNewMap"
             @open-maps="openMaps"
             @toggle-erase="onToggleErase"
+            @clear-pieces="onClearPieces"
           />
           <template v-else>
             <div class="rail-tabs">
@@ -1234,6 +1249,7 @@ onBeforeUnmount(() => {
                 @fork-continue="onForkContinue"
                 @discard-order-changes="onDiscardOrderChanges"
                 @cancel-continue="onCancelContinue"
+                @restore-orders="onRestoreOrders"
               />
             </div>
           </template>
@@ -1321,11 +1337,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div v-show="rightTab === 'piece'" class="rail-tab-body">
-            <PiecePanel
-              :snapshot="snapshot"
-              @set-stance="onSetPieceStance"
-              @clear-orders="onClearOrders"
-            />
+            <PiecePanel :snapshot="snapshot" @clear-orders="onClearOrders" />
 
             <div class="rail-title">hover</div>
             <div class="hover-readout">
@@ -1364,16 +1376,16 @@ onBeforeUnmount(() => {
             </CollapsibleSection>
 
             <CollapsibleSection
-              title="stance"
+              title="orders"
               :open="!snapshot.stanceCollapsed"
               @toggle="onToggleStance"
             >
               <ul class="legend">
-                <li><LegendIcon kind="badge-m" /><b>M</b> Move — travel, return fire only</li>
-                <li><LegendIcon kind="badge-a" /><b>A</b> Attack — engage nearby, flee when low</li>
-                <li><LegendIcon kind="badge-none" /><b>no order</b> — stand &amp; fire in range</li>
+                <li><LegendIcon kind="badge-m" /><b>M</b> moving to an ordered destination</li>
+                <li><LegendIcon kind="badge-a" /><b>A</b> attacking — keeps engaging nearby enemies</li>
+                <li><LegendIcon kind="badge-none" /><b>no badge</b> — idle, fires at what is in range</li>
                 <li><LegendIcon kind="ring-red" /><b>ordered</b> attack target</li>
-                <li><LegendIcon kind="ring-amber" /><b>auto-acquired</b> / retaliation target</li>
+                <li><LegendIcon kind="ring-amber" /><b>auto-acquired</b> / retaliation target (AI)</li>
               </ul>
             </CollapsibleSection>
 

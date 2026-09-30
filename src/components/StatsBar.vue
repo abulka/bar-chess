@@ -22,5 +22,8 @@ defineProps<{ snapshot: GameSnapshot }>()
     <span v-if="snapshot.winner" class="stat winner" :style="{ color: snapshot.teams[snapshot.winner].color }">
       {{ snapshot.teams[snapshot.winner].name }} wins — press <b>u</b> to undo
     </span>
+    <span v-else-if="snapshot.drawn" class="stat winner">
+      draw — only the kings remain, press <b>u</b> to undo
+    </span>
   </div>
 </template>

@@ -7,6 +7,7 @@ import { Game } from '../../src/game/game'
 import { chebyshev, NEVER } from '../../src/game/geometry'
 import { kingRing } from '../../src/game/kingSafety'
 import { PIECES, WEAPONS } from '../../src/game/pieces'
+import { STALEMATE_DRAW_TURNS } from '../../src/game/constants'
 import { isKingOnlyDraw } from '../../src/game/study'
 import { clearComponents, flatBoard, orderAttack } from '../helpers'
 
@@ -406,5 +407,79 @@ describe('lone king under ranged check', () => {
 
     const after = game.world.require(king, Cell)
     expect(after.x !== 5 || after.y !== 1).toBe(true)
+  })
+})
+
+describe('live stalemate draw', () => {
+  beforeEach(() => clearComponents())
+
+  /** A board with nothing but one king per side. */
+  function kingsOnly(): Game {
+    const game = new Game(8, 'ai-vs-ai', 1)
+    stripArmy(game)
+    createPiece(shim(game), 'blue', PIECES.king, { x: 4, y: 7 })
+    createPiece(shim(game), 'red', PIECES.king, { x: 4, y: 0 })
+    game.teams.red.alive = { king: 1 }
+    game.teams.blue.alive = { king: 1 }
+    return game
+  }
+
+  function playTurn(game: Game): void {
+    game.queueTurn()
+    let guard = 0
+    while (game.turnActive && guard++ < 5000) game.runTicks(1)
+  }
+
+  it('draws once both sides have run the king-only grace turns', () => {
+    const game = kingsOnly()
+
+    for (let i = 0; i < STALEMATE_DRAW_TURNS; i++) {
+      expect(game.drawn).toBe(false)
+      playTurn(game)
+    }
+
+    expect(game.winner).toBeNull()
+    expect(game.drawn).toBe(true)
+    expect(game.snapshot().drawn).toBe(true)
+
+    // Frozen: a fresh turn request is ignored until the draw is undone.
+    playTurn(game)
+    expect(game.turnActive).toBe(false)
+  })
+
+  it('does not draw while a field piece survives', () => {
+    const game = new Game(8, 'ai-vs-ai', 1)
+    stripArmy(game)
+    createPiece(shim(game), 'blue', PIECES.king, { x: 4, y: 7 })
+    createPiece(shim(game), 'red', PIECES.king, { x: 4, y: 0 })
+    createPiece(shim(game), 'red', PIECES.rook, { x: 0, y: 0 })
+    game.teams.red.alive = { king: 1, rook: 1 }
+    game.teams.blue.alive = { king: 1 }
+
+    for (let i = 0; i < STALEMATE_DRAW_TURNS + 2; i++) playTurn(game)
+
+    expect(game.drawn).toBe(false)
+  })
+
+  it('undo reopens a drawn battle', () => {
+    const game = kingsOnly()
+    for (let i = 0; i < STALEMATE_DRAW_TURNS; i++) playTurn(game)
+    expect(game.drawn).toBe(true)
+
+    game.undoTurn()
+    expect(game.drawn).toBe(false)
+    expect(game.snapshot().drawn).toBe(false)
+  })
+
+  it('preserves the draw through export and import', () => {
+    const game = kingsOnly()
+    for (let i = 0; i < STALEMATE_DRAW_TURNS; i++) playTurn(game)
+    expect(game.drawn).toBe(true)
+
+    const saved = game.exportPosition()
+    clearComponents()
+    const restored = new Game(8, 'ai-vs-ai', 1)
+    restored.importPosition(saved)
+    expect(restored.drawn).toBe(true)
   })
 })

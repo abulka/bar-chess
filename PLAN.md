@@ -46,26 +46,19 @@ autonomous movement, firing, projectile flight and destruction play out.
 | 9 | Teams | red / blue (N-team friendly) |
 | 10 | Conventions | Strict TS, single runtime dependency (Vue), no comments unless asked |
 
-## Stance vs order
+## Orders
 
-Two distinct concepts:
+There is one concept: the **order**. An AI piece acts on its own; a human piece
+does what you tell it and otherwise stands and fires at anything already in
+range. There is no stance to set.
 
-**Stance** is a piece's persistent autonomous policy, shown as a badge and set
-from the **piece panel** (right rail), which applies to the whole selection:
-
-- **None** (default, no badge) — stand ground and fire only at enemies already in
-  range, so the opening board stays clean.
-- **Move** (`M`, green) — travel and return fire only; never starts an attack.
-- **Attack** (`A`, red) — seek and attack nearby targets. Prefers an enemy it can
-  actually shoot right now, then whoever is shooting it, then damaged ones.
-  Below 30% HP it keeps firing: it holds when already safe, otherwise steps to the
-  nearest square that still hits the target but escapes the fire geometry of the
-  target and its last attacker; it only runs when the target is out of range.
-  Does not chase across the board.
-
-Orders **never** change a piece's stance. Issuing an attack leaves the stance as
-it was; when the target dies the order simply completes. Set the stance to
-Attack to have a piece keep engaging on its own, or None to disengage.
+- **A move order** (`goto`) runs to its destination and completes there. While it
+  travels the piece keeps firing at whatever is in range.
+- **An attack order** chases and fights its target. When the target dies the
+  piece picks the nearest enemy within about eight squares and keeps fighting;
+  only when none is near does the order complete. It does not chase across the
+  whole board. An ordered attack is shown in red (chain, reticle and ring); an
+  AI's own chosen target is amber.
 
 **Order** is a one-shot (or queued) instruction:
 
@@ -90,14 +83,12 @@ Attack to have a piece keep engaging on its own, or None to disengage.
   reach is skipped. The queued remainder is
   drawn as a dim dashed chain with numbered waypoint markers (a queued attack
   shows a dim threat line). `c` or `Backspace` clears the active order **and** the
-  queue (and drops the current target); it does not change the stance.
+  queue (and drops the current target), standing the piece down.
 - **Pulling back mid-attack**: a move issued on a piece with an active attack
-  order **replaces** the attack — there is no parked target and no automatic
-  re-engagement. To pull back and then re-engage, Shift-queue a follow-up attack
-  behind the move, set the piece to **Attack** stance so it acquires a target on
-  its own, or re-issue the attack. (Autonomous **self-preservation** is separate:
-  a wounded attacker still breaks off to heal on its own and resumes its order —
-  see below.)
+  order **replaces** the attack — there is no parked target. To pull back and
+  then re-engage, Shift-queue a follow-up attack behind the move, or re-issue the
+  attack. (Autonomous **self-preservation** is separate: a wounded attacker still
+  breaks off to heal on its own and resumes its order — see below.)
 - The attack's route is always shown and **theoretical**: it assumes other pieces
   will move, so only walls and the target's own square are avoided and the route
   stays visible even when the piece is boxed in. It ends on a real square — a
@@ -114,9 +105,9 @@ Attack to have a piece keep engaging on its own, or None to disengage.
   line, falling back to a friendly-passable plan when the piece is boxed in, and
   always draws a connector from the end of that route to the objective so a
   partial route never dead-ends in mid-air.
-- An attack order never changes the piece's stance. When the target dies the
-  order clears and the piece reverts to its explicit stance (None = stand & fire
-  in range), so it only keeps engaging on its own if the player set Attack.
+- When an attack target dies the piece keeps fighting the nearest enemy within
+  about eight squares; only when none is near does the order complete and the
+  piece stand down.
 - Only pieces whose team is under human control can be commanded: your own team
   in Human-vs-AI, **both** teams in Human-vs-Human, nobody in AI-vs-AI. Enemy
   pieces remain selectable for inspection.
@@ -124,8 +115,8 @@ Attack to have a piece keep engaging on its own, or None to disengage.
   when on, `my orders` (`o`) / `enemy plans` (`e`) — never floating permanently.
 
 **Team colour is Orange vs Blue** so that **red is reserved for attack
-indicators** (tracking chain, targeted ring, Attack stance). Pieces have no
-default ring — a red ring means "this piece is under an attack order".
+indicators** (tracking chain, targeted ring, ordered-attack badge). Pieces have
+no default ring — a red ring means "this piece is under an attack order".
 
 **History retention.** Undo/redo keeps turn-boundary snapshots under an
 **entity budget** rather than a fixed beat count: the retained history holds at
@@ -136,10 +127,10 @@ normal 8×8 game that retains several hundred turns — far beyond the old
 100-beat cap — while a busy large-board game trims sooner. The turn list shows
 how many earlier beats were trimmed.
 
-Auto-targeting follows from this: attack order = sticky target; Attack = scored
-auto-acquire (a shootable enemy first, then one firing on the piece, then damaged
-and nearer ones); no stance = in-range only; Move = retaliation only (returns fire
-at its attacker while continuing to move).
+Auto-targeting follows from this: an attack order is a sticky target that moves
+on to the next nearby enemy when it dies; an AI piece scores its own targets (a
+shootable enemy first, then one firing on it, then damaged and nearer ones); a
+human piece with no order fires only at enemies already in range.
 
 ## Turn flow, pause and replay
 
@@ -165,7 +156,7 @@ The battle **starts paused**. Give orders, then take a turn:
   replaces the redo branch.
 - `y` — **Replay**: re-plays the beat that produced the state you are viewing —
   at any point in the history, not just the latest. It restores that beat's exact
-  start snapshot (so orders and stances issued while paused are included),
+  start snapshot (so orders issued while paused are included),
   re-applies any commands that were pending, re-runs the recorded ticks and
   returns to exactly the same end state, leaving the cursor and redo branch
   untouched. The selection is kept. Every kind of playback — live turns, free
@@ -186,7 +177,7 @@ The battle **starts paused**. Give orders, then take a turn:
 Every battle has an origin **seed** (`Game` ctor / `loadSize` / `reset`). With the
 seed and the ordered player inputs the whole game is deterministic, so a game can
 be recorded as a header + cell-based intents instead of a stack of position
-snapshots. `Game.onCommand` reports each player command (order, stance, clear,
+snapshots. `Game.onCommand` reports each player command (order, clear,
 deploy, mode); `Recorder` (`src/game/record.ts`) collects them per turn and
 `replayRecord` reproduces the game exactly.
 
@@ -263,7 +254,7 @@ spend the whole allowance and the king would never get to join in.
 
 `human-vs-ai` (default), `ai-vs-ai`, `human-vs-human`, chosen in the toolbar.
 The player's team (default blue) is shown in the `You: Blue · Red ai` badge.
-Human pieces start with **no stance** (no badge) and only act on your orders; AI
+Human pieces only act on your orders and otherwise stand and fire in range; AI
 teams rally/engage on their own, except the **AI king**, which guards its back
 rank instead of advancing. Under fire it steps out of an attacker's firing line
 (reacting to any shooter in line of sight, anyone who recently hit it, and nearby
@@ -294,9 +285,8 @@ pieces bail earlier (queen/king at 50% health, rook 45%, bishop/knight 40%). Paw
 never retreat: they can only step forward, so a "flee" would walk them into the
 enemy and drop the shot, so they hold and fire instead. The persisted
 **auto-preserve** toolbar checkbox disables this automatic retreat pass, but it
-does **not** mean "never retreat": an AI-controlled or **Attack**-stance piece
-still takes its own low-HP cover step while keeping its target (the stance logic
-below).
+does **not** mean "never retreat": an AI piece still takes its own low-HP cover
+step while keeping its target.
 
 **Sustained-fire awareness and retreat commitment.** Above the HP gate a piece
 still reconsiders: after `HIT_STREAK_TRIGGER = 2` hits taken since its last
@@ -375,10 +365,9 @@ uncovered adjacent square it can reach; otherwise it returns to its post. The
 exception is being in check: it escapes to the safest legal square, including
 one farther from the shooter (a bishop or rook can cover every sideways and
 forward escape, leaving only retreats), preferring a square that still closes
-on the threat and avoiding the square it just vacated. A
-player king last-stands only in Attack stance; None/Move keep the player in
-control. With both kings obeying check, a king-only ending settles into
-opposition and is a draw.
+on the threat and avoiding the square it just vacated. An AI lone king last-stands
+on its own; a player's lone king holds and fires unless you order it. With both
+kings obeying check, a king-only ending settles into opposition and is a draw.
 
 **Finishing safely.** Pursuit avoids the 3×3 around an enemy king, where the
 king's guard hits for 80% of max HP: `attackPlan`/`previewFiringCell` prefer a
@@ -458,9 +447,8 @@ Scope: the **selection** always shows full detail; `my orders` (`o`) and
 - **Path** — dashed gold route; **destination** a hollow diamond (orange and
   dashed if blocked), so it never reads as a target reticle.
 - **Target** — an ordered attack draws a red firing line + reticle and rings the
-  victim red; an auto-acquired or retaliation target (Attack stance / return
-  fire) draws the same indicator in **amber**, so you can see what a piece is
-  engaging on its own.
+  victim red; an AI's auto-acquired or retaliation target draws the same
+  indicator in **amber**, so you can see what a piece is engaging on its own.
 
 Army scope shows paths/goals/targets; reach, attack and range are reserved for
 selected pieces to keep the board readable.
@@ -473,9 +461,9 @@ order (goto on an empty square, attack on an enemy; replaces the plan —
 armed to queue more). Hover shows a per-piece order preview (faint ghosts) and
 the square name. The board is labelled with chess coordinates; the control hints
 and legends live in the right rail's **info** tab, and the **piece panel**
-(properties + stance buttons) in its **piece** tab (both always visible, even
-with the HUD hidden). A **Copy position JSON** button in the left rail's
-games tab captures the full situation.
+(properties + status pill + clear orders) in its **piece** tab (both always
+visible, even with the HUD hidden). A **Copy position JSON** button in the left
+rail's games tab captures the full situation.
 
 Keyboard summary: `m`/`a` arm move/attack, `space` turn / pause play,
 `shift+space` play, `p` play/pause, `s` step, `u`/`r` undo/redo, `y` replay,

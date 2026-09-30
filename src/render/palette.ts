@@ -20,7 +20,7 @@ export const RELOAD_FILL = '#15c2b6'
  * be mistaken for a route the player issued. */
 export const PRESERVE_COLOR = '#00e5ff'
 /** Muted grey for an incidental "pot shot": a stationary piece firing at whatever
- * is in range without committing to pursue it (None/Move stance). */
+ * is in range without committing to pursue it. */
 export const POTSHOT_COLOR = '#8b929c'
 /** Ordered-attack firing line and target ring. */
 export const TRACK_COLOR = '#ff2d20'
@@ -33,9 +33,9 @@ export const ROUTE_COLOR = '#ffd166'
 export const ROUTE_PARTIAL_COLOR = '#ffb347'
 /** Selected-piece ring. */
 export const SELECT_COLOR = '#ffd166'
-/** Stance badge colours. */
-export const STANCE_MOVE_COLOR = '#4ad991'
-export const STANCE_ATTACK_COLOR = '#ff3b30'
+/** Order badge colours: green M for a move order, red A for an attack order. */
+export const ORDER_MOVE_COLOR = '#4ad991'
+export const ORDER_ATTACK_COLOR = '#ff3b30'
 
 const HEALTH_FULL: [number, number, number] = [76, 217, 100]
 const HEALTH_EMPTY: [number, number, number] = [255, 59, 48]

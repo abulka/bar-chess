@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Game } from '../game/game'
-import type { StanceMode, Vec2 } from '../game/types'
+import type { PendingCommand, Vec2 } from '../game/types'
 import { Renderer } from '../render/renderer'
 
 const props = defineProps<{
   game: Game
   /** Pending BAR-style command (`m`/`a`), used for the cursor and click routing. */
-  pending: StanceMode
+  pending: PendingCommand
   /** Whether the map editor is active (cursor + pointer routing). */
   editor: boolean
 }>()

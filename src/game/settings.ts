@@ -44,7 +44,7 @@ export interface GameSettings {
   /** Left/right side-rail widths as a fraction of the viewport. */
   leftRailFraction: number
   rightRailFraction: number
-  /** Whether the right-rail "controls" hints and "stance" legend are collapsed. */
+  /** Whether the right-rail "controls" hints and "orders" legend are collapsed. */
   controlsCollapsed: boolean
   stanceCollapsed: boolean
   /** Whether the right-rail legend / firing-lines sections are collapsed. */

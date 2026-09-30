@@ -34,12 +34,11 @@ describe('position shorthand', () => {
     const { game: attack, attacker: queen } = duelSetup()
     attack.world.require(queen, Weapon).left = 0
     attack.selected = [queen]
-    attack.setPieceStance('attack')
     attack.orderAt({ x: 4, y: 5 })
     attack.runTicks(1)
 
     const text = attack.shorthand()
-    expect(text).toMatch(/bQ e4 @A atk=#\d+\(e3\)/)
+    expect(text).toMatch(/bQ e4 atk=#\d+\(e3\)/)
     expect(text).toMatch(/tgt=#\d+\(e3\)/)
     expect(text).toMatch(/note="attack ordered/)
     expect(text).toContain('# proj:')
@@ -48,9 +47,8 @@ describe('position shorthand', () => {
     const move = new Game(8)
     const rook = placePiece(move, 'rook', 'blue', { x: 0, y: 7 })
     move.selected = [rook]
-    move.setPieceStance('move')
     move.orderAt({ x: 0, y: 4 })
-    expect(move.shorthand()).toMatch(/bR a1 @M goto=a4 goal=a4 path=a4/)
+    expect(move.shorthand()).toMatch(/bR a1 goto=a4 goal=a4 path=a4/)
     expect(move.shorthand()).toMatch(/note="move ordered/)
   })
 

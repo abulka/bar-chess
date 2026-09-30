@@ -7,7 +7,6 @@ import {
   Position,
   Projectile,
   Render,
-  Stance,
   Target,
   Team,
   Weapon,
@@ -42,8 +41,8 @@ import {
   ROUTE_COLOR,
   ROUTE_PARTIAL_COLOR,
   SELECT_COLOR,
-  STANCE_ATTACK_COLOR,
-  STANCE_MOVE_COLOR,
+  ORDER_ATTACK_COLOR,
+  ORDER_MOVE_COLOR,
   TRACK_COLOR,
   UNREACHABLE_COLOR,
   healTint,
@@ -51,11 +50,6 @@ import {
 } from './palette'
 import { selfPreservationThresholds } from '../game/selfPreservation'
 import { bakeTerrain } from './terrain'
-
-const STANCE_COLORS: Record<string, string> = {
-  move: STANCE_MOVE_COLOR,
-  attack: STANCE_ATTACK_COLOR,
-}
 
 export class Renderer {
   camera = new Camera()
@@ -332,11 +326,11 @@ export class Renderer {
       ctx.setLineDash([])
     }
 
-    // Auto-acquired / retaliation target. A committed piece (AI, or Attack
-    // stance) will pursue it: an amber line + reticle reads as an engagement.
-    // A stationary None/Move piece is only taking pot shots at whatever passes
-    // in range and will not follow it, so it gets a muted grey dashed line with
-    // no arrow or reticle — no lock-on feel.
+    // Auto-acquired / retaliation target. A committed piece (the AI, or a human
+    // with an attack order) will pursue it: an amber line + reticle reads as an
+    // engagement. An idle piece is only taking pot shots at whatever passes in
+    // range and will not follow it, so it gets a muted grey dashed line with no
+    // arrow or reticle — no lock-on feel.
     if (autoTarget === null || !game.world.isAlive(autoTarget)) return
     const tc = game.world.get(autoTarget, Cell)
     if (!tc) return
@@ -382,15 +376,15 @@ export class Renderer {
   }
 
   /**
-   * Whether a piece is committed to pursuing its auto-acquired target: an AI
-   * controller always is, and a human piece is when set to Attack stance. A
-   * None/Move piece only fires in range and never follows the target.
+   * Whether a piece is committed to pursuing its auto-acquired target: the AI
+   * always is, and a human piece is while it has an attack order. Without one it
+   * only fires at whatever is already in range and never follows the target.
    */
   private committedTarget(game: Game, e: Entity): boolean {
     const team = game.world.get(e, Team)
     if (!team) return false
     if (game.teams[team].controller === 'ai') return true
-    return game.world.get(e, Stance)?.mode === 'attack'
+    return game.world.get(e, Order)?.kind === 'attack'
   }
 
   /**
@@ -710,8 +704,8 @@ export class Renderer {
     const sorted = entities.slice().sort((a, b) => game.world.require(a, Position).y - game.world.require(b, Position).y)
 
     // Target rings follow the same scope as orders/overlays: an explicit attack
-    // order marks its victim red, while a *committed* auto-acquired target (AI or
-    // Attack stance) marks it amber. A stationary pot shot rings nothing — it is
+    // order marks its victim red, while a *committed* auto-acquired target (the AI
+    // or a human with an attack order) marks it amber. A stationary pot shot rings nothing — it is
     // not pursuing the target, so it must not imply a lock-on.
     const targeted = new Set<Entity>()
     const autoTargeted = new Set<Entity>()
@@ -811,18 +805,18 @@ export class Renderer {
         }
       }
 
-      // Badge shows an active attack order (red A) or an explicit stance. A
-      // piece with no stance and no order shows nothing, keeping the opening
+      // Badge shows an explicit order: a green M while moving, a red A while
+      // attacking. A piece with no order shows nothing, keeping the opening
       // board clean.
-      const stance = game.world.get(e, Stance)?.mode ?? 'none'
       const order = game.world.get(e, Order)
+      const moving = order?.kind === 'goto'
       const attacking = order?.kind === 'attack'
-      if (attacking || stance !== 'none') {
-        const letter = attacking ? 'A' : stance[0].toUpperCase()
+      if (moving || attacking) {
+        const letter = moving ? 'M' : 'A'
         const bx = pos.x + size * 0.34
         const by = pos.y + size * 0.36
         const br = size * 0.17
-        ctx.fillStyle = attacking ? TRACK_COLOR : STANCE_COLORS[stance] ?? '#888'
+        ctx.fillStyle = moving ? ORDER_MOVE_COLOR : ORDER_ATTACK_COLOR
         ctx.beginPath()
         ctx.arc(bx, by, br, 0, Math.PI * 2)
         ctx.fill()

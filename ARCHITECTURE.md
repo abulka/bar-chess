@@ -98,7 +98,6 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `PieceType` | `{ kind }` | keys into `PIECES` |
 | `Render` | `{ glyph, tint, size }` | unicode glyph + team tint |
 | `Health` | `{ cur, max }` | |
-| `Stance` | `{ mode }` | persistent policy: `none` / `move` / `attack` (`none` stands ground and fires in range, with no badge) |
 | `Order` | `{ kind, dest, target, targetCell, chessKill, reachable, noPreserveUntil, queue, log }` | active step is one-shot `none` / `goto` / `attack`; `targetCell` is the target's last known cell (order-log notes); `chessKill` parks an **insta-kill** victim (immediate chess kill, human-only, active-order-only — see `src/game/instaKill.ts`), consumed on the next tick (kept on the order so it is part of the turn snapshot); `reachable` marks an attack target that is positionally attainable; `noPreserveUntil` is the player's Alt-click insist window; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence; `log` is a bounded list of recent order transitions (`noteOrder`) so the panel can explain why an order was issued, replaced, completed or abandoned |
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping. `underFireUntil` is a raw ~3 s latch (the AI keeps treating the recent attacker as a threat); **reporting** goes through `underFireAttacker` (`src/game/underFire.ts`), which also requires the attacker to still cover the square |
 | `Weapon` | `{ left }` | seconds until next shot |
@@ -160,7 +159,7 @@ requestAnimationFrame(frame):
   snapshot `start` (used by replay), the producing turn's `ticks`, commands
   pending at its start (`pending`), and `continuous` (true for a mega turn).
 - `state` and `start` are deliberately both kept. They are different points in
-  time: orders/stances issued while paused mutate the live world but create no
+  time: orders issued while paused mutate the live world but create no
   boundary, so `start` has them and `state` does not; and `beginTurn` clears
   every cooldown and sets `movedThisTurn`, overwriting values that only `state`
   retains. Neither can be derived from the other.
@@ -180,7 +179,7 @@ requestAnimationFrame(frame):
   produced `history[cursor]` and returns to exactly that boundary, leaving the
   cursor and redo branch untouched, so a turn can be re-watched after undoing.
   It restores the recorded `start` snapshot (which already includes the paused
-  orders/stances and the turn's rules) and re-applies the recorded `pending`
+  orders and the turn's rules) and re-applies the recorded `pending`
   commands so deferred work (e.g. a reinforcement deploy) is not lost. All
   playback — live turns, free play and replays — runs at the selected speed
   (`speed` scales the accumulator only, so the sim stays deterministic).
@@ -211,7 +210,11 @@ requestAnimationFrame(frame):
   leaves the game paused there so orders can still be changed; `space` then
   plays a fresh turn. The confirmation warns via `ordersTouched` when no order
   was changed since the boundary, since the deterministic sim would repeat the
-  same outcome.
+  same outcome. While backtracked with changed orders, the turns footer shows an
+  explicit **Restore orders** button; `discardOrderChanges()` reloads the
+  boundary's `Order` components in place and clears `ordersTouched` without
+  moving the cursor, so the redo branch survives. (Cancel/kill prompts never
+  revert — only the explicit restore/discard actions do.)
 - `history` is a bounded list of `HistoryEntry` under an entity budget:
   `HISTORY_MAX_BEATS = 1000`, `HISTORY_ENTITY_BUDGET = 20000` stored entity
   records and a `HISTORY_MIN_BEATS = 50` floor. `trimHistory()` drops the oldest
@@ -235,18 +238,23 @@ requestAnimationFrame(frame):
   `replay` also stays enabled: it rewinds to the fatal beat's recorded start
   (pre-death) and re-runs it, so the winning beat can be watched without undoing
   first. If both kings fall on the same tick it is a draw and play continues.
+  A **stalemate draw** is decided the same way: once no field piece remains on
+  either side (`isKingOnlyDraw`, `src/game/endgame.ts`) the no-check rule keeps
+  the two kings apart, so a lone king can never force a kill. The battle is
+  frozen as a draw (`drawn` on `Game`, captured in `TurnState`/`SavedPosition`
+  alongside `winner`) after `STALEMATE_DRAW_TURNS = 4` completed beats, giving any
+  in-flight attack time to land. A `draw` event is emitted, the toolbar disables
+  turn/pause/step, and `undo` restores `drawn = false`, reopening play.
 
 ### Team control & game modes
 
 `TeamRuntime.controller` is `'human'` or `'ai'`, set from `gameMode`
 (`human-vs-ai`, `ai-vs-ai`, `human-vs-human`) and `playerTeam`. The `orders`
-system turns stance/orders into movement for **every** piece; for AI teams it
-also auto-manages behaviour (rally/engage). Human pieces start with no stance
-(`none`, no badge) and act solely on player orders, while still
-firing autonomously via combat. A piece's stance is changed only from the piece
-panel (`setPieceStance`), never implicitly by an order. A piece is commandable
-only when its team's controller is `human`. The toolbar shows the mode drop-down
-and a `You: Blue · Red ai` badge.
+system turns orders into movement for **every** piece; AI teams also manage their
+own behaviour (rally/engage/hunt). Human pieces act solely on player orders and
+otherwise stand and fire in range, while still firing autonomously via combat.
+A piece is commandable only when its team's controller is `human`. The toolbar
+shows the mode drop-down and a `You: Blue · Red ai` badge.
 
 `SimContext` (`src/ecs/types.ts`) is the shared mutable context passed to every
 system: `world`, `bus`, `board`, `rng`, `tick`, `turn`, `dt`, `cmds`, `teams`,
@@ -328,20 +336,19 @@ cell/reservation during movement validation and path planning.
 
 - **spawn** — drains `cmds.deploy`, finds a free passable entry lane for the team
   and `createPiece`s there; updates `TeamRuntime.alive` / `deployed`.
-- **targeting** — rebuilds occupancy, then sets the engagement target from
-  stance + order: an `attack` order is sticky on its enemy; `none` picks the
-  nearest enemy already in firing geometry; `attack` auto-acquires within
-  `min(weaponVision, ATTACK_LEASH)` (so sliders fight locally instead of chasing
-  board-wide), strongly preferring an enemy it can actually shoot this instant,
-  then the `lastAttacker` firing on it, then damaged and nearer ones; `move` only
-  targets its `lastAttacker` while `underFire`. AI-controlled teams always behave
-  as `attack`.
-  When an attack order ends (target gone) the order clears; the stance is never
-  changed by orders, so the piece reverts to its explicit policy. The `orders`
-  leash guard also holds a piece that drifts beyond `ATTACK_LEASH` and is not in
-  firing geometry.
-- **orders** — turns stance/order into `Motion.goal` for every piece (human or
-  AI): an `attack` order pursues the target (or stops to fire when in geometry).
+- **targeting** — rebuilds occupancy, then sets the engagement target from the
+  order and controller. An `attack` order is sticky on its enemy; when that enemy
+  dies the order retargets to the nearest enemy within
+  `min(weaponVision, ATTACK_LEASH)` if one is near (a queued step takes priority),
+  otherwise it completes. With no attack order, an AI team auto-acquires within
+  that leash (so sliders fight locally instead of chasing board-wide), strongly
+  preferring an enemy it can actually shoot this instant, then the
+  `lastAttacker` firing on it, then damaged and nearer ones; a human piece picks
+  only the nearest enemy already in firing geometry. The `orders` leash guard
+  also holds a piece that drifts beyond `ATTACK_LEASH` and is not in firing
+  geometry.
+- **orders** — turns the order into `Motion.goal` for every piece: an `attack`
+  order pursues the target (or stops to fire when in geometry).
   In the **finishing phase** (enemy king-only) every attacker targets the enemy
   king and skips preservation; one that can survive a king guard hit
   (`hp > 0.8 × maxHp`) also drops the 3×3 avoidance to trap the king, while a
@@ -356,11 +363,12 @@ cell/reservation during movement validation and path planning.
   piece's current square, so a piece already standing on a closest square parks
   there instead of shuttling between two equidistant squares (the bishop g6↔h7
   case);
-  a `goto` order advances toward the objective (best effort); autonomous `attack`
-  pursues in a leash, and rallies only for AI teams; a low-HP piece retreats via
-  `preservation.ts` (escape the shooters that actually cover it, else head home
-  to the king's aura to heal — see the self-preservation note below). Anything other than
-  `attack` clears the goal. Pursuit picks a goal with the
+  a `goto` order advances toward the objective (best effort); an AI piece with no
+  target pursues its auto-acquired target in a leash and rallies toward the enemy
+  king when nothing is near, while a human piece holds; a low-HP piece retreats
+  via `preservation.ts` (escape the shooters that actually cover it, else head
+  home to the king's aura to heal — see the self-preservation note below). A
+  human piece with no order clears the goal. Pursuit picks a goal with the
   same chain as `Game.planAttack` (`previewFiringCell` → `closestEmptyCell` →
   target) so the executed route cannot diverge from the preview; a firing position
   beats piling onto the occupied target, and an impossible target still ends on
@@ -394,8 +402,8 @@ cell/reservation during movement validation and path planning.
   closing on the threat (so it still last-stands when both are available), and
   penalises the square it just vacated so it cannot shuffle `A→B→A`.
   When both sides are king-only it seeks the enemy king and settles at chess
-  **opposition** (distance 2), a draw. A player king last-stands only in Attack
-  stance; None/Move keep the current dodge/hold behaviour. All three policies run
+  **opposition** (distance 2), a draw. A human player's lone king holds and fires
+  unless ordered; the AI king last-stands. These policies run
   their move options through the no-check filter below. Nearby AI pieces within
   `KING_GUARD_RADIUS = 4` of a
   threatened king become **bodyguards**: they first try to `screenPlan` — step
@@ -489,10 +497,11 @@ cell/reservation during movement validation and path planning.
   carries a recency penalty, so near-equal cover squares no longer produce
   visible A→B→A dithering; a materially safer square still wins at once. Gated by
   `ctx.autoPreserve`, the persisted **auto-preserve** toolbar toggle; with it off
-  the same coverage-based retreat still runs for a low-HP Attack-stance piece
-  (there is no longer a single-target `fleeCell` path). A `none`/`move` piece
-  never pursues or capture-advances — its only self-directed move is this
-  necessary dodge, so it otherwise goes exactly where it is ordered and holds.
+  the same coverage-based retreat still runs for a low-HP AI piece
+  (there is no longer a single-target `fleeCell` path). A human piece with no
+  attack order never pursues or capture-advances — its only self-directed move is
+  this necessary dodge, so it otherwise goes exactly where it is ordered and
+  holds.
   Every goal records a `Motion.intent` (`order` / `preserve` /
   `defense` / `engage` / `rally`), so the renderer can colour a self-preservation
   retreat bright cyan and the properties panel can label each goal's source;
@@ -569,7 +578,7 @@ cell/reservation during movement validation and path planning.
   AI-vs-AI).
 - **combat** — ticks `Weapon.left`; when ready, fires at `Target.entity` if it is
   inside `fireCells`. Because targeting decides whether a target exists at all,
-  combat inherits the stance/order fire policy automatically.
+  combat inherits the order/controller fire policy automatically.
 - **projectile** — advances waypoints at `speed`; applies splash/direct damage on
   impact via `cmds.damage`; `line` shots are stopped by walls; jump/arc ignore
   blockers.
@@ -658,7 +667,7 @@ frame time, never stored in the world.
 Draw order: clear → baked terrain (`terrain.ts`, keyed by
 `boardId:WxH:terrainVersion:grid`) → camera transform → spawn zones → scoped
 overlays (move/attack cells, range arcs, paths, destinations, red tracking
-chains) → hover ghosts → pieces (shadow, glyph, health + reload bars, stance
+chains) → hover ghosts → pieces (shadow, glyph, health + reload bars, order
 badge, selection/target rings; a hit piece trembles) → projectiles
 (shape-specific: dot/shell/lance/tumbling bomb) → FX (red death blast, red
 capture pulse, pink hit burst) → hover cursor → border → chess coordinates.
@@ -713,7 +722,7 @@ buttons, **save**/**load** slots and **export** import sections) and **turns**
 the right rail between **piece**
 (`PiecePanel` + the hover readout) and **info**. The tab bodies use `v-show`
 so hidden tabs keep their state (slot input, scroll position). Within the
-right rail's **info** tab the **controls**, **stance**, **legend** and
+right rail's **info** tab the **controls**, **orders**, **legend** and
 **firing lines** sections are wrapped in `CollapsibleSection.vue` — a clickable
 rail-title header with a caret that hides its body and persists its state as
 `controlsCollapsed`/`stanceCollapsed`/`legendCollapsed`/
@@ -726,7 +735,7 @@ legend can never drift from what the canvas actually paints.
 The hover readout shows the hovered cell's coord and kind, and for an occupied
 cell the piece's glyph, name and side plus its **current intent** — its motion
 goal provenance (`self-preservation`, `engaging`, `rally`, …), falling back to
-its order or stance when idle. An enemy's intent/order/goal is redacted unless
+its order when idle. An enemy's intent/order/goal is redacted unless
 the `enemy plans` overlay is on (the readout shows "intent hidden"), so it cannot
 leak a hidden plan.
 
@@ -736,23 +745,23 @@ warnings selected selectedLines counts winner overlays hudVisible autoPreserve
 captureAdvance soundEnabled railsVisible controlsCollapsed stanceCollapsed
 legendCollapsed firingLinesCollapsed hover
 playerTeam turnActive queuedTurns canReplay canUndo canRedo ordersTouched replaying
-barProgress pendingCommand selectionCount stanceSummary pieceInfo
+barProgress pendingCommand selectionCount pieceInfo drawn
 terrainVersion editorMode editorBrush editorDirty canEdit mapName`.
 
 | Component | Responsibility |
 | --------- | -------------- |
 | `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay/fork, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, chess kills, promotion, finish pressure, reset, `New game`, `New from template…`, editor toggle |
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle; routes map-editor clicks/drags (stamp, continuous erase) and exposes `cellAtClient`/`overBoard` for palette drops |
-| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed — AI, Attack stance or an active attack order — `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. It tells the situation as history / now / pending: the **order / auto changes** list shows the piece's last few transitions with their tick (e.g. `immediate chess kill → e3`, `immediate chess kill lands → e3`, `target at e3 lost — attack abandoned`, `self-preservation: retreating → …`); a parked insta-kill, a latched `safe-hold until <hp> hp` and a "self-preservation overriding the attack order" banner show the pending state; the queue shows what runs next. Its health bar shows the current health as a percentage at the end of the bar and draws two notches — the critical line and the retreat line — with instant hover hints over the bar regions explaining what self-preservation does in each (healthy / hurt / critical, or a pawn note); there is no separate rules block, and the live retreat/resume activity shows in the order / auto changes list |
+| `PiecePanel.vue` | focused piece properties (health, reload, a read-only **status pill** — `Move · dest`, `Attack · target`, `Idle`, or `Auto` for an AI piece — target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed — an AI piece or an active attack order — `pot shot` when only firing in range), plus clear-orders. It tells the situation as history / now / pending: the **order / auto changes** list shows the piece's last few transitions with their tick (e.g. `immediate chess kill → e3`, `immediate chess kill lands → e3`, `target at e3 lost — order complete`, `self-preservation: retreating → …`); a parked insta-kill, a latched `safe-hold until <hp> hp` and a "self-preservation overriding the attack order" banner show the pending state; the queue shows what runs next. Its health bar shows the current health as a percentage at the end of the bar and draws two notches — the critical line and the retreat line — with instant hover hints over the bar regions explaining what self-preservation does in each (healthy / hurt / critical, or a pawn note); there is no separate rules block, and the live retreat/resume activity shows in the order / auto changes list |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane, drag drops the piece on a chosen cell (or arms an editor brush in editor mode) |
 | `TurnList.vue` | left-rail **turns** tab: newest-first history rows (jump on click, replay per row), inline Fork on the active row, two-step inline confirmation before discarding future turns (warns when `ordersTouched` is false that the same outcome would repeat), backtrack warning and trimmed-history hint in a sticky footer below the list (so rows never shift and the hint stays visible while the list scrolls), per-row piece/order/time info |
-| `EditorPanel.vue` | floating map-editor controls: map name, save, eraser, blank-board size, `Maps…`, cancel/done |
+| `EditorPanel.vue` | floating map-editor controls: map name, save, eraser, clear all, blank-board size, `Maps…`, cancel/done |
 | `MapsModal.vue` | saved-map browser: `MapThumbnail` previews with Play / Edit / Rename / Export / Delete, plus New map and Import JSON |
 | `MapThumbnail.vue` | square canvas rendering `drawMapPreview` for a `SavedMap` |
 | `StatsBar.vue` | turn/tick/fps/tps/pieces/shots/kills/entities/selected/winner |
 | `EventLog.vue` | Event stream (filter chips), Systems timings, Sound config panel, Inspector for the selection |
 | `CollapsibleSection.vue` | clickable rail-title header with a caret that hides its slot body; state owned/persisted by `App.vue` |
-| `LegendIcon.vue` | inline-SVG legend swatches (cells, route/objective, preserve, waypoints, bars, firing lines, stance badges, target rings) coloured from `src/render/palette.ts` |
+| `LegendIcon.vue` | inline-SVG legend swatches (cells, route/objective, preserve, waypoints, bars, firing lines, order badges, target rings) coloured from `src/render/palette.ts` |
 
 ### Overlay scope and legend
 
@@ -780,9 +789,9 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   line + reticle and rings the victim red; a positionally impossible target draws
   the movement route to its closest reachable point and then the same line dashed
   grey. An auto-acquired target is drawn two
-  ways: a **committed** piece (AI controller, or Attack stance) will pursue it, so
-  it gets the same line + reticle in **amber** and rings the victim; a stationary
-  **None/Move** piece only fires at whatever passes in range and will not follow
+  ways: a **committed** piece (the AI, or a human with an attack order) will
+  pursue it, so it gets the same line + reticle in **amber** and rings the victim;
+  an idle human piece only fires at whatever passes in range and will not follow
   it, so it gets a muted **grey dashed** line with no arrow, reticle or ring — a
   "pot shot", never mistaken for a lock-on. The line runs from the piece's
   **current square** unless it is genuinely moving to a firing position to pursue
@@ -790,8 +799,8 @@ orders` (`o`) and `enemy plans` (`e`) extend a summary to each army.
   ordered attack), in which case it is previewed from the end of the planned path;
   a self-preservation override (`intent === 'preserve'`) therefore never draws the
   line from a retreat square. The piece panel mirrors this: its target heading
-  reads `engaging` for a committed piece — AI, Attack stance, **or an active
-  attack order** — and `pot shot` otherwise, with an
+  reads `engaging` for a committed piece — an AI, **or an active attack order** —
+  and `pot shot` otherwise, with an
   "in range only — …" note that adds "holding position" when the piece has no
   goal. It also surfaces the pending state directly: a parked insta-kill line, a
   latched `safe-hold until <hp> hp`, a "self-preservation overriding the attack
@@ -861,14 +870,14 @@ Ordering is BAR-style and **context-sensitive** — there is no global order mod
   turn snapshot, so undo/redo and **replay** reproduce the kill and its red pulse
   exactly. Applies to an explicit attack or a move onto the enemy's square;
   checked only at **order-issue** time (a target that walks into range later is
-  fought normally), and only for explicitly ordered pieces (AI autonomous stance
-  is unaffected).
+  fought normally), and only for explicitly ordered pieces (the AI's autonomous
+  behaviour is unaffected).
 - The queued remainder is drawn by the renderer as a dim dashed chain with
   numbered waypoint markers (`queueMarkers`), and a queued attack shows a dim
   threat line to its target.
-- Pieces start with no stance and show no badge; only an explicit stance or an
-  active attack order draws one. Toolbar selects/checkboxes blur after use so the
-  global shortcuts always reach the window.
+- Pieces show no badge when idle; a green **M** marks a move order and a red **A**
+  an attack order. Toolbar selects/checkboxes blur after use so the global
+  shortcuts always reach the window.
 - Hovering computes a per-selected-piece order preview (`Game.setHover`, drawn as
   faint ghosts) and a cell readout; the on-canvas coordinate label gets a solid
   backing only when a piece occupies the hovered square, so it stays legible
@@ -941,7 +950,9 @@ placements.
   included) into `editorBackup`, pauses and clears transient state. Piece
   brushes/eraser are stamped through `placePiece`/`removePieceAt` (sandbox: no
   cap/supply check, allowed only while `canEdit`, i.e. no turn or replay is
-  running). Done pushes an undo boundary so `u` steps back over the session and
+  running); `clearPieces` wipes every piece but keeps the terrain, emitting one
+  `remove` intent per piece so a record still replays exactly. Done pushes an
+  undo boundary so `u` steps back over the session and
   re-runs study; Cancel restores `editorBackup` via `importPosition`, and
   `App.vue` rolls the `Recorder` back to its pre-session copy. The renderer draws
   a validity-tinted cursor and brush ghost (`src/render/editor.ts`). Only pieces
@@ -959,7 +970,7 @@ applies a validated patch. Stored under `bar-chess.settings`:
 `soundEnabled`, `bottomFraction` (the HUD splitter height),
 `leftRailFraction`/`rightRailFraction` (side-rail widths) and the info-tab section
 collapse flags `controlsCollapsed`/`stanceCollapsed`/`legendCollapsed`/
-`firingLinesCollapsed` (per-piece stance lives in the world, not
+`firingLinesCollapsed` (per-piece orders live in the world, not
 here). `loadSettings`
 drops malformed or out-of-range fields (unknown
 overlay keys, non-boolean flags, speeds outside `SPEEDS`, unknown modes,
@@ -975,7 +986,7 @@ The lossless JSON is ~16k tokens for the opening position — wasteful to paste
 into an LLM. `formatShorthand(game)` (`src/game/shorthand.ts`) emits a compact,
 line-oriented dump instead: a header (map/size/tick/turn/mode/you/winner), team
 totals, sparse non-floor terrain, an ASCII grid for boards up to 16×16, one line
-per piece with only non-default attributes (`hp`, `@M`/`@A` stance, `goto`/`atk`
+per piece with only non-default attributes (`hp`, `goto`/`atk`
 orders with `#id(cell)` references, `kill=#id(cell)` for a parked insta-kill,
 `q` queued steps, `tgt`, `goal`, `path`
 hops, `blk`, `moving`, `w` reload, …), selection ids and in-flight projectiles.
@@ -1009,8 +1020,9 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   damage variance and initial cooldown/reload jitter, so `(board + seed + ordered
   inputs)` fully determines a battle. The seed is exposed on `GameSnapshot.seed`
   and `SavedPosition.seed` (absent on pre-seed saves, defaulted on load).
-- **Game record.** `Game.onCommand` reports player commands (order, stance,
-  clear, deploy, place, remove, mode) normalized to board cells. `Recorder`
+- **Game record.** `Game.onCommand` reports player commands (order, clear,
+  deploy, place, remove, mode) normalized to board cells. Older records may still
+  contain retired `stance` intents, which replay harmlessly. `Recorder`
   (`src/game/record.ts`) groups them by the turn they precede; a `GameRecord` is
   a header (`boardId`, `size`, `mode`, `playerTeam`, `seed`, rule settings,
   `baseline`) plus turns and result. Since v2 the header embeds `baseline`, a
@@ -1040,8 +1052,9 @@ Opening 8×8 ≈ 80 tokens; a 16×16 mid-game ≈ 250.
   orders a few random pieces to make short moves or reachable attacks, using its
   own RNG so replay stays exact). When both sides are down to a lone king the
   standoff is unwinnable (the no-check rule keeps the kings apart), so it is
-  allowed `KING_ONLY_DRAW_TURNS = 4` turns for any committed attack to land and
-  then recorded as a draw rather than grinding out the turn cap. It samples a
+  allowed `STALEMATE_DRAW_TURNS = 4` turns for any committed attack to land and
+  then recorded as a draw rather than grinding out the turn cap (the same
+  constant the live game uses to freeze a standoff). It samples a
   per-turn **piece trace**
   (`src/game/trace.ts`) and collects the event stream. `Stop game` keeps the
   current (partial) recording and moves to the next seed; `Cancel all` discards
@@ -1077,9 +1090,9 @@ command?)` resolves the intent: an explicit `move` always gotos, an explicit
 `attack` requires an enemy occupant, and omitted is context-sensitive
 (enemy→attack, friendly→no-op, empty→goto). Re-issuing the same order appends a
 queued step (a duplicate of the active or last queued step is ignored), and only
-pieces under human control can be commanded. Orders never change stance; the
-piece stays whatever the **piece panel** set (red **A** = Attack stance badge).
-The attack navigation is re-derived from the current board on every re-plan
+pieces under human control can be commanded. A piece with no order stands and
+fires in range; an AI piece acts on its own. The attack navigation is re-derived
+from the current board on every re-plan
 (goal change, block, or cadence), live occupancy first: a real route when one
 exists, a best-effort partial that creeps toward the goal when it does not, and a
 theoretical route (walls and the target's square only) as the boxed-in fallback.
@@ -1087,9 +1100,10 @@ It ends on a genuine firing cell or the closest empty reachable cell. The firing
 line from there to the victim is judged against the current board: solid red when
 the shot is clear; solid red up to the blocker and dashed red beyond it when
 reachable but blocked; dashed grey when positionally out of reach. A lock reticle sits on the victim and
-the legend groups these under "firing lines". When the target dies the order
-clears (stance unchanged), and `planAttack` routes immediately (visible while
-paused) against a fresh occupancy map. Left/right clicks never change the
+the legend groups these under "firing lines". When the target dies the attack
+order retargets to the nearest enemy within the leash, or completes if none is
+near; `planAttack` routes immediately (visible while paused) against a fresh
+occupancy map. Left/right clicks never change the
 selection. `space` pressed while a turn/replay is running is buffered (up to 3) and runs
 after it rather than being dropped; while viewing an earlier turn `space`
 replays forward instead of forking (see **Forward playback** above), and `f`
@@ -1097,9 +1111,9 @@ discards the future turns (paused; `space` then plays). `u`/`r` undo/redo
 completed turns.
 
 Team colour is Orange vs Blue; **red marks an ordered attack**: the firing chain,
-the Attack stance badge, and the ring around a piece targeted by an explicit
+the attack-order badge, and the ring around a piece targeted by an explicit
 attack order. **Amber marks autonomous engagement**: the ring/line around an
-auto-acquired or retaliation target (Attack stance or return fire). Pieces no
+AI's auto-acquired or retaliation target. Pieces no
 longer draw a default ring. Target rings/chains
 are computed from **scoped** pieces only (selection + `my orders` / `enemy plans`),
 so they never float permanently. A damaged piece draws a thin
@@ -1305,7 +1319,7 @@ src/
       index.ts                 createPipeline()
       spawn.ts                 entry-lane deploy
       targeting.ts             occupancy rebuild + acquisition
-      orders.ts                Stance/Order -> Motion.goal
+      orders.ts                Order -> Motion.goal
       pathfinding.ts           budgeted geometry A*
       movement.ts              cell claim + interpolated motion
       combat.ts                weapon cooldown + fire

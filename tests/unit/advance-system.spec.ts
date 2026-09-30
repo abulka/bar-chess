@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Health, Motion, Order, PieceType, Position, Stance, Team } from '../../src/ecs/components'
+import { Cell, Health, Motion, Order, PieceType, Position, Team } from '../../src/ecs/components'
 import type { EventRecord } from '../../src/ecs/events'
 import type { SimContext } from '../../src/ecs/types'
 import { createPiece } from '../../src/game/factory'
@@ -18,7 +18,8 @@ describe('advance system — chess-style capture step', () => {
 
   /** Kill `victim` (remove it) and queue the killer-to-victim-cell intent. */
   function kill(ctx: SimContext, killer: number, victim: number): void {
-    ctx.world.require(killer, Stance).mode = 'attack'
+    // Capture advance only pulls an AI piece or an explicit attack order.
+    ctx.teams[ctx.world.require(killer, Team)].controller = 'ai'
     const vcell = { ...ctx.world.require(victim, Cell) }
     ctx.world.destroy(victim)
     ctx.cmds.advance.push({ killer, victim, cell: vcell })
@@ -154,7 +155,7 @@ describe('advance system — chess-style capture step', () => {
     ctx.captureAdvance = true
     const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 6, y: 3 }) // g5
     const pawn = createPiece(ctx, 'red', PIECES.pawn, { x: 5, y: 1 }) // f7
-    ctx.world.require(knight, Stance).mode = 'attack'
+    ctx.teams.blue.controller = 'ai'
     ctx.cmds.damage.push({ target: pawn, source: knight, amount: 999, kind: 'projectile', direct: true })
 
     damage.update(ctx)
@@ -168,14 +169,13 @@ describe('advance system — chess-style capture step', () => {
     expect(cellOf(ctx, knight)).toEqual({ x: 5, y: 1 })
   })
 
-  it('never capture-advances a passive (none/move) killer', () => {
+  it('never capture-advances a passive human killer with no attack order', () => {
     const ctx = context()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
     const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
-    // kill() defaults the killer to Attack; drop it back to a passive stance.
+    ctx.teams.blue.controller = 'human'
     const vcell = { ...ctx.world.require(victim, Cell) }
     ctx.world.destroy(victim)
-    ctx.world.require(queen, Stance).mode = 'none'
     ctx.cmds.advance.push({ killer: queen, victim, cell: vcell })
 
     advance.update(ctx)
@@ -217,7 +217,6 @@ describe('advance system — chess-style capture step', () => {
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
     const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 })
     const vcell = { ...ctx.world.require(victim, Cell) }
-    ctx.world.require(queen, Stance).mode = 'attack'
     ctx.world.destroy(victim)
     ctx.cmds.advance.push({ killer: queen, victim, cell: vcell, chess: true })
     const events: EventRecord[] = []

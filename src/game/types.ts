@@ -5,7 +5,8 @@ export interface Vec2 {
   y: number
 }
 
-export type StanceMode = 'none' | 'move' | 'attack'
+/** The BAR-style click prefix armed by `m`/`a` (see `Game.setPendingCommand`). */
+export type PendingCommand = 'none' | 'move' | 'attack'
 
 export type OrderKind = 'none' | 'goto' | 'attack'
 

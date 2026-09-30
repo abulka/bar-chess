@@ -59,6 +59,19 @@ test('saves a map, shows a preview, and starts a game from it', async ({ page })
   await expect.poll(() => page.evaluate(() => (window as any).game.board.data.name)).toBe('e2e map')
 })
 
+test('Clear all empties the board and Cancel restores it', async ({ page }) => {
+  await page.getByRole('button', { name: 'Editor', exact: true }).click()
+  await expect(page.locator('.editor-panel')).toBeVisible()
+  const pieces = () => page.evaluate(() => (window as any).game.toDebugJson().pieces.length)
+  expect(await pieces()).toBeGreaterThan(0)
+
+  await page.getByRole('button', { name: 'Clear all', exact: true }).click()
+  await expect.poll(pieces).toBe(0)
+
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect.poll(pieces).toBeGreaterThan(0)
+})
+
 test('undo steps back over an editor session', async ({ page }) => {
   await page.getByRole('button', { name: 'Editor', exact: true }).click()
   await page.locator('aside.roster.left .unit-card').filter({ hasText: 'Queen' }).click()

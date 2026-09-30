@@ -30,6 +30,8 @@ export interface SerializedTurnState {
   turn: number
   teams: Record<TeamId, TeamRuntime>
   winner: TeamId | null
+  /** Optional for older saves; treated as false when absent. */
+  drawn?: boolean
   settings: SimSettings
 }
 
@@ -68,6 +70,8 @@ export interface SavedPosition {
   tick: number
   turn: number
   winner: TeamId | null
+  /** True when the battle ended as a stalemate draw; absent on older saves. */
+  drawn?: boolean
   teams: Record<TeamId, TeamRuntime>
   gameMode: GameMode
   playerTeam: TeamId
@@ -204,6 +208,7 @@ export function serializePosition(game: {
   tick: number
   turn: number
   winner: TeamId | null
+  drawn: boolean
   teams: Record<TeamId, TeamRuntime>
   gameMode: GameMode
   playerTeam: TeamId
@@ -220,6 +225,7 @@ export function serializePosition(game: {
     tick: game.tick,
     turn: game.turn,
     winner: game.winner,
+    drawn: game.drawn,
     teams: structuredClone(game.teams),
     gameMode: game.gameMode,
     playerTeam: game.playerTeam,

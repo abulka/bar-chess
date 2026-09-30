@@ -7,7 +7,7 @@ import type { GameMode } from './game'
 import { validatePosition } from './position'
 import type { SavedPosition } from './position'
 import type { SimSettings } from './settings'
-import type { StanceMode, TeamId, Vec2 } from './types'
+import type { TeamId, Vec2 } from './types'
 
 /** Bump when the record shape changes incompatibly. */
 const RECORD_VERSION = 3
@@ -20,7 +20,6 @@ const RECORD_VERSION = 3
 export type GameCommandIntent =
   | { t: 'order'; from: Vec2; to: Vec2; command?: 'move' | 'attack'; force?: boolean; queue?: boolean }
   | { t: 'no-preserve'; from: Vec2 }
-  | { t: 'stance'; from: Vec2; mode: StanceMode }
   | { t: 'clear'; from: Vec2 }
   | { t: 'deploy'; team: TeamId; key: string }
   | { t: 'place'; team: TeamId; key: string; to: Vec2 }
@@ -194,8 +193,8 @@ export class Recorder {
       turns: result.turns ?? this.game.turn,
       ticks: result.ticks ?? this.game.tick,
       timedOut: result.timedOut ?? false,
-      partial: result.partial ?? this.game.winner === null,
-      drawn: result.drawn ?? false,
+      partial: result.partial ?? (this.game.winner === null && !this.game.drawn),
+      drawn: result.drawn ?? this.game.drawn,
     }
   }
 
@@ -344,13 +343,6 @@ function applyIntents(game: Game, intents: GameCommandIntent[]): void {
       case 'no-preserve': {
         const e = at(intent.from)
         if (e !== null) game.insistOn(e)
-        break
-      }
-      case 'stance': {
-        const e = at(intent.from)
-        if (e === null) break
-        game.selected = [e]
-        game.setPieceStance(intent.mode)
         break
       }
       case 'clear': {

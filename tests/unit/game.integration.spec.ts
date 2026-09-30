@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Health, Motion, Order, Stance, Target, Team, Weapon } from '../../src/ecs/components'
+import { Cell, Health, Motion, Order, Target, Team, Weapon } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { coordName } from '../../src/game/coords'
 import { createPiece } from '../../src/game/factory'
@@ -43,7 +43,7 @@ describe('Game integration', () => {
     const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
     const knight = createPiece(shim, 'blue', PIECES.knight, { x: 6, y: 3 }) // g5
     const pawn = createPiece(shim, 'red', PIECES.pawn, { x: 5, y: 1 }) // f7
-    game.world.require(knight, Stance).mode = 'attack'
+    game.teams.blue.controller = 'ai'
     game.cmds.damage.push({ target: pawn, source: knight, amount: 999, kind: 'projectile', direct: true })
     game.setCaptureAdvance(true)
 
@@ -392,31 +392,6 @@ describe('Game integration', () => {
     expect(game.snapshot().pieceInfo?.entity).toBe(veteran)
   })
 
-  it('an attack order does not change the piece stance', () => {
-    const { game, attacker } = duelSetup()
-    game.selected = [attacker]
-    expect(game.world.require(attacker, Stance).mode).toBe('none')
-
-    game.orderAt({ x: 4, y: 5 }, 'attack')
-    expect(game.world.require(attacker, Order).kind).toBe('attack')
-    expect(game.world.require(attacker, Stance).mode).toBe('none')
-  })
-
-  it('setPieceStance applies to the selection, including none', () => {
-    const game = new Game(8)
-    const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
-    const knight = placePiece(game, 'knight', 'blue', { x: 7, y: 7 })
-    game.selected = [rook, knight]
-
-    game.setPieceStance('attack')
-    expect(game.world.require(rook, Stance).mode).toBe('attack')
-    expect(game.world.require(knight, Stance).mode).toBe('attack')
-
-    game.setPieceStance('none')
-    expect(game.world.require(rook, Stance).mode).toBe('none')
-    expect(game.world.require(knight, Stance).mode).toBe('none')
-  })
-
   it('right-clicking a friendly square is a no-op', () => {
     const game = new Game(8)
     const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
@@ -443,7 +418,6 @@ describe('Game integration', () => {
     const game = new Game(8)
     const queen = placePiece(game, 'queen', 'blue', { x: 4, y: 4 })
     game.selected = [queen]
-    game.setPieceStance('attack')
     game.orderAt({ x: 5, y: 4 }, 'move')
     game.orderAt({ x: 3, y: 4 }, 'move', { queue: true })
 
@@ -451,7 +425,6 @@ describe('Game integration', () => {
     expect(info).not.toBeNull()
     expect(info!.entity).toBe(queen)
     expect(info!.kind).toBe('queen')
-    expect(info!.stance).toBe('attack')
     expect(info!.commandable).toBe(true)
     expect(info!.order.kind).toBe('goto')
     expect(info!.order.destCoord).toBe('f4')
@@ -972,7 +945,7 @@ describe('Game integration — king guard lethality', () => {
     // retreat, and unarmed so it cannot fight back.
     game.world.remove(queen, Motion)
     game.world.remove(queen, Weapon)
-    game.world.require(king, Stance).mode = 'attack'
+    game.teams.blue.controller = 'ai'
     orderAttack(game, king, queen, true)
     game.world.require(king, Weapon).left = 0
 

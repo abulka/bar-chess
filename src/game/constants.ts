@@ -26,7 +26,7 @@ export const ATTACK_LEASH = 8
  * Saves stamped with a different version load position-only (their turn history
  * is cleared) so a replay can never mix old recorded states with new rules.
  */
-export const SIM_VERSION = 3
+export const SIM_VERSION = 4
 
 /** Seconds a capture-advance step glides for (slower than a normal step). */
 export const CAPTURE_ADVANCE_TRAVEL = 0.75
@@ -83,6 +83,15 @@ export const FINISH_PRESSURE_GRACE_TICKS = 240
 export const FINISH_PRESSURE_PERIOD_TICKS = 180
 export const FINISH_PRESSURE_STEP = 0.25
 export const FINISH_PRESSURE_MAX_BONUS = 1
+
+/**
+ * Turns a both-kings-only standoff is allowed to run before the battle is
+ * declared a draw. A lone king can no longer force a win (the no-check rule
+ * keeps the two kings apart), so the fight is decided; this lets any
+ * already-committed attack land before ending it. Shared by the live game and
+ * the study batch's draw classification.
+ */
+export const STALEMATE_DRAW_TURNS = 4
 
 /** HUD bottom-panel height as a fraction of the viewport, persisted as a pref. */
 export const BOTTOM_FRACTION_DEFAULT = 0.28

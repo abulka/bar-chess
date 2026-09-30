@@ -150,6 +150,37 @@ test('a plain second right-click replaces the active order', async ({ page }) =>
   expect(state.queue).toBe(0)
 })
 
+test('browser copy (modifier+c) does not clear orders, bare c does', async ({ page }) => {
+  const attacker = await page.evaluate(() => {
+    const g = (window as any).game
+    const rook = g.toDebugJson().pieces.find((p: any) => p.team === 'blue' && p.kind === 'rook')
+    g.selected = [rook.e]
+    return rook.e as number
+  })
+
+  const canvas = page.locator('canvas.board-canvas')
+  const box = (await canvas.boundingBox())!
+  const point = await cellScreenPoint(page, { x: 0, y: 5 })
+  await page.mouse.click(box.x + point.x, box.y + point.y, { button: 'right' })
+
+  const orderKind = () =>
+    page.evaluate((e) => {
+      const g = (window as any).game
+      const store = g.world.allStores.find((s: any) => s.name === 'Order')
+      return store.map.get(e).kind
+    }, attacker)
+
+  expect(await orderKind()).toBe('goto')
+
+  // ⌘/Ctrl+C is the browser's copy shortcut and must not reach the game.
+  await page.keyboard.press('ControlOrMeta+c')
+  expect(await orderKind()).toBe('goto')
+
+  // A bare `c` still clears the selected pieces' orders.
+  await page.keyboard.press('c')
+  expect(await orderKind()).toBe('none')
+})
+
 test('right-click on an enemy issues an attack order (context-sensitive)', async ({ page }) => {
   const attacker = await page.evaluate(() => {
     const g = (window as any).game
@@ -220,20 +251,20 @@ test('the rail splitter resizes a side rail and persists', async ({ page }) => {
 })
 
 test('the rail info sections collapse and persist', async ({ page }) => {
-  // The right rail's "info" tab holds the controls/stance/legend/firing-lines sections.
+  // The right rail's "info" tab holds the controls/orders/legend/firing-lines sections.
   await page.getByRole('button', { name: 'info', exact: true }).click()
   const hints = page.locator('.rail.right .hints')
-  const stanceLegend = page.locator('.rail.right .legend').first()
+  const orderLegend = page.locator('.rail.right .legend').first()
   await expect(hints).toBeVisible()
-  await expect(stanceLegend).toBeVisible()
+  await expect(orderLegend).toBeVisible()
 
   await page.getByRole('button', { name: 'controls', exact: true }).click()
-  await page.getByRole('button', { name: 'stance', exact: true }).click()
+  await page.getByRole('button', { name: 'orders', exact: true }).click()
   await page.getByRole('button', { name: 'legend', exact: true }).click()
   await page.getByRole('button', { name: 'firing lines', exact: true }).click()
 
   await expect(hints).toBeHidden()
-  await expect(stanceLegend).toBeHidden()
+  await expect(orderLegend).toBeHidden()
   await expect(page.locator('.rail.right .legend').nth(1)).toBeHidden()
   await expect(page.locator('.rail.right .legend').nth(2)).toBeHidden()
 

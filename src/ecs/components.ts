@@ -1,4 +1,4 @@
-import type { OrderKind, ProjectileShape, StanceMode, TeamId, Trajectory, Vec2 } from '../game/types'
+import type { OrderKind, ProjectileShape, TeamId, Trajectory, Vec2 } from '../game/types'
 import type { Entity, World } from './world'
 import { defineComponent } from './world'
 
@@ -27,11 +27,6 @@ export interface HealthData {
   max: number
 }
 
-/** Persistent autonomous behaviour policy. */
-export interface StanceData {
-  mode: StanceMode
-}
-
 /** One queued waypoint, planned from the previous step's endpoint. */
 export type OrderStep =
   | { kind: 'goto'; dest: Vec2; path: Vec2[] }
@@ -43,7 +38,7 @@ export interface OrderLogEntry {
   text: string
 }
 
-/** A one-shot instruction that overrides stance until fulfilled. */
+/** A player instruction (or an AI's autonomous task) until fulfilled. */
 export interface OrderData {
   kind: OrderKind
   dest: Vec2 | null
@@ -164,7 +159,6 @@ export const Team = defineComponent<TeamId>('Team')
 export const PieceType = defineComponent<PieceTypeData>('PieceType')
 export const Render = defineComponent<RenderData>('Render')
 export const Health = defineComponent<HealthData>('Health')
-export const Stance = defineComponent<StanceData>('Stance')
 export const Order = defineComponent<OrderData>('Order')
 export const Target = defineComponent<TargetData>('Target')
 export const Weapon = defineComponent<WeaponData>('Weapon')
@@ -187,7 +181,6 @@ export const ALL_STORES = [
   PieceType,
   Render,
   Health,
-  Stance,
   Order,
   Target,
   Weapon,

@@ -6,7 +6,7 @@ import { dist2, healthRatio } from '../../game/math'
 import { buildOccupancy, makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS, weaponVision } from '../../game/pieces'
 import { noteOrder, clearOrder } from '../../game/queue'
-import { Cell, Health, Order, PieceType, Stance, Target, Team, hasLiveCell } from '../components'
+import { Cell, Health, Order, PieceType, Target, Team, hasLiveCell } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
@@ -98,15 +98,16 @@ const system: System = {
     ctx.occupancy.clear()
     for (const [key, value] of built) ctx.occupancy.set(key, value)
 
-    for (const e of ctx.world.query(Target, Cell, Team, PieceType, Stance, Order)) {
+    for (const e of ctx.world.query(Target, Cell, Team, PieceType, Order)) {
       const target = ctx.world.require(e, Target)
       const order = ctx.world.require(e, Order)
-      const stance = ctx.world.require(e, Stance)
       const team = ctx.world.require(e, Team)
       const kind = ctx.world.require(e, PieceType).kind
       const def = PIECES[kind]
       if (!def) continue
-      const mode = ctx.teams[team].controller === 'ai' ? 'attack' : stance.mode
+      // The AI hunts on its own; a human piece only shoots at what is already in
+      // range unless it has an explicit attack order.
+      const aggressive = ctx.teams[team].controller === 'ai'
 
       // A specific attack order is sticky: keep the exact enemy until it dies.
       if (order.kind === 'attack') {
@@ -123,25 +124,39 @@ const system: System = {
           }
           continue
         }
-        if (t !== null) {
-          const at = order.targetCell
-            ? ` at ${coordName(order.targetCell.x, order.targetCell.y, ctx.board.height)}`
-            : ''
-          noteOrder(order, ctx.tick, `target${at} lost — attack abandoned`)
+        if (order.queue.length > 0) {
+          // A queued step takes over: leave the order for the orders system to
+          // promote, rather than clearing it here.
+          target.entity = null
+          continue
         }
+        // Keep fighting: pick the next enemy within the attack leash.
+        const next = acquireAttack(ctx, e, team, def.weapon)
+        if (next !== null) {
+          const nextCell = ctx.world.get(next, Cell) ?? null
+          order.target = next
+          order.targetCell = nextCell ? { x: nextCell.x, y: nextCell.y } : null
+          order.reachable = nextCell
+            ? firingPositionExists(
+                ctx.board,
+                ctx.world.require(e, Cell),
+                nextCell,
+                def.move,
+                WEAPONS[def.weapon].geometry,
+                team,
+              )
+            : false
+          target.entity = next
+          target.retargetAt = ctx.tick + RETARGET_TICKS
+          const at = nextCell ? coordName(nextCell.x, nextCell.y, ctx.board.height) : '?'
+          noteOrder(order, ctx.tick, `target lost — engaging ${at}`)
+          continue
+        }
+        const last = order.targetCell
+        const at = last ? ` at ${coordName(last.x, last.y, ctx.board.height)}` : ''
+        noteOrder(order, ctx.tick, `target${at} lost — order complete`)
         clearOrder(order)
         target.entity = null
-        // The order is done, but the stance is kept (the player can change it).
-        continue
-      }
-
-      // Move never initiates an attack: only return fire while under fire.
-      if (mode === 'move') {
-        const attacker = target.lastAttacker
-        target.entity =
-          ctx.tick < target.underFireUntil && attacker !== null && ctx.world.isAlive(attacker)
-            ? attacker
-            : null
         continue
       }
 
@@ -152,7 +167,7 @@ const system: System = {
           target.retargetAt = Math.min(target.retargetAt, ctx.tick + 3)
         }
         if (ctx.tick >= target.retargetAt) {
-          const found = acquire(ctx, e, team, def.weapon, mode === 'attack')
+          const found = acquire(ctx, e, team, def.weapon, aggressive)
           target.entity = found
           target.retargetAt = ctx.tick + RETARGET_TICKS
           if (found !== null) {
@@ -161,7 +176,7 @@ const system: System = {
         }
       } else if (ctx.tick >= target.retargetAt) {
         target.retargetAt = ctx.tick + RETARGET_TICKS
-        const found = acquire(ctx, e, team, def.weapon, mode === 'attack')
+        const found = acquire(ctx, e, team, def.weapon, aggressive)
         // Re-evaluate every retarget window: a target this piece can no longer
         // acquire (moved out of reach / line) is dropped, not left stale.
         if (found !== target.entity) {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Health, Motion, Order, Projectile, Stance, Target, Weapon } from '../../src/ecs/components'
+import { Cell, Health, Motion, Order, Projectile, Target, Weapon } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
@@ -41,7 +41,7 @@ describe('traditional chess kills', () => {
     game.runTicks(1)
     const notes = game.world.require(queen, Order).log.map((n) => n.text)
     expect(notes).toContain('immediate chess kill lands → e3')
-    expect(notes).toContain('target at e3 lost — attack abandoned')
+    expect(notes).toContain('target at e3 lost — order complete')
     expect(notes.every((t) => !/#\d+/.test(t))).toBe(true)
   })
 
@@ -147,13 +147,12 @@ describe('traditional chess kills', () => {
     expect(game.world.require(pawn, Order).chessKill).toBeNull()
   })
 
-  it('always pulls the killer onto the victim, even from a move order in Move stance', () => {
+  it('always pulls the killer onto the victim, even from a move order', () => {
     const { game, shim } = emptyGame()
     const queen = createPiece(shim, 'blue', PIECES.queen, { x: 4, y: 4 })
     createPiece(shim, 'red', PIECES.pawn, { x: 4, y: 5 })
     game.chessKills = true
     game.setCaptureAdvance(true)
-    game.world.require(queen, Stance).mode = 'move'
     game.selected = [queen]
 
     // A goto order (not an attack), which the ordinary advance would refuse.

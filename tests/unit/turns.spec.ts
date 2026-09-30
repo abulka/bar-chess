@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Health, PieceType, Team } from '../../src/ecs/components'
+import { Cell, Health, Order, PieceType, Team } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
 import { clearComponents } from '../helpers'
 
@@ -14,6 +14,22 @@ function runUntil(game: Game, pred: () => boolean, max = 8000): void {
   let guard = 0
   while (!pred() && guard++ < max) game.runTicks(1)
   expect(guard).toBeLessThan(max)
+}
+
+/** Give the first blue piece a move order so `ordersTouched` flips. */
+function editOrders(game: Game): number {
+  const blue = [...game.world.query(Cell)].find((e) => game.world.get(e, Team) === 'blue')
+  expect(blue).toBeDefined()
+  game.selected = [blue as number]
+  for (let y = 7; y >= 0; y--) {
+    for (let x = 0; x < game.board.width; x++) {
+      if (game.pieceAt(x, y) === null) {
+        game.orderAt({ x, y })
+        return blue as number
+      }
+    }
+  }
+  return blue as number
 }
 
 describe('turn list & history navigation', () => {
@@ -175,10 +191,7 @@ describe('turn list & history navigation', () => {
     game.undoTurn()
     expect(game.snapshot().ordersTouched).toBe(false)
 
-    const blue = [...game.world.query(Cell)].find((e) => game.world.get(e, Team) === 'blue')
-    expect(blue).toBeDefined()
-    game.selected = [blue as number]
-    game.setPieceStance('move')
+    editOrders(game)
     expect(game.snapshot().ordersTouched).toBe(true)
 
     // Returning to a recorded boundary resets the baseline.
@@ -192,9 +205,7 @@ describe('turn list & history navigation', () => {
     runTurn(game)
     game.undoTurn()
 
-    const blue = [...game.world.query(Cell)].find((e) => game.world.get(e, Team) === 'blue')
-    game.selected = [blue as number]
-    game.setPieceStance('move')
+    editOrders(game)
     expect(game.snapshot().ordersTouched).toBe(true)
     expect(game.snapshot().canRedo).toBe(true)
 
@@ -207,6 +218,26 @@ describe('turn list & history navigation', () => {
     // Landed on the recorded boundary, not a new turn with the edits.
     expect(game.snapshot().historyIndex).toBe(game.snapshot().historyLength - 1)
     expect(game.snapshot().turnActive).toBe(false)
+  })
+
+  it('discarding order changes restores the boundary and keeps the future', () => {
+    const game = new Game(8, 'human-vs-ai', 55)
+    runTurn(game)
+    runTurn(game)
+    const future = game.snapshot().historyLength
+    game.undoTurn()
+
+    const blue = editOrders(game)
+    expect(game.snapshot().ordersTouched).toBe(true)
+    expect(game.world.get(blue, Order)?.kind).toBe('goto')
+
+    game.discardOrderChanges()
+
+    // Edits reverted, baseline reset, cursor and redo branch untouched.
+    expect(game.snapshot().ordersTouched).toBe(false)
+    expect(game.world.get(blue, Order)?.kind).toBe('none')
+    expect(game.snapshot().historyLength).toBe(future)
+    expect(game.snapshot().canRedo).toBe(true)
   })
 
   it('play-forward runs the recorded beats then continues live at the tip', () => {

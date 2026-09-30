@@ -89,13 +89,13 @@ test('keeps the backtrack hint pinned in view on a long turn list', async ({ pag
   await expect(page.locator('.turn-panel .hint')).toContainText('viewing turn')
 })
 
-/** Change a blue piece's stance while paused so `ordersTouched` becomes true. */
+/** Give a blue piece a move order while paused so `ordersTouched` becomes true. */
 async function editOrders(page: import('@playwright/test').Page): Promise<void> {
   await page.evaluate(() => {
     const g = (window as any).game
     const rook = g.toDebugJson().pieces.find((p: any) => p.team === 'blue' && p.kind === 'rook')
     g.selected = [rook.e]
-    g.setPieceStance('move')
+    g.orderAt({ x: 0, y: 5 })
     g.selected = []
   })
 }
@@ -137,5 +137,25 @@ test('discarding changed orders replays the recorded beat forward', async ({ pag
   // It replayed the recorded beat forward and discarded the edits.
   const state = await page.evaluate(() => (window as any).game.snapshot())
   expect(state.historyIndex).toBe(state.historyLength - 1)
+  expect(state.turnActive).toBe(false)
+})
+
+test('Restore orders reverts the edits in place and keeps the redo branch', async ({ page }) => {
+  await playTurns(page, 2)
+  await page.keyboard.press('u')
+  await page.getByRole('button', { name: 'turns', exact: true }).click()
+
+  await editOrders(page)
+  const warning = page.locator('.turn-panel .order-changed')
+  await expect(warning).toBeVisible()
+  expect(await page.evaluate(() => (window as any).game.snapshot().canRedo)).toBe(true)
+
+  await warning.getByRole('button', { name: 'Restore orders' }).click()
+
+  // The edits are gone, but the cursor stays put so the future is still there.
+  await expect(warning).toHaveCount(0)
+  const state = await page.evaluate(() => (window as any).game.snapshot())
+  expect(state.ordersTouched).toBe(false)
+  expect(state.canRedo).toBe(true)
   expect(state.turnActive).toBe(false)
 })

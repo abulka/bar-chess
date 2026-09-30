@@ -23,6 +23,7 @@ const emit = defineEmits<{
   (e: 'new-map', size: BoardSize): void
   (e: 'open-maps'): void
   (e: 'toggle-erase'): void
+  (e: 'clear-pieces'): void
 }>()
 
 const newSize = ref<BoardSize>(BOARD_SIZES.includes(props.size as BoardSize) ? (props.size as BoardSize) : 8)
@@ -65,6 +66,7 @@ function onNewMap(): void {
       >
         Eraser
       </button>
+      <button class="ctl small danger" @click="emit('clear-pieces')">Clear all</button>
     </div>
 
     <div class="editor-row">

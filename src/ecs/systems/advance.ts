@@ -5,7 +5,7 @@ import { vecEquals } from '../../game/math'
 import { buildOccupancy, makeOccupied, occupiedExcept } from '../../game/occupancy'
 import { clearMotion } from '../../game/queue'
 import { PIECES, WEAPONS } from '../../game/pieces'
-import { Cell, Health, Motion, Order, PieceType, Position, Render, Stance, Team } from '../components'
+import { Cell, Health, Motion, Order, PieceType, Position, Render, Team } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
@@ -71,9 +71,9 @@ const system: System = {
       const motion = ctx.world.require(killer, Motion)
       const team = ctx.world.require(killer, Team)
       // A chess kill is a capture: it always pulls the killer onto the victim's
-      // square, whatever its stance, order or safe-hold, because taking the
-      // square is the whole point of the rule. Ordinary kills keep the passive
-      // guards below so a piece is never dragged off a safe or healing square.
+      // square, whatever its order or safe-hold, because taking the square is the
+      // whole point of the rule. Ordinary kills keep the passive guards below so
+      // a piece is never dragged off a safe or healing square.
       const chess = intent.chess === true
       if (!chess) {
         if (order.queue.length > 0) continue
@@ -85,10 +85,9 @@ const system: System = {
         const attackOrderOnVictim = order.kind === 'attack' && order.target === intent.victim
         if (order.kind !== 'none' && !attackOrderOnVictim) continue
 
-        // Capture advance is an Attack-mode behaviour only: a passive (none/move)
-        // piece is never pulled off a safe or healing square by a kill.
-        const stance = ctx.world.get(killer, Stance)
-        if (ctx.teams[team].controller !== 'ai' && stance?.mode !== 'attack' && order.kind !== 'attack') continue
+        // Capture advance is an attacking behaviour only: an idle AI piece or an
+        // explicit attack order presses on, a passive human piece holds its post.
+        if (ctx.teams[team].controller !== 'ai' && order.kind !== 'attack') continue
       }
 
       const dest = intent.cell

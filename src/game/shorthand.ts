@@ -6,7 +6,6 @@ import {
   PieceType,
   Position,
   Projectile,
-  Stance,
   Target,
   Team,
   Weapon,
@@ -27,7 +26,7 @@ const MAX_PATH = 16
 const MAX_TERRAIN = 256
 
 const FORMAT_LEGEND =
-  '# fmt: r|b + piece(PNBRQK) + cell; hp=cur/max; @M=move @A=attack stance; goto=<cell>; ' +
+  '# fmt: r|b + piece(PNBRQK) + cell; hp=cur/max; goto=<cell>; ' +
   'atk=#id(cell)[!]=attack order (! positionally unreachable); ' +
   'kill=#id(cell)=parked insta-kill (immediate chess kill, lands next tick, outranks self-preservation); ' +
   'tgt=#id(cell) current target; ' +
@@ -57,10 +56,15 @@ Kings obey the chess check rule: a king may never move onto a square covered by 
 this moment (including the enemy king's adjacent ring), so kings can never be adjacent and cannot
 walk into a firing line. A king already in check simply holds and fights; the battle still ends
 only when a king dies.
+An AI army acts on its own. A human piece follows its orders and otherwise stands and fires at
+anything already in range; its attack orders keep engaging nearby enemies after the current target
+dies, and "clear orders" stands it down.
 Win: the battle ends when a king dies and the other team wins; both kings down on the same tick is a
-draw. A game stopped at the turn cap without a king death is a partial, not a draw.
+draw. Once neither side has a non-king piece the two lone kings can never reach each other, so the
+battle is also drawn after a 4-turn grace; a game stopped at the turn cap without a king death is a
+partial, not a draw.
 Rules toggles: autoPreserve enables the automatic self-preservation retreat for any wounded piece
-(with it off, an AI/Attack-stance piece still makes its own low-HP cover step); captureAdvance
+(with it off, an AI piece still makes its own low-HP cover step); captureAdvance
 lets an idle killer step onto a victim's now-empty square; chessKills enables the parked immediate
 chess kill (lands next tick, outranks self-preservation); promotion turns a pawn that reaches the
 enemy back rank into a queen; finishPressure ramps damage to a king whose side has no field pieces
@@ -69,7 +73,6 @@ square covered by a same-team firing pattern) slowly regenerate, even away from 
 Reading a position block:
   <r|b><PNBRQK> <cell>   one unit (r=red, b=blue); grid uses Upper=red, lower=blue
   hp<cur>/<max>          present only when damaged
-  @M | @A                stance: M=move (return fire only), A=attack (auto-engage nearby)
   goto=<cell>            standing move order
   atk=#id(cell)          standing attack order ('!' = target positionally unreachable, e.g. wrong colour)
   kill=#id(cell)         parked insta-kill (immediate chess kill, human-only): lands next tick and
@@ -148,20 +151,17 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
   const units: Unit[] = []
   const occupancy = buildOccupancy(game.world, game.board)
 
-  for (const e of game.world.query(Cell, Team, PieceType, Health, Stance, Order, Target, Motion)) {
+  for (const e of game.world.query(Cell, Team, PieceType, Health, Order, Target, Motion)) {
     const cell = game.world.require(e, Cell)
     const team = game.world.require(e, Team)
     const kind = game.world.require(e, PieceType).kind
     const health = game.world.require(e, Health)
-    const stance = game.world.require(e, Stance)
     const order = game.world.require(e, Order)
     const target = game.world.require(e, Target)
     const motion = game.world.require(e, Motion)
 
     const flags: string[] = []
     if (health.cur < health.max) flags.push(`hp${Math.round(health.cur)}/${health.max}`)
-    if (stance.mode === 'move') flags.push('@M')
-    else if (stance.mode === 'attack') flags.push('@A')
 
     if (order.kind === 'goto') {
       flags.push(`goto=${order.dest ? cellName(height, order.dest) : '?'}`)

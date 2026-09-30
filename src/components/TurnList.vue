@@ -18,6 +18,7 @@ const emit = defineEmits<{
   (e: 'fork-continue'): void
   (e: 'discard-order-changes'): void
   (e: 'cancel-continue'): void
+  (e: 'restore-orders'): void
 }>()
 
 /** Newest boundary first so the active row stays near the top. */
@@ -141,6 +142,15 @@ watch(
           <b>orders changed</b> — continuing discards {{ dropped }} future
           turn{{ dropped === 1 ? '' : 's' }}. <b>space</b> will ask whether to fork.
         </p>
+        <div class="fork-actions">
+          <button
+            class="ctl small"
+            title="revert to the orders recorded at this boundary"
+            @click="emit('restore-orders')"
+          >
+            Restore orders
+          </button>
+        </div>
       </div>
       <p v-else-if="backtracked" class="hint">
         viewing turn {{ current }} of {{ latest }} — <b>space</b> replays forward ·

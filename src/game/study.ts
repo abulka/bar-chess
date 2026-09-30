@@ -2,6 +2,7 @@ import { Cell, Health, Motion, PieceType, Team } from '../ecs/components'
 import type { EventRecord } from '../ecs/events'
 import { firingPositionExists } from './approach'
 import type { BoardSize } from './boards'
+import { STALEMATE_DRAW_TURNS } from './constants'
 import { Game } from './game'
 import type { GameMode } from './game'
 import { GameLog } from './gameLog'
@@ -39,14 +40,6 @@ export const DEFAULT_STUDY_TUNING: StudyPolicyTuning = {
 /** Ticks one fast frame may simulate, so the page never freezes for long. */
 const FAST_STEPS_PER_FRAME = 2000
 
-/**
- * Turns a both-kings-only standoff is allowed to run before it is stopped as a
- * draw. A lone king can no longer force a win (the no-check rule keeps the two
- * kings apart), so the fight is decided; this lets any already-committed attack
- * land before ending it, instead of grinding out the remaining turns.
- */
-const KING_ONLY_DRAW_TURNS = 4
-
 function piecesOf(game: Game, team: TeamId): number[] {
   const out: number[] = []
   for (const e of game.world.query(Cell, Team, PieceType, Health)) {
@@ -59,21 +52,9 @@ function enemyOf(team: TeamId): TeamId {
   return team === 'red' ? 'blue' : 'red'
 }
 
-/** Any living non-king piece on the team? False means the side is king-only. */
-function hasFieldPieces(game: Game, team: TeamId): boolean {
-  for (const e of game.world.query(PieceType, Team, Health)) {
-    if (game.world.require(e, Team) !== team) continue
-    if (game.world.require(e, PieceType).kind === 'king') continue
-    if (game.world.require(e, Health).cur <= 0) continue
-    return true
-  }
-  return false
-}
+import { isKingOnlyDraw } from './endgame'
 
-/** True when neither side has a living non-king piece: no winning material left. */
-export function isKingOnlyDraw(game: Game): boolean {
-  return !hasFieldPieces(game, 'red') && !hasFieldPieces(game, 'blue')
-}
+export { isKingOnlyDraw } from './endgame'
 
 /** Pick `count` distinct items at random, in a seeded, reproducible order. */
 function pickSome<T>(items: T[], count: number, rng: Rng): T[] {
@@ -299,7 +280,7 @@ export class StudyController {
       return
     }
     if (this.game.turnActive || this.game.isReplaying) return
-    if (this.game.winner !== null || this.game.turn >= this.options.maxTurns || this.kingOnlyDrawReached()) {
+    if (this.game.over || this.game.turn >= this.options.maxTurns || this.kingOnlyDrawReached()) {
       this.finishGame()
       return
     }
@@ -314,7 +295,7 @@ export class StudyController {
         this.game.runTicks(1)
         continue
       }
-      if (this.game.winner !== null || this.game.turn >= this.options.maxTurns || this.kingOnlyDrawReached()) {
+      if (this.game.over || this.game.turn >= this.options.maxTurns || this.kingOnlyDrawReached()) {
         this.finishGame()
         continue
       }
@@ -333,7 +314,7 @@ export class StudyController {
       return false
     }
     if (this.kingOnlyAtTurn < 0) this.kingOnlyAtTurn = this.game.turn
-    return this.game.turn >= this.kingOnlyAtTurn + KING_ONLY_DRAW_TURNS
+    return this.game.turn >= this.kingOnlyAtTurn + STALEMATE_DRAW_TURNS
   }
 
   private startNextTurn(): void {

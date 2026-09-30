@@ -5,10 +5,10 @@ import {
   POTSHOT_COLOR,
   PRESERVE_COLOR,
   RELOAD_FILL,
+  ORDER_ATTACK_COLOR,
+  ORDER_MOVE_COLOR,
   ROUTE_COLOR,
   SELECT_COLOR,
-  STANCE_ATTACK_COLOR,
-  STANCE_MOVE_COLOR,
   TRACK_COLOR,
   UNREACHABLE_COLOR,
   healthColor,
@@ -84,13 +84,13 @@ const NONE_COLOR = '#7d8794'
       <line x1="1" y1="7" x2="17" y2="7" :stroke="POTSHOT_COLOR" stroke-width="2" stroke-dasharray="3 3" />
     </template>
 
-    <!-- stance badges -->
+    <!-- order badges -->
     <template v-else-if="kind === 'badge-m'">
-      <circle cx="9" cy="7" r="6" :fill="STANCE_MOVE_COLOR" />
+      <circle cx="9" cy="7" r="6" :fill="ORDER_MOVE_COLOR" />
       <text x="9" y="10" text-anchor="middle" font-size="8" font-weight="bold" font-family="ui-monospace, monospace" fill="#0b0f16">M</text>
     </template>
     <template v-else-if="kind === 'badge-a'">
-      <circle cx="9" cy="7" r="6" :fill="STANCE_ATTACK_COLOR" />
+      <circle cx="9" cy="7" r="6" :fill="ORDER_ATTACK_COLOR" />
       <text x="9" y="10" text-anchor="middle" font-size="8" font-weight="bold" font-family="ui-monospace, monospace" fill="#0b0f16">A</text>
     </template>
     <template v-else-if="kind === 'badge-none'">

@@ -14,7 +14,7 @@ import { noteOrder, clearMotion, clearOrder, promoteNext, rechainQueue } from '.
 import { hasInstaKill, instaKillLandedNote } from '../../game/instaKill'
 import { orderInsists, noPreserveEndedNote, noPreserveSuppressedNote } from '../../game/noPreserve'
 import { CRITICAL_WOUND, HIT_STREAK_TRIGGER, preserveThreshold, recoverThreshold } from '../../game/selfPreservation'
-import { Cell, Health, Motion, Order, PieceType, Stance, Target, Team, hasLiveCell } from '../components'
+import { Cell, Health, Motion, Order, PieceType, Target, Team, hasLiveCell } from '../components'
 import type { MotionData, MotionIntent, OrderData } from '../components'
 import type { Entity } from '../world'
 import type { TeamId, Vec2 } from '../../game/types'
@@ -185,12 +185,11 @@ export function wouldSelfPreserve(ctx: SimContext, e: Entity): boolean {
   const order = ctx.world.get(e, Order)
   const motion = ctx.world.get(e, Motion)
   const target = ctx.world.get(e, Target)
-  const stance = ctx.world.get(e, Stance)
   const hp = ctx.world.get(e, Health)
   const cell = ctx.world.get(e, Cell)
   const team = ctx.world.get(e, Team)
   const kind = ctx.world.get(e, PieceType)?.kind
-  if (!order || !motion || !target || !stance || !hp || !cell || !team || !kind) return false
+  if (!order || !motion || !target || !hp || !cell || !team || !kind) return false
   if (hasInstaKill(order)) return false
   if (orderInsists(order, ctx.turn)) return false
 
@@ -203,9 +202,8 @@ export function wouldSelfPreserve(ctx: SimContext, e: Entity): boolean {
     fieldCount[ctx.world.require(o, Team)]++
   }
   const controller = ctx.teams[team].controller
-  const mode = controller === 'ai' ? 'attack' : stance.mode
   const isKing = kind === 'king'
-  const lastStandKing = isKing && fieldCount[team] === 0 && (controller === 'ai' || mode === 'attack')
+  const lastStandKing = isKing && fieldCount[team] === 0
   const enemyKing = kings[enemyTeam]
   const endgame = enemyKing !== null && fieldCount[enemyTeam] === 0
   if (endgame || lastStandKing || (controller === 'ai' && isKing)) return false
@@ -322,8 +320,7 @@ const system: System = {
         }
       : null
 
-    for (const e of ctx.world.query(Stance, Order, Motion, Cell, Team, Target)) {
-      const stance = ctx.world.require(e, Stance)
+    for (const e of ctx.world.query(Order, Motion, Cell, Team, Target)) {
       const order = ctx.world.require(e, Order)
       const motion = ctx.world.require(e, Motion)
       const cell = ctx.world.require(e, Cell)
@@ -391,13 +388,11 @@ const system: System = {
       // one episode (start / end) rather than on every goal re-evaluation.
       const wasPreserve = motion.intent === 'preserve'
       const controller = ctx.teams[team].controller
-      const mode = controller === 'ai' ? 'attack' : stance.mode
       const isKing = kind === 'king'
       // A lone king with no field pieces never runs: it is faster than every
       // attacker, so dodging forever turned material wins into turn-cap draws.
-      // It is exempt from the preserve pass and last-stands instead (below), as
-      // is a player king whose stance is Attack.
-      const lastStandKing = isKing && fieldCount[team] === 0 && (controller === 'ai' || mode === 'attack')
+      // It is exempt from the preserve pass and last-stands instead (below).
+      const lastStandKing = isKing && fieldCount[team] === 0
       // The enemy is down to its king alone: the finishing phase. Attackers hunt
       // the king directly and ignore self-preservation; the lone king holds.
       const enemyKing = kings[enemyTeam]
@@ -508,12 +503,10 @@ const system: System = {
               // when free; hold when every step is no safer (or nobody is near).
               // Pawns cannot retreat, so an "escape" only marches them into the
               // enemy and gives up the shot — they hold and fire instead.
-              // Keep the shot while backing off: an attack order (or Attack stance)
-              // holds its target in range as a tie-break.
+              // Keep the shot while backing off: an attack order holds its target
+              // in range as a tie-break.
               const keepShot =
-                targetValid && (order.kind === 'attack' || stance.mode === 'attack')
-                  ? (target.entity as number)
-                  : null
+                targetValid && order.kind === 'attack' ? (target.entity as number) : null
               goal = kind === 'pawn' ? null : escapeGoal(ctx, e, team, threats, keepShot, escapeOptions)
               if (goal !== null) intent = 'preserve'
               else noSaferStep = true
@@ -605,8 +598,8 @@ const system: System = {
           motion.intent = motion.goal === null ? 'none' : 'order'
           continue
         }
-        // The order is done; the next queued step takes over, else clear. The
-        // stance is kept so the piece stays in Attack either way.
+        // The order is done; the next queued step takes over, else clear.
+        // (Retargeting to the next nearby enemy is done by the targeting system.)
         if (promoteNext(order, motion)) {
           noteOrder(order, ctx.tick, 'attack target lost — executing queued step')
           rechain(ctx, e, order)
@@ -657,14 +650,14 @@ const system: System = {
         continue
       }
 
-      // 3. Autonomous stance.
-      if (mode !== 'attack') {
+      // 3. Autonomous play. Only the AI acts without an order; a human piece
+      // follows its order or holds.
+      if (controller !== 'ai') {
         clearMotion(motion)
         continue
       }
 
-      // A side down to its king last-stands instead of kiting: AI kings always,
-      // a player's king only when the player has set Attack stance.
+      // A side down to its king last-stands instead of kiting.
       if (lastStandKing) {
         const threats = kingThreats(ctx, e, team, kingThreatMemo)
         const goal = loneKingGoal(ctx, e, team, threats, {
@@ -764,8 +757,8 @@ const system: System = {
         }
       }
       if (!targetValid) {
-        // AI armies advance; a player's Attack stance skirmishes locally.
-        const goal = controller === 'ai' ? rally(ctx, team) : null
+        // Nothing in reach: march on the enemy king.
+        const goal = rally(ctx, team)
         setGoal(motion, goal, goal === null ? 'none' : 'rally', ctx.tick)
         continue
       }

@@ -5,7 +5,7 @@ vi.mock('../../src/render/terrain', () => ({
   bakeTerrain: () => ({ width: 0, height: 0 }),
 }))
 
-import { Health, Motion, PieceType, Render, Stance, Target, Weapon } from '../../src/ecs/components'
+import { Health, Motion, PieceType, Render, Target, Weapon } from '../../src/ecs/components'
 import { DEATH_FX_COLOR, DEATH_TREMBLE_TTL, HIT_FX_COLOR } from '../../src/game/constants'
 import { Game } from '../../src/game/game'
 import { buildOccupancy } from '../../src/game/occupancy'
@@ -240,8 +240,8 @@ describe('Renderer autonomous target overlay', () => {
     s.game.selected = [attacker]
   })
 
-  it('draws an amber line + reticle + ring for a committed (Attack stance) target', () => {
-    s.game.world.require(attacker, Stance).mode = 'attack'
+  it('draws an amber line + reticle + ring for a committed AI target', () => {
+    s.game.teams.blue.controller = 'ai'
     s.game.world.require(attacker, Target).entity = target
     s.renderer.draw(s.game)
 
@@ -292,7 +292,7 @@ describe('Renderer autonomous target overlay', () => {
   })
 
   it('previews a committed engagement from the path end (future firing position)', () => {
-    s.game.world.require(attacker, Stance).mode = 'attack'
+    s.game.teams.blue.controller = 'ai'
     const motion = s.game.world.require(attacker, Motion)
     motion.intent = 'engage'
     motion.goal = { x: 4, y: 5 }

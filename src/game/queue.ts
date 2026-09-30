@@ -23,8 +23,8 @@ export function noteOrder(order: OrderData, tick: number, text: string): void {
 }
 
 /**
- * Reset the active order slot to idle (`kind: 'none'`). Stance and the order
- * log are left alone; pass `queue: true` to also drop queued steps (player
+ * Reset the active order slot to idle (`kind: 'none'`). The order log is left
+ * alone; pass `queue: true` to also drop queued steps (player
  * clear — completion paths promote the queue first).
  */
 export function clearOrder(order: OrderData, opts?: { queue?: boolean }): void {

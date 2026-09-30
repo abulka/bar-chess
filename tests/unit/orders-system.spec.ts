@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Health, Motion, Order, Stance, Target } from '../../src/ecs/components'
+import { Health, Motion, Order, Target } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { chebyshev } from '../../src/game/geometry'
 import { enemyCoverage } from '../../src/game/kingSafety'
@@ -31,7 +31,7 @@ describe('orders system — low-HP retreat (auto-preserve off)', () => {
     const ctx = context()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 3, y: 3 })
     const rook = createPiece(ctx, 'red', PIECES.rook, { x: 3, y: 0 }) // c-file
-    ctx.world.require(queen, Stance).mode = 'attack'
+    ctx.teams.blue.controller = 'ai'
     ctx.world.require(queen, Health).cur = 20
     ctx.world.require(queen, Target).entity = rook
 
@@ -48,7 +48,7 @@ describe('orders system — low-HP retreat (auto-preserve off)', () => {
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 7, y: 4 }) // h5
     const bishop = createPiece(ctx, 'red', PIECES.bishop, { x: 2, y: 3 }) // far, not shooting
     createPiece(ctx, 'red', PIECES.king, { x: 7, y: 6 }) // near, but cannot reach the queen
-    ctx.world.require(queen, Stance).mode = 'attack'
+    ctx.teams.blue.controller = 'ai'
     ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.33)
     ctx.world.require(queen, Target).entity = bishop
 
@@ -68,7 +68,7 @@ describe('orders system — low-HP retreat (auto-preserve off)', () => {
     // The knight cannot hit the pawn where it stands, but it does cover the
     // pawn's only forward square (4,3).
     const knight = createPiece(ctx, 'red', PIECES.knight, { x: 6, y: 4 })
-    ctx.world.require(pawn, Stance).mode = 'attack'
+    ctx.teams.blue.controller = 'ai'
     ctx.world.require(pawn, Health).cur = 10
     ctx.world.require(pawn, Target).entity = knight
 
@@ -81,7 +81,7 @@ describe('orders system — low-HP retreat (auto-preserve off)', () => {
     const ctx = context()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 7, y: 0 })
     const knight = createPiece(ctx, 'red', PIECES.knight, { x: 0, y: 7 }) // far, short reach
-    ctx.world.require(queen, Stance).mode = 'attack'
+    ctx.teams.blue.controller = 'ai'
     ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.33)
     ctx.world.require(queen, Target).entity = knight
 
@@ -95,7 +95,7 @@ describe('orders system — low-HP retreat (auto-preserve off)', () => {
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 7, y: 4 }) // h5
     createPiece(ctx, 'red', PIECES.rook, { x: 7, y: 0 }) // h-file, covers h5
     const bishop = createPiece(ctx, 'red', PIECES.bishop, { x: 2, y: 3 })
-    ctx.world.require(queen, Stance).mode = 'attack'
+    ctx.teams.blue.controller = 'ai'
     ctx.world.require(queen, Health).cur = Math.floor(PIECES.queen.hp * 0.33)
     ctx.world.require(queen, Target).entity = bishop
 
@@ -958,7 +958,7 @@ describe('orders system — motion intent provenance', () => {
     const ctx = context()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
     const rook = createPiece(ctx, 'red', PIECES.rook, { x: 1, y: 0 })
-    ctx.world.require(queen, Stance).mode = 'attack'
+    ctx.teams.blue.controller = 'ai'
     ctx.world.require(queen, Target).entity = rook
 
     run(ctx)
@@ -974,7 +974,7 @@ describe('orders system — damage-aware retreats and last stand', () => {
     const ctx = makeContext()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
     createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 }) // covers the c-file
-    ctx.world.require(queen, Stance).mode = 'attack'
+    ctx.teams.blue.controller = 'ai'
     expect(ctx.world.require(queen, Health).cur).toBe(PIECES.queen.hp)
     ctx.world.require(queen, Motion).hitStreak = 2
 
@@ -990,7 +990,7 @@ describe('orders system — damage-aware retreats and last stand', () => {
     const ctx = makeContext()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
     createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
-    ctx.world.require(queen, Stance).mode = 'attack'
+    ctx.teams.blue.controller = 'ai'
 
     run(ctx)
 
@@ -1116,10 +1116,10 @@ describe('orders system — damage-aware retreats and last stand', () => {
     expect(ctx.world.require(king, Motion).goal).toBeNull()
   })
 
-  it('last-stands for a player king only in Attack stance', () => {
+  it('last-stands for an AI king', () => {
     const ctx = makeContext()
+    ctx.teams.red.controller = 'ai'
     const active = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 4 })
-    ctx.world.require(active, Stance).mode = 'attack'
     createPiece(ctx, 'blue', PIECES.rook, { x: 4, y: 1 })
 
     run(ctx)

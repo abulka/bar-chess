@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
+import { Cell, Position } from '../../src/ecs/components'
 import { Game } from '../../src/game/game'
 import { exportMap } from '../../src/game/map'
 import type { TeamId } from '../../src/game/types'
@@ -38,6 +39,29 @@ describe('map editor game api', () => {
     expect(game.canEdit).toBe(false)
     expect(game.placePiece('red', 'queen', 4, 4)).toBe(false)
     expect(game.removePieceAt(0, 0)).toBe(false)
+    expect(game.clearPieces()).toBe(false)
+  })
+
+  it('clears every piece and resets team counts', () => {
+    const game = new Game(8, 'human-vs-ai', 1)
+    game.setEditor(true)
+    expect(exportMap(game, 'before').placements.length).toBeGreaterThan(0)
+
+    expect(game.clearPieces()).toBe(true)
+    expect(game.world.query(Position, Cell)).toHaveLength(0)
+    expect(exportMap(game, 'cleared').placements).toHaveLength(0)
+    expect(game.teams.red.deployed).toBe(0)
+    expect(game.teams.blue.deployed).toBe(0)
+    expect(game.snapshot().editorDirty).toBe(true)
+
+    game.cancelEditor()
+    expect(exportMap(game, 'after').placements.length).toBeGreaterThan(0)
+  })
+
+  it('clearPieces is a no-op on an empty board', () => {
+    const game = new Game(8, 'human-vs-ai', 1)
+    game.newMap(8)
+    expect(game.clearPieces()).toBe(false)
   })
 
   it('cancel restores the exact battle and history', () => {

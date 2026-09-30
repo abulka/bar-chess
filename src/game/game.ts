@@ -15,7 +15,6 @@ import {
   PieceType,
   Position,
   Projectile,
-  Stance,
   Target,
   Team,
   Weapon,
@@ -38,11 +37,13 @@ import {
   RAIL_FRACTION_MIN,
   SIM_VERSION,
   SPEEDS,
+  STALEMATE_DRAW_TURNS,
   TEAM_COLORS,
   TEAM_IDS,
   TEAM_NAMES,
 } from './constants'
 import { coordName } from './coords'
+import { hasLivingKing, isKingOnlyDraw } from './endgame'
 import { containsCell, fireCells, NEVER } from './geometry'
 import type { OccupiedFn } from './geometry'
 import { enemyCoverage, enemyKingDanger } from './kingSafety'
@@ -53,7 +54,7 @@ import { createPiece } from './factory'
 import { buildOccupancy, makeOccupied, occupiedExcept } from './occupancy'
 import type { Occupancy } from './occupancy'
 import { underFireAttacker } from './underFire'
-import type { OrderKind, StanceMode, TeamId, Vec2 } from './types'
+import type { OrderKind, PendingCommand, TeamId, Vec2 } from './types'
 import { PIECE_LIST, PIECES, WEAPONS, weaponDamage } from './pieces'
 import { destReachable, findPath } from './pathfind'
 import { anchorFor, clearMotion, clearOrder, noteOrder, planStep } from './queue'
@@ -139,7 +140,6 @@ export interface PieceInfo {
   coord: string
   health: { cur: number; max: number; ratio: number }
   weapon: { key: string; left: number; cooldown: number; ready: boolean; fired: boolean } | null
-  stance: StanceMode
   commandable: boolean
   target: PieceRef | null
   underFire: { entity: Entity; coord: string } | null
@@ -171,13 +171,6 @@ export interface PieceInfo {
   }
 }
 
-export interface StanceSummary {
-  none: number
-  move: number
-  attack: number
-  mixed: boolean
-}
-
 /** What the hover readout shows for the piece under the cursor. */
 export interface HoverPiece {
   entity: Entity
@@ -186,7 +179,6 @@ export interface HoverPiece {
   glyph: string
   color: string
   team: TeamId
-  stance: StanceMode
   /** Current motion-goal provenance (`none` when idle). */
   intent: MotionIntent
   orderKind: OrderKind
@@ -239,6 +231,8 @@ interface TurnState {
   turn: number
   teams: Record<TeamId, TeamRuntime>
   winner: TeamId | null
+  /** True when the battle ended as a stalemate draw (both sides king-only). */
+  drawn: boolean
   /** Sim-affecting rules in force at capture, restored on undo/redo/replay. */
   settings: SimSettings
 }
@@ -249,7 +243,7 @@ interface TurnState {
  *
  * `state` is the end-of-turn boundary used by undo/redo. `start` is the exact
  * post-setup turn-start snapshot used by replay. They are deliberately separate:
- * the start also carries paused player commands (orders/stances) that never
+ * the start also carries paused player commands (orders) that never
  * create a boundary, while the end carries the previous cooldowns that the
  * turn setup overwrote — so neither can be derived from the other. `pending`
  * holds commands queued outside the pipeline at turn start (e.g. a reinforcement
@@ -355,6 +349,8 @@ export interface GameSnapshot {
   selectedLines: Array<{ entity: Entity; kind: string; lines: ComponentLine[] }>
   counts: { entities: number; pieces: number; projectiles: number }
   winner: TeamId | null
+  /** True when the battle ended as a stalemate draw (both sides king-only). */
+  drawn: boolean
   /** Signed static evaluation in pawn points; positive means red is ahead. */
   advantage: number
   /** Specific breakdown of the evaluation, for the advantage-bar tooltip. */
@@ -377,7 +373,7 @@ export interface GameSnapshot {
   soundEnabled: boolean
   /** Whether the left/right side rails (games/turns, piece/info/options) are shown. */
   railsVisible: boolean
-  /** Whether the right-rail "controls" hints and "stance" legend are collapsed. */
+  /** Whether the right-rail "controls" hints and "orders" legend are collapsed. */
   controlsCollapsed: boolean
   stanceCollapsed: boolean
   /** Whether the right-rail legend / firing-lines sections are collapsed. */
@@ -404,15 +400,14 @@ export interface GameSnapshot {
   canReplay: boolean
   canUndo: boolean
   canRedo: boolean
-  /** True when orders/stances/deploys changed since the boundary in view. */
+  /** True when orders/deploys changed since the boundary in view. */
   ordersTouched: boolean
   replaying: boolean
   /** Unified turn/replay bar fill (0..1); holds at 1 until the next action. */
   barProgress: number
   /** BAR-style command waiting for the next left-click (`none` = plain select). */
-  pendingCommand: StanceMode
+  pendingCommand: PendingCommand
   selectionCount: number
-  stanceSummary: StanceSummary
   /** Focused selected piece (first in the selection), for the properties panel. */
   pieceInfo: PieceInfo | null
   /** Pending "override self-preservation?" prompt, or null when none is open. */
@@ -496,6 +491,10 @@ export class Game {
   leftRailFraction = RAIL_FRACTION_DEFAULT
   rightRailFraction = RAIL_FRACTION_DEFAULT
   winner: TeamId | null = null
+  /** True once a both-kings-only standoff has run its grace turns: a draw. */
+  drawn = false
+  /** Completed beats the current standoff has run (reset when field pieces return). */
+  private stalemateTurns = 0
   terrainVersion = 0
   playerTeam: TeamId = 'blue'
   gameMode: GameMode = 'human-vs-ai'
@@ -512,9 +511,9 @@ export class Game {
   /** A piece covered by a friendly weapon slowly regenerates, even away from the king. */
   defendedHeal = true
   /** Transient BAR-style command awaiting the next left-click. */
-  pendingCommand: StanceMode = 'none'
+  pendingCommand: PendingCommand = 'none'
   /**
-   * True when the player has changed orders/stances/deploys since landing on the
+   * True when the player has changed orders/deploys since landing on the
    * boundary in view. Forking with an unchanged plan would replay the same
    * deterministic outcome, so the UI warns about it before discarding the future.
    */
@@ -661,7 +660,7 @@ export class Game {
   onProgress: ((value: number) => void) | null = null
   /**
    * Observer for player-issued commands, normalized to board cells so a whole
-   * game can be recorded and replayed. Fired by `orderAt`, `setPieceStance`,
+   * game can be recorded and replayed. Fired by `orderAt`,
    * `clearOrders`, `deploy` and `setGameMode`; never by the simulation itself.
    */
   onCommand: ((intent: GameCommandIntent) => void) | null = null
@@ -772,7 +771,7 @@ export class Game {
       return
     }
     // A finished game stays frozen until it is undone.
-    if (this.winner !== null) return
+    if (this.over) return
     if (this.replaying) {
       // Aborting a replay snaps back to the boundary being viewed so the world
       // is a real history state again.
@@ -789,7 +788,7 @@ export class Game {
   }
 
   stepOnce(): void {
-    if (this.winner !== null) return
+    if (this.over) return
     this.queuedTurns = 0
     this.queuedPlay = false
     this.queuedForward = 0
@@ -820,7 +819,7 @@ export class Game {
    * space presses (a double-tap) queue two turns instead of dropping the second.
    */
   queueTurn(): void {
-    if (this.winner) return
+    if (this.over) return
     // A turn requested while playing closes the mega turn first, so the play
     // burst becomes an undoable boundary instead of being lost.
     if (this.megaActive) this.endMegaTurn()
@@ -841,7 +840,7 @@ export class Game {
    * no redo branch is ever discarded by a play request.
    */
   requestPlay(): void {
-    if (this.winner) return
+    if (this.over) return
     if (this.megaActive) return
     if (this.turnActive || this.replaying) {
       if (this.cursor < this.history.length - 1) this.forwardPlay = true
@@ -862,7 +861,7 @@ export class Game {
    * instead of forking the timeline; forking needs an explicit `forkTurn()`.
    */
   advance(): void {
-    if (this.winner) return
+    if (this.over) return
     // While playing, space/Turn pauses the burst (closing it into an undoable
     // boundary) rather than ending it into a fresh turn. A second press then
     // starts a normal turn from the boundary.
@@ -899,7 +898,7 @@ export class Game {
    * then plays a fresh turn (shift+space starts a mega turn).
    */
   forkTurn(): void {
-    if (this.winner || this.turnActive || this.replaying) return
+    if (this.over || this.turnActive || this.replaying) return
     if (this.megaActive) this.endMegaTurn()
     if (this.turnActive || this.replaying) return
     this.queuedTurns = 0
@@ -930,7 +929,7 @@ export class Game {
    * turns short, readable beats rather than several seconds of real time.
    */
   beginTurn(): void {
-    if (this.turnActive || this.replaying || this.winner !== null) return
+    if (this.turnActive || this.replaying || this.over) return
     if (this.megaActive) this.endMegaTurn()
     if (this.turnActive) return
     // The turn decides the orders that were given; a pending override prompt is
@@ -940,7 +939,7 @@ export class Game {
     this.captureOutro = false
     this.captureOutroTicks = 0
     // Snapshot after the setup mutations: replay must start from the exact
-    // turn-start state, including the orders/stances issued while paused (which
+    // turn-start state, including the orders issued while paused (which
     // never create a history boundary) and the cleared cooldowns/movedThisTurn.
     this.turnPending = structuredClone(this.cmds)
     this.turnTicks = 0
@@ -960,7 +959,7 @@ export class Game {
    * whole interval is one history beat replayed with `ctx.turnActive` off.
    */
   beginMegaTurn(): void {
-    if (this.megaActive || this.turnActive || this.replaying || this.winner !== null) return
+    if (this.megaActive || this.turnActive || this.replaying || this.over) return
     this.noPreservePrompt = null
     this.winnerLocked = false
     this.captureOutro = false
@@ -994,11 +993,14 @@ export class Game {
     this.megaSnapshot = null
     this.megaPending = null
     this.megaTicks = 0
+    let drew = false
     if (start) {
+      drew = this.checkStalemate()
       this.pushHistory({ state: this.captureTurn(), start, ticks, pending, continuous: true })
     }
     this.bus.emit('phase', 'turn end', { data: { turn: this.turn, tick: this.tick, ticks, mode: 'mega' } })
     this.bus.emit('info', ticks > 0 ? `play ended after ${ticks} ticks` : 'play ended')
+    if (drew) this.bus.emit('draw', 'draw \u2014 both sides are down to only their king')
   }
 
   /** Append a completed beat, replacing any undone redo branch. */
@@ -1039,7 +1041,7 @@ export class Game {
 
   /** Start any buffered beat once the current turn/replay/mega turn finishes. */
   private pump(): void {
-    if (this.winner !== null) {
+    if (this.over) {
       this.queuedPlay = false
       this.queuedTurns = 0
       this.queuedForward = 0
@@ -1077,6 +1079,11 @@ export class Game {
   /** True while a continuous mega turn is running. */
   get playing(): boolean {
     return this.megaActive
+  }
+
+  /** True when the battle is decided: a king fell, or a stalemate draw. */
+  get over(): boolean {
+    return this.winner !== null || this.drawn
   }
 
   /** The deterministic per-turn setup every piece's one-move gate depends on. */
@@ -1145,6 +1152,22 @@ export class Game {
   }
 
   /**
+   * Discard paused order and deploy edits at the boundary in view, restoring
+   * the recorded orders without moving the cursor (so the redo branch survives).
+   * Used by the "orders changed" warning's explicit restore action.
+   */
+  discardOrderChanges(): void {
+    if (this.turnActive || this.replaying) return
+    // Close an in-flight mega turn so the burst being viewed is a real boundary.
+    if (this.megaActive) this.endMegaTurn()
+    if (this.turnActive || this.replaying) return
+    this.restoreTurn(this.history[this.cursor].state)
+    this.barProgress = 0
+    this.paused = true
+    this.bus.emit('info', 'order changes discarded')
+  }
+
+  /**
    * Advance the cursor one boundary and replay the beat that produced it. A
    * non-turn boundary has no beat to animate, so it is shown instantly. Returns
    * false when already at the latest boundary. Used by space and play-forward.
@@ -1203,7 +1226,7 @@ export class Game {
   private startReplay(entry: HistoryEntry): void {
     const start = entry.start
     if (!start || entry.ticks <= 0) return
-    // The recorded start already carries the turn's orders/stances and rules.
+    // The recorded start already carries the turn's orders and rules.
     this.restoreTurn(start)
     if (entry.pending) this.restoreCommands(entry.pending)
     this.replaying = true
@@ -1318,6 +1341,8 @@ export class Game {
     this.turnActive = false
     this.barProgress = 1
     this.paused = true
+    // Decide the standoff draw before capturing, so the boundary records it.
+    const drew = this.checkStalemate()
     // A completed turn is a new history boundary; anything undone is replaced.
     this.pushHistory({
       state: this.captureTurn(),
@@ -1334,8 +1359,33 @@ export class Game {
     this.bus.emit('phase', 'turn end', {
       data: { turn: this.turn, tick: this.tick, ticks: this.turnTicks, mode: 'turn' },
     })
+    if (drew) {
+      this.bus.emit('draw', 'draw \u2014 both sides are down to only their king')
+      return
+    }
     // Buffered requests start once this turn ends, back-to-back.
     this.pump()
+  }
+
+  /**
+   * Count one completed beat toward the both-kings-only draw. Returns true once
+   * the standoff has run its grace turns and the battle is drawn. Reset whenever
+   * a field piece returns (undo, editor).
+   */
+  private checkStalemate(): boolean {
+    if (this.winner !== null || this.drawn) return this.drawn
+    // A genuine two-kings standoff: both kings on the board with no field
+    // pieces. The predicate alone would also match a board with no kings at all
+    // (both down on the same tick), which is a draw, not this freeze.
+    const kingsAlive = hasLivingKing(this, 'red') && hasLivingKing(this, 'blue')
+    if (!kingsAlive || !isKingOnlyDraw(this)) {
+      this.stalemateTurns = 0
+      return false
+    }
+    this.stalemateTurns++
+    if (this.stalemateTurns < STALEMATE_DRAW_TURNS) return false
+    this.drawn = true
+    return true
   }
 
   private captureTurn(): TurnState {
@@ -1346,6 +1396,7 @@ export class Game {
       turn: this.turn,
       teams: structuredClone(this.teams),
       winner: this.winner,
+      drawn: this.drawn,
       settings: this.simSettings(),
     }
   }
@@ -1378,6 +1429,8 @@ export class Game {
       this.teams[id] = structuredClone(state.teams[id])
     }
     this.winner = state.winner
+    this.drawn = state.drawn
+    this.stalemateTurns = 0
     this.winnerLocked = false
     this.captureOutro = false
     this.captureOutroTicks = 0
@@ -1578,7 +1631,7 @@ export class Game {
     // outro is the one exception: a fatal capture still glides the killer onto
     // the victim's square before the freeze.
     const outro = this.captureOutroActive()
-    if (this.winner !== null && !this.replaying && !outro) return
+    if (this.over && !this.replaying && !outro) return
     this.ctx.tick = this.tick
     this.ctx.turn = this.turn
     this.ctx.verbosePhases = this.pipeline.verbose
@@ -1788,6 +1841,8 @@ export class Game {
     this.rng.reset(this.seed)
     this.selected = []
     this.winner = null
+    this.drawn = false
+    this.stalemateTurns = 0
     this.winnerLocked = false
     this.captureOutro = false
     this.captureOutroTicks = 0
@@ -1963,6 +2018,34 @@ export class Game {
     return true
   }
 
+  /**
+   * Remove every piece from the board (editor "clear all"), keeping the terrain
+   * and spawns. Emits one `remove` intent per piece so a recorded battle replays
+   * exactly. Allowed only while no turn or replay is running.
+   */
+  clearPieces(): boolean {
+    if (!this.canEdit) {
+      this.bus.emit('warn', 'finish the turn before editing the board')
+      return false
+    }
+    const pieces = this.world.query(Position, Cell, Team, PieceType).slice()
+    if (pieces.length === 0) return false
+    for (const e of pieces) {
+      const cell = this.world.get(e, Cell)
+      if (cell) this.onCommand?.({ t: 'remove', at: { x: cell.x, y: cell.y } })
+      this.world.destroy(e)
+    }
+    for (const team of ['red', 'blue'] as TeamId[]) {
+      const runtime = this.teams[team]
+      for (const key of Object.keys(runtime.alive)) runtime.alive[key] = 0
+      runtime.deployed = 0
+    }
+    this.selected = []
+    if (this.editorMode) this.editorDirty = true
+    this.bus.emit('info', `cleared ${pieces.length} piece${pieces.length === 1 ? '' : 's'}`)
+    return true
+  }
+
   /** World-pixel hit test; `additive` toggles the piece in the multi-selection. */
   selectAt(worldX: number, worldY: number, additive = false): Entity | null {
     let best: Entity | null = null
@@ -2016,29 +2099,8 @@ export class Game {
     this.selected = []
   }
 
-  /**
-   * Set the persistent stance of every selected commandable piece. Unlike an
-   * order, this survives the order completing — `none` stands ground and only
-   * fires in range, so it is the way to disengage a previously attacking piece.
-   */
-  setPieceStance(mode: StanceMode): void {
-    this.noPreservePrompt = null
-    this.liveEdit(() => {
-      let n = 0
-      this.forEachCommandable((e) => {
-        const stance = this.world.get(e, Stance)
-        if (stance) stance.mode = mode
-        const cell = this.world.get(e, Cell)
-        if (cell) this.onCommand?.({ t: 'stance', from: { x: cell.x, y: cell.y }, mode })
-        n++
-      })
-      if (n > 0) this.ordersTouched = true
-      this.bus.emit('info', `${n} piece(s) stance: ${mode}`)
-    })
-  }
-
   /** Arm a BAR-style command prefix for the next left-click. */
-  setPendingCommand(mode: StanceMode): void {
+  setPendingCommand(mode: PendingCommand): void {
     this.pendingCommand = mode
     if (mode !== 'none') this.bus.emit('info', `${mode} command: left-click a target (shift to queue)`)
   }
@@ -2393,7 +2455,6 @@ export class Game {
           motion.arrived = true
         }
         // Drop the current engagement too, so the target line clears immediately.
-        // Stance is untouched: set it to `none` in the panel to stop auto-engage.
         const target = this.world.get(e, Target)
         if (target) {
           target.entity = null
@@ -2454,7 +2515,6 @@ export class Game {
       const team = this.world.require(e, Team)
       const kind = this.world.require(e, PieceType).kind
       const hp = this.world.get(e, Health)
-      const stance = this.world.get(e, Stance)
       const order = this.world.get(e, Order)
       const target = this.world.get(e, Target)
       const motion = this.world.get(e, Motion)
@@ -2466,7 +2526,6 @@ export class Game {
         name: coordName(cell.x, cell.y, this.board.height),
         pos: { x: Math.round(pos.x), y: Math.round(pos.y) },
         hp: hp ? { cur: hp.cur, max: hp.max } : null,
-        stance: stance?.mode ?? null,
         order: order
           ? {
               kind: order.kind,
@@ -2534,6 +2593,7 @@ export class Game {
       turn: state.turn,
       teams: state.teams,
       winner: state.winner,
+      drawn: state.drawn,
       settings: state.settings,
     }
   }
@@ -2546,6 +2606,7 @@ export class Game {
       turn: saved.turn,
       teams: saved.teams,
       winner: saved.winner,
+      drawn: saved.drawn ?? false,
       settings: saved.settings,
     }
   }
@@ -2681,6 +2742,9 @@ export class Game {
     this.tick = saved.tick
     this.turn = saved.turn
     this.winner = saved.winner
+    this.drawn = saved.drawn ?? false
+    this.stalemateTurns = 0
+    this.winnerLocked = false
     this.teams = structuredClone(saved.teams)
     this.gameMode = saved.gameMode
     this.playerTeam = saved.playerTeam
@@ -2881,7 +2945,6 @@ export class Game {
             glyph: ref.glyph,
             color: ref.color,
             team: ref.team,
-            stance: this.world.get(occupant, Stance)?.mode ?? 'none',
             intent: reveal ? (motion?.intent ?? 'none') : 'none',
             orderKind: reveal ? (order?.kind ?? 'none') : 'none',
             targetCoord: reveal && targetCell ? coordName(targetCell.x, targetCell.y, this.board.height) : null,
@@ -2910,7 +2973,6 @@ export class Game {
     const advantage = adv.score
     const advantageTooltip = describeAdvantage(adv)
 
-    const stanceSummary = this.stanceSummary()
     const focused = this.selected.find((e) => this.world.isAlive(e))
     const pieceInfo = focused !== undefined ? this.pieceInfo(focused) : null
 
@@ -2966,6 +3028,7 @@ export class Game {
       })),
       counts: { entities: this.world.count, pieces, projectiles },
       winner: this.winner,
+      drawn: this.drawn,
       advantage,
       advantageTooltip,
       checkmate: { red: adv.lost.red, blue: adv.lost.blue },
@@ -3008,7 +3071,6 @@ export class Game {
       barProgress: this.barProgress,
       pendingCommand: this.pendingCommand,
       selectionCount: this.selected.filter((e) => this.world.isAlive(e)).length,
-      stanceSummary,
       pieceInfo,
       noPreservePrompt: this.noPreservePrompt
         ? {
@@ -3046,18 +3108,6 @@ export class Game {
     }
   }
 
-  private stanceSummary(): StanceSummary {
-    const summary: StanceSummary = { none: 0, move: 0, attack: 0, mixed: false }
-    for (const e of this.selected) {
-      if (!this.world.isAlive(e)) continue
-      const mode = this.world.get(e, Stance)?.mode ?? 'none'
-      summary[mode]++
-    }
-    const kinds = (['none', 'move', 'attack'] as const).filter((k) => summary[k] > 0)
-    summary.mixed = kinds.length > 1
-    return summary
-  }
-
   private pieceRef(e: Entity): PieceRef | null {
     if (!this.world.isAlive(e)) return null
     const kind = this.world.get(e, PieceType)?.kind ?? '?'
@@ -3086,7 +3136,6 @@ export class Game {
     const def = kind ? PIECES[kind] : undefined
     if (!ref || !cell || !def) return null
     const hp = this.world.get(e, Health)
-    const stance = this.world.get(e, Stance)?.mode ?? 'none'
     const order = this.world.get(e, Order)
     const motion = this.world.get(e, Motion)
     const target = this.world.get(e, Target)
@@ -3133,7 +3182,6 @@ export class Game {
       weapon: weapon
         ? { key: wdef.key, left: weapon.left, cooldown: wdef.cooldown, ready: weapon.left <= 0, fired: weapon.fired }
         : null,
-      stance,
       commandable: team !== undefined && this.commandable(team),
       target: target?.entity != null ? this.pieceRef(target.entity) : null,
       underFire:

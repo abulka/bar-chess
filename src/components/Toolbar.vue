@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { SPEEDS } from '../game/constants'
 import type { GameMode, GameSnapshot, OverlayFlags } from '../game/game'
 
 const props = defineProps<{
   snapshot: GameSnapshot
 }>()
+
+/** A decided battle (a king fell or a stalemate draw) freezes the controls. */
+const over = computed(() => Boolean(props.snapshot.winner) || props.snapshot.drawn)
 
 const emit = defineEmits<{
   (e: 'select-size', size: number): void
@@ -110,19 +114,19 @@ function onSoundChange(event: Event): void {
       {{ props.snapshot.megaTurn ? 'Mega' : 'Turn' }} <b>{{ props.snapshot.turn }}</b>
     </span>
 
-    <button class="ctl" :class="{ active: props.snapshot.turnActive }" :disabled="!!props.snapshot.winner" @click="emit('turn')" title="next turn — or replay forward while viewing an earlier turn (space)">
+    <button class="ctl" :class="{ active: props.snapshot.turnActive }" :disabled="over" @click="emit('turn')" title="next turn — or replay forward while viewing an earlier turn (space)">
       {{ props.snapshot.turnActive ? '⏵ Turn…' : '⏵ Turn' }}
     </button>
     <button
       class="ctl"
       :class="{ active: props.snapshot.playing }"
-      :disabled="!!props.snapshot.winner"
+      :disabled="over"
       @click="emit('toggle-pause')"
       title="play forward through history, then continuously — a mega turn (shift+space)"
     >
       {{ props.snapshot.paused ? '▶ Play' : '⏸ Pause' }}
     </button>
-    <button class="ctl" :disabled="!!props.snapshot.winner" @click="emit('step')">⏭ Step</button>
+    <button class="ctl" :disabled="over" @click="emit('step')">⏭ Step</button>
     <button class="ctl" :disabled="!props.snapshot.canUndo" @click="emit('undo')">↶ Undo</button>
     <button class="ctl" :disabled="!props.snapshot.canRedo" @click="emit('redo')">↷ Redo</button>
     <button class="ctl" :disabled="!props.snapshot.canReplay" @click="emit('replay')">↺ Replay</button>

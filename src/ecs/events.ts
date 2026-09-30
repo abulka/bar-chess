@@ -21,6 +21,7 @@ export type EventType =
   | 'explosion'
   | 'cleanup'
   | 'win'
+  | 'draw'
   | 'info'
   | 'warn'
 
