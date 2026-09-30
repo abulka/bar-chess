@@ -120,6 +120,26 @@ test('changing orders while backtracked prompts to fork before space continues',
   await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().turnActive)).toBe(true)
 })
 
+test('space answers the orders-changed prompt by forking and continuing', async ({ page }) => {
+  await playTurns(page, 2)
+  await page.keyboard.press('u')
+  await page.getByRole('button', { name: 'turns', exact: true }).click()
+
+  await editOrders(page)
+  // Wait for the edit to reach the UI before pressing space.
+  await expect(page.locator('.turn-panel .order-changed')).toBeVisible()
+  // The first space opens the fork prompt instead of silently replaying.
+  await page.keyboard.press('Space')
+  await expect(
+    page.locator('.turn-panel .fork-confirm', { hasText: 'Orders changed here' }),
+  ).toBeVisible()
+
+  // A second space takes the prompt's default: fork and continue.
+  await page.keyboard.press('Space')
+  await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().canRedo)).toBe(false)
+  await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().turnActive)).toBe(true)
+})
+
 test('discarding changed orders replays the recorded beat forward', async ({ page }) => {
   await playTurns(page, 2)
   await page.keyboard.press('u')
@@ -158,4 +178,26 @@ test('Restore orders reverts the edits in place and keeps the redo branch', asyn
   expect(state.ordersTouched).toBe(false)
   expect(state.canRedo).toBe(true)
   expect(state.turnActive).toBe(false)
+})
+
+test('reveals the turns tab when a prompt needs attention', async ({ page }) => {
+  await playTurns(page, 2)
+  await page.keyboard.press('u')
+
+  // View the games tab, then hide the rails so the prompt would be invisible.
+  await page.getByRole('button', { name: 'games', exact: true }).click()
+  await page.keyboard.press('Tab')
+  await expect(page.locator('.rail-tabs')).toHaveCount(0)
+
+  // Editing orders makes `ordersTouched` true: the app must reveal the rail and
+  // switch to the turns tab so the "orders changed" warning is on screen.
+  await editOrders(page)
+  await expect(page.locator('.turn-panel .order-changed')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'turns', exact: true })).toHaveClass(/active/)
+
+  // Space opens the blocking fork prompt on the same tab, so it can be answered.
+  await page.keyboard.press('Space')
+  await expect(
+    page.locator('.turn-panel .fork-confirm', { hasText: 'Orders changed here' }),
+  ).toBeVisible()
 })

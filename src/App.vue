@@ -846,6 +846,29 @@ watch(
   },
 )
 
+// Prompts in the turns tab (the fork confirmations and the "orders changed"
+// warning) block or change what the spacebar does, so bring the turns tab — and
+// the left rail itself — into view whenever one opens. The user stays on the
+// turns tab after answering.
+watch(
+  () =>
+    forkPrompt.value ||
+    forkArmed.value ||
+    (snapshot.value.ordersTouched && snapshot.value.canRedo),
+  (attention) => {
+    if (!attention) return
+    leftTab.value = 'turns'
+    if (!game.railsVisible) {
+      game.railsVisible = true
+      persistSettings()
+      nextTick(() => {
+        reclampRails()
+        boardView.value?.resize()
+      })
+    }
+  },
+)
+
 function onJumpTurn(index: number): void {
   game.jumpToTurn(index)
   liveLog.rewind(game.turn)
@@ -1004,7 +1027,11 @@ function onKey(event: KeyboardEvent): void {
     onPlayControl()
   } else if (event.key === ' ') {
     event.preventDefault()
-    if (event.shiftKey) {
+    if (forkPrompt.value) {
+      // Space answers the "orders changed" prompt with its default answer, fork
+      // and continue, so an open prompt never just swallows the keypress.
+      onForkContinue()
+    } else if (event.shiftKey) {
       // Shift+space: play continuously — forward through history first when
       // viewing an earlier turn, then live from the tip.
       guardContinue(() => game.requestPlay())

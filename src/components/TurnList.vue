@@ -115,10 +115,16 @@ watch(
         <p class="fork-note">
           Forking discards {{ dropped }} future turn{{ dropped === 1 ? '' : 's' }} and plays on
           from this boundary with your edits. Continuing without forking replays the recorded
-          turns and drops your order changes.
+          turns and drops your order changes. Press <b>space</b> to fork and continue.
         </p>
         <div class="fork-actions">
-          <button class="ctl small" @click="emit('fork-continue')">Fork &amp; continue</button>
+          <button
+            class="ctl small"
+            title="fork and continue (space)"
+            @click="emit('fork-continue')"
+          >
+            Fork &amp; continue
+          </button>
           <button class="ctl small" @click="emit('discard-order-changes')">Discard changes</button>
           <button class="ctl small" @click="emit('cancel-continue')">Cancel</button>
         </div>
@@ -140,17 +146,16 @@ watch(
       <div v-else-if="backtracked && snapshot.ordersTouched" class="warn order-changed">
         <p>
           <b>orders changed</b> — continuing discards {{ dropped }} future
-          turn{{ dropped === 1 ? '' : 's' }}. <b>space</b> will ask whether to fork.
-        </p>
-        <div class="fork-actions">
+          turn{{ dropped === 1 ? '' : 's' }}. <b>space</b> will ask whether to fork,
+          or
           <button
-            class="ctl small"
+            type="button"
+            class="link"
             title="revert to the orders recorded at this boundary"
             @click="emit('restore-orders')"
           >
-            Restore orders
-          </button>
-        </div>
+            Restore orders</button>.
+        </p>
       </div>
       <p v-else-if="backtracked" class="hint">
         viewing turn {{ current }} of {{ latest }} — <b>space</b> replays forward ·
@@ -218,6 +223,26 @@ watch(
 
 .order-changed p {
   margin: 0;
+}
+
+/* The restore action is secondary to the informational note, so it reads as a
+ * subdued inline link rather than a full button. */
+.order-changed .link {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.order-changed .link:hover {
+  opacity: 1;
+  color: #ffd8a0;
 }
 
 .fork-confirm .fork-q {
