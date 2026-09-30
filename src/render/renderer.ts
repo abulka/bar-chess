@@ -49,6 +49,7 @@ import {
   healTint,
   healthColor,
 } from './palette'
+import { selfPreservationThresholds } from '../game/selfPreservation'
 import { bakeTerrain } from './terrain'
 
 const STANCE_COLORS: Record<string, string> = {
@@ -783,16 +784,23 @@ export class Renderer {
       const barH = Math.max(1, t * 0.035)
       const barY = pos.y - t * 0.4
       let barSlot = 0
-      if (game.overlays.health) {
-        const ratio = healthRatio(health, 0)
-        if (ratio < BAR_HIDE_THRESHOLD) {
-          this.drawBar(ctx, pos.x, barY, barW, barH, ratio, healthColor(ratio))
-          barSlot++
-        }
-      }
       const weapon = game.world.get(e, Weapon)
       const kind = game.world.get(e, PieceType)?.kind
       const def = kind ? PIECES[kind] : undefined
+      // Subtle notches mark the two self-preservation thresholds (critical and
+      // retreat). Pawns never retreat, so they get none.
+      let marks: number[] | undefined
+      if (kind && kind !== 'pawn') {
+        const t = selfPreservationThresholds(kind)
+        marks = [t.critical, t.preserve]
+      }
+      if (game.overlays.health) {
+        const ratio = healthRatio(health, 0)
+        if (ratio < BAR_HIDE_THRESHOLD) {
+          this.drawBar(ctx, pos.x, barY, barW, barH, ratio, healthColor(ratio), marks)
+          barSlot++
+        }
+      }
       if (weapon && def && game.overlays.reload) {
         const cd = WEAPONS[def.weapon].cooldown
         const ratio = cd > 0 ? 1 - weapon.left / cd : 1
@@ -844,6 +852,7 @@ export class Renderer {
     h: number,
     ratio: number,
     fill: string,
+    marks?: readonly number[],
   ): void {
     const left = x - w / 2
     const r = Math.max(0, Math.min(1, ratio))
@@ -854,6 +863,15 @@ export class Renderer {
     if (r > 0) {
       ctx.fillStyle = fill
       ctx.fillRect(left, y, w * r, h)
+    }
+    // A faint light notch at each threshold, readable over both the fill and the
+    // dark frame, so the self-preservation lines show on the board too.
+    if (marks) {
+      ctx.fillStyle = 'rgba(233, 238, 247, 0.4)'
+      for (const m of marks) {
+        const mx = left + w * Math.max(0, Math.min(1, m))
+        ctx.fillRect(mx - 0.5, y, 1, h)
+      }
     }
   }
 

@@ -9,7 +9,6 @@ import {
   serializeRecord,
   validateRecord,
 } from '../../src/game/record'
-import type { GameRecord } from '../../src/game/record'
 import { clearComponents } from '../helpers'
 
 function playTurns(game: Game, turns: number): void {
@@ -55,6 +54,30 @@ describe('game record', () => {
 
     const replay = replayRecord(record)
     expect(replay.game.winner).toBe(game.winner)
+    expect(JSON.stringify(replay.game.toDebugJson())).toBe(before)
+  })
+
+  it('replays a Shift-queued order sequence exactly', () => {
+    const game = new Game(8, 'human-vs-ai', 77)
+    const recorder = new Recorder(game)
+    const rook = bluePieces(game).find((e) => {
+      const cell = game.world.get(e, Cell)
+      return cell?.x === 0 && cell.y === 7
+    })
+    expect(rook).toBeDefined()
+    game.selected = [rook as number]
+    game.orderAt({ x: 0, y: 5 })
+    game.orderAt({ x: 0, y: 3 }, undefined, { queue: true })
+    game.selected = []
+    playTurns(game, 3)
+
+    const before = JSON.stringify(game.toDebugJson())
+    const record = recorder.finish({ turns: game.turn, ticks: game.tick })
+    // The queued step is recorded with its explicit flag so replay re-queues it.
+    const orderIntents = record.turns.flatMap((t) => t.intents).filter((i) => i.t === 'order')
+    expect(orderIntents.some((i) => i.queue === true)).toBe(true)
+
+    const replay = replayRecord(record)
     expect(JSON.stringify(replay.game.toDebugJson())).toBe(before)
   })
 
@@ -140,7 +163,7 @@ describe('game record', () => {
     const [e] = bluePieces(game)
     const cell = game.world.require(e, Cell)
     game.selected = [e]
-    game.orderAt({ x: cell.x, y: 0 }, 'move', true)
+    game.orderAt({ x: cell.x, y: 0 }, 'move', { force: true })
     game.selected = []
 
     // The override rides the order and the command records that Alt was held.
@@ -255,7 +278,7 @@ describe('game record', () => {
     expect(JSON.stringify(replay.game.toDebugJson())).toBe(before)
   })
 
-  it('still accepts version 1 records without a baseline', () => {
+  it('rejects pre-v3 records that lack the explicit queue flag', () => {
     const legacy = {
       v: 1,
       boardId: 'board-8',
@@ -267,8 +290,7 @@ describe('game record', () => {
       turns: [],
       result: null,
     }
-    expect(validateRecord(legacy).ok).toBe(true)
-    const replay = replayRecord(legacy as unknown as GameRecord)
-    expect(replay.game.board.width).toBe(8)
+    expect(validateRecord(legacy).ok).toBe(false)
+    expect(validateRecord({ ...legacy, v: 2 }).ok).toBe(false)
   })
 })

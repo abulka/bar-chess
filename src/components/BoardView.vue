@@ -187,7 +187,7 @@ function onPointerUp(event: PointerEvent): void {
   if (wasCommand) {
     if (!moved && button === 0 && props.pending !== 'none') {
       const command = props.pending === 'attack' ? 'attack' : 'move'
-      props.game.orderAt(cellAt(event), command, event.altKey)
+      props.game.orderAt(cellAt(event), command, { force: event.altKey, queue: shiftDown })
       // Shift keeps the prefix armed so several commands can be queued.
       if (!shiftDown) props.game.clearPendingCommand()
       emit('ordered')
@@ -231,7 +231,7 @@ function onContextMenu(event: MouseEvent): void {
     return
   }
   props.game.clearPendingCommand()
-  props.game.orderAt(cellAt(event), undefined, event.altKey)
+  props.game.orderAt(cellAt(event), undefined, { force: event.altKey, queue: event.shiftKey })
   emit('ordered')
   emit('changed')
 }

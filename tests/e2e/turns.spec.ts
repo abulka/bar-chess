@@ -88,3 +88,54 @@ test('keeps the backtrack hint pinned in view on a long turn list', async ({ pag
   await expect(foot).toBeInViewport()
   await expect(page.locator('.turn-panel .hint')).toContainText('viewing turn')
 })
+
+/** Change a blue piece's stance while paused so `ordersTouched` becomes true. */
+async function editOrders(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(() => {
+    const g = (window as any).game
+    const rook = g.toDebugJson().pieces.find((p: any) => p.team === 'blue' && p.kind === 'rook')
+    g.selected = [rook.e]
+    g.setPieceStance('move')
+    g.selected = []
+  })
+}
+
+test('changing orders while backtracked prompts to fork before space continues', async ({ page }) => {
+  await playTurns(page, 2)
+  await page.keyboard.press('u')
+  await page.getByRole('button', { name: 'turns', exact: true }).click()
+
+  await editOrders(page)
+  await expect(page.locator('.turn-panel .order-changed')).toBeVisible()
+
+  // Space no longer silently replays: it opens the fork prompt first.
+  await page.keyboard.press('Space')
+  const prompt = page.locator('.turn-panel .fork-confirm', { hasText: 'Orders changed here' })
+  await expect(prompt).toBeVisible()
+  expect(await page.evaluate(() => (window as any).game.snapshot().canRedo)).toBe(true)
+
+  // Fork & continue discards the future and starts a fresh turn from here.
+  await prompt.getByRole('button', { name: 'Fork & continue' }).click()
+  await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().canRedo)).toBe(false)
+  await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().turnActive)).toBe(true)
+})
+
+test('discarding changed orders replays the recorded beat forward', async ({ page }) => {
+  await playTurns(page, 2)
+  await page.keyboard.press('u')
+  await page.getByRole('button', { name: 'turns', exact: true }).click()
+
+  await editOrders(page)
+  await expect(page.locator('.turn-panel .order-changed')).toBeVisible()
+
+  await page.keyboard.press('Space')
+  const prompt = page.locator('.turn-panel .fork-confirm', { hasText: 'Orders changed here' })
+  await prompt.getByRole('button', { name: 'Discard changes' }).click()
+
+  await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().replaying)).toBe(true)
+  await expect.poll(() => page.evaluate(() => (window as any).game.snapshot().replaying)).toBe(false)
+  // It replayed the recorded beat forward and discarded the edits.
+  const state = await page.evaluate(() => (window as any).game.snapshot())
+  expect(state.historyIndex).toBe(state.historyLength - 1)
+  expect(state.turnActive).toBe(false)
+})

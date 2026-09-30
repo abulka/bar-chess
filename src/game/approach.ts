@@ -179,7 +179,7 @@ export interface AttackPlan {
  *
  * `inRange` is the hold signal (already hittable — stop and fire). `cell` is
  * always the walk-to goal chain (firing cell → closest empty → target), even
- * when holding: callers that do not hold (`orderSettled`, `planStep`) need that
+ * when holding: callers that do not hold (`planStep`) need that
  * chain, while holders (`planAttack`, `pursue`) check `inRange` first and ignore it.
  * `avoid` (the enemy king's 3×3) steers both the firing-cell pick and the
  * unreachable-target fallback, so a best-effort approach stops on a safe square.

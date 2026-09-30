@@ -25,8 +25,6 @@ export function createPiece(ctx: SimContext, team: 'red' | 'blue', def: PieceDef
     chessKill: null,
     noPreserveUntil: -1,
     reachable: true,
-    resumeTarget: null,
-    resumeTurn: -1,
     queue: [],
     log: [],
   })

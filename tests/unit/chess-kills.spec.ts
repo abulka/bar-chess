@@ -69,9 +69,9 @@ describe('traditional chess kills', () => {
     game.chessKills = true
     game.selected = [queen]
 
-    // The move starts the active order, so the attack click is only queued.
+    // The move starts the active order, so the Shift+attack click is only queued.
     game.orderAt({ x: 0, y: 4 }, 'move')
-    game.orderAt({ x: 4, y: 5 })
+    game.orderAt({ x: 4, y: 5 }, undefined, { queue: true })
 
     const order = game.world.require(queen, Order)
     expect(order.chessKill).toBeNull()

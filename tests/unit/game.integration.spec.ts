@@ -445,7 +445,7 @@ describe('Game integration', () => {
     game.selected = [queen]
     game.setPieceStance('attack')
     game.orderAt({ x: 5, y: 4 }, 'move')
-    game.orderAt({ x: 3, y: 4 }, 'move')
+    game.orderAt({ x: 3, y: 4 }, 'move', { queue: true })
 
     const info = game.snapshot().pieceInfo
     expect(info).not.toBeNull()
@@ -1425,7 +1425,7 @@ describe('Game mega turns', () => {
     game.playerTeam = 'blue'
     game.teams.blue.controller = 'human'
     game.selected = [king]
-    game.orderAt({ x: 4, y: 0 }, 'move', true)
+    game.orderAt({ x: 4, y: 0 }, 'move', { force: true })
 
     const order = game.world.require(king, Order)
     // Active at issue and through the next two simulated turns, then lapsed.

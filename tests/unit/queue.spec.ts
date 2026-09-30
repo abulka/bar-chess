@@ -13,7 +13,7 @@ function runTurn(game: Game): void {
 describe('order queue', () => {
   beforeEach(() => clearComponents())
 
-  it('a second right-click appends a queued goto', () => {
+  it('a plain second click replaces the active order', () => {
     const game = new Game(8)
     const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
     game.selected = [rook]
@@ -24,18 +24,39 @@ describe('order queue', () => {
     expect(order.dest).toEqual({ x: 0, y: 5 })
     expect(order.queue).toHaveLength(0)
 
+    // A plain click replaces the whole plan rather than queueing behind it.
     game.orderAt({ x: 0, y: 3 })
-    expect(order.queue).toHaveLength(1)
-    expect(order.queue[0]).toMatchObject({ kind: 'goto', dest: { x: 0, y: 3 } })
+    expect(order.kind).toBe('goto')
+    expect(order.dest).toEqual({ x: 0, y: 3 })
+    expect(order.queue).toHaveLength(0)
   })
 
-  it('queues moves then an attack, context-based', () => {
+  it('Shift appends a queued step, and a plain order clears the queue', () => {
+    const game = new Game(8)
+    const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
+    game.selected = [rook]
+
+    game.orderAt({ x: 0, y: 5 })
+    game.orderAt({ x: 0, y: 3 }, undefined, { queue: true })
+    const order = game.world.require(rook, Order)
+    expect(order.kind).toBe('goto')
+    expect(order.dest).toEqual({ x: 0, y: 5 })
+    expect(order.queue).toHaveLength(1)
+    expect(order.queue[0]).toMatchObject({ kind: 'goto', dest: { x: 0, y: 3 } })
+
+    // A plain order replaces the active order and drops the queued step.
+    game.orderAt({ x: 2, y: 3 })
+    expect(order.dest).toEqual({ x: 2, y: 3 })
+    expect(order.queue).toHaveLength(0)
+  })
+
+  it('queues moves then an attack with Shift, context-based', () => {
     const { game, attacker, victim } = duelSetup()
     game.selected = [attacker]
 
     game.orderAt({ x: 4, y: 3 })
-    game.orderAt({ x: 3, y: 4 })
-    game.orderAt({ x: 4, y: 5 })
+    game.orderAt({ x: 3, y: 4 }, undefined, { queue: true })
+    game.orderAt({ x: 4, y: 5 }, undefined, { queue: true })
 
     const order = game.world.require(attacker, Order)
     expect(order.kind).toBe('goto')
@@ -52,7 +73,7 @@ describe('order queue', () => {
     game.selected = [rook, knight]
 
     game.orderAt({ x: 0, y: 5 })
-    game.orderAt({ x: 0, y: 3 })
+    game.orderAt({ x: 0, y: 3 }, undefined, { queue: true })
 
     expect(game.world.require(rook, Order).queue).toHaveLength(1)
     expect(game.world.require(knight, Order).queue).toHaveLength(1)
@@ -68,7 +89,7 @@ describe('order queue', () => {
       ).e as number
     game.selected = [bishop]
     game.orderAt({ x: 7, y: 5 })
-    game.orderAt({ x: 6, y: 4 })
+    game.orderAt({ x: 6, y: 4 }, undefined, { queue: true })
     runTurn(game)
 
     const order = game.world.require(bishop, Order)
@@ -83,7 +104,7 @@ describe('order queue', () => {
     game.selected = [queen]
 
     game.orderAt({ x: 4, y: 3 })
-    game.orderAt({ x: 3, y: 3 })
+    game.orderAt({ x: 3, y: 3 }, undefined, { queue: true })
     runTurn(game)
 
     const order = game.world.require(queen, Order)
@@ -97,7 +118,7 @@ describe('order queue', () => {
     const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
     game.selected = [rook]
     game.orderAt({ x: 0, y: 5 })
-    game.orderAt({ x: 0, y: 3 })
+    game.orderAt({ x: 0, y: 3 }, undefined, { queue: true })
 
     game.clearOrders()
     const order = game.world.require(rook, Order)
@@ -111,7 +132,7 @@ describe('order queue', () => {
     game.selected = [rook]
 
     game.orderAt({ x: 0, y: 5 })
-    game.orderAt({ x: 0, y: 3 })
+    game.orderAt({ x: 0, y: 3 }, undefined, { queue: true })
 
     const order = game.world.require(rook, Order)
     expect(order.kind).toBe('none')
@@ -123,7 +144,7 @@ describe('order queue', () => {
     game.selected = [attacker]
 
     game.orderAt({ x: 4, y: 3 })
-    game.orderAt({ x: 4, y: 5 })
+    game.orderAt({ x: 4, y: 5 }, undefined, { queue: true })
 
     const json = JSON.stringify(game.exportPosition())
     game.loadSize(8)
@@ -135,11 +156,10 @@ describe('order queue', () => {
     expect(order.queue.map((s) => s.kind)).toEqual(['attack'])
   })
 
-  it('replaces a settled (unreachable) goto instead of queueing behind it', () => {
+  it('a plain order replaces a parked best-effort goto', () => {
     const game = new Game(8)
     // A bishop already parked at the closest legal point to e5, a square it can
-    // never reach (wrong colour): the best-effort order has no progress left, so
-    // the next command replaces it rather than being swallowed by the queue.
+    // never reach (wrong colour): a plain order replaces it outright.
     const bishop = placePiece(game, 'bishop', 'blue', { x: 4, y: 4 })
     game.selected = [bishop]
 
@@ -154,10 +174,10 @@ describe('order queue', () => {
     expect(order.queue).toHaveLength(0)
   })
 
-  it('replaces a settled attack order with a move', () => {
+  it('a plain move replaces an attack on an unreachable target', () => {
     const game = new Game(8)
-    // A bishop can never hit the king on the other colour; it is already at the
-    // closest legal point, so the attack has done all it can and yields to a move.
+    // A bishop can never hit the king on the other colour; a plain move drops
+    // the attack outright (and its parked target).
     const bishop = placePiece(game, 'bishop', 'blue', { x: 4, y: 4 })
     const king = placePiece(game, 'king', 'red', { x: 4, y: 3 })
     game.selected = [bishop]
@@ -195,7 +215,6 @@ describe('order queue', () => {
     const order = game.world.require(bishop, Order)
     expect(order.kind).toBe('goto')
     expect(order.dest).toEqual({ x: 5, y: 5 })
-    expect(order.resumeTarget).toBeNull()
     expect(game.world.require(bishop, Target).entity).toBeNull()
     void king
   })
@@ -211,14 +230,14 @@ describe('order queue', () => {
     expect(game.world.require(rook, Motion).holdUntilHp).toBe(0)
   })
 
-  it('still queues behind an order that is merely blocked by a friendly', () => {
+  it('Shift still queues behind an order that is merely blocked by a friendly', () => {
     const game = new Game(8)
     const rook = placePiece(game, 'rook', 'blue', { x: 0, y: 7 })
     placePiece(game, 'pawn', 'blue', { x: 0, y: 6 }) // blocks the a-file
     game.selected = [rook]
 
     game.orderAt({ x: 0, y: 4 })
-    game.orderAt({ x: 2, y: 4 })
+    game.orderAt({ x: 2, y: 4 }, undefined, { queue: true })
 
     const order = game.world.require(rook, Order)
     expect(order.kind).toBe('goto')

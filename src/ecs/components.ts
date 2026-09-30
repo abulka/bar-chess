@@ -66,15 +66,11 @@ export interface OrderData {
    * `src/game/noPreserve.ts`. It ends when the order is replaced, completed or
    * cleared, so a promoted queued step does not inherit it. Kept on the order
    * (not in `cmds`) so it is part of the world snapshot and replays
-   * deterministically, like `resumeTurn`/`chessKill`.
+   * deterministically, like `chessKill`.
    */
   noPreserveUntil: number
   /** For an attack order: whether the target is positionally reachable at all. */
   reachable: boolean
-  /** Attack target parked while a goto suspends the attack; resumed on arrival. */
-  resumeTarget: Entity | null
-  /** Turn index at which a suspension may re-engage; -1 while unarmed. */
-  resumeTurn: number
   /** Steps queued behind the active order, executed in sequence. */
   queue: OrderStep[]
   /** Recent order transitions, oldest first (bounded). Lets the panel explain

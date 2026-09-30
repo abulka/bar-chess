@@ -186,6 +186,29 @@ describe('turn list & history navigation', () => {
     expect(game.snapshot().ordersTouched).toBe(false)
   })
 
+  it('continuing with changed orders replays forward and discards the edits', () => {
+    const game = new Game(8, 'human-vs-ai', 55)
+    runTurn(game)
+    runTurn(game)
+    game.undoTurn()
+
+    const blue = [...game.world.query(Cell)].find((e) => game.world.get(e, Team) === 'blue')
+    game.selected = [blue as number]
+    game.setPieceStance('move')
+    expect(game.snapshot().ordersTouched).toBe(true)
+    expect(game.snapshot().canRedo).toBe(true)
+
+    // Space replays the recorded beat; the restore drops the uncommitted edits.
+    // Only an explicit fork keeps them, which is what the prompt guards.
+    game.advance()
+    expect(game.snapshot().replaying).toBe(true)
+    runUntil(game, () => !game.isReplaying)
+    expect(game.snapshot().ordersTouched).toBe(false)
+    // Landed on the recorded boundary, not a new turn with the edits.
+    expect(game.snapshot().historyIndex).toBe(game.snapshot().historyLength - 1)
+    expect(game.snapshot().turnActive).toBe(false)
+  })
+
   it('play-forward runs the recorded beats then continues live at the tip', () => {
     const game = new Game(8, 'ai-vs-ai', 61)
     runTurn(game)

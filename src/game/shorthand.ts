@@ -59,7 +59,8 @@ walk into a firing line. A king already in check simply holds and fights; the ba
 only when a king dies.
 Win: the battle ends when a king dies and the other team wins; both kings down on the same tick is a
 draw. A game stopped at the turn cap without a king death is a partial, not a draw.
-Rules toggles: autoPreserve lets a wounded AI/Attack-stance piece retreat to heal; captureAdvance
+Rules toggles: autoPreserve enables the automatic self-preservation retreat for any wounded piece
+(with it off, an AI/Attack-stance piece still makes its own low-HP cover step); captureAdvance
 lets an idle killer step onto a victim's now-empty square; chessKills enables the parked immediate
 chess kill (lands next tick, outranks self-preservation); promotion turns a pawn that reaches the
 enemy back rank into a queen; finishPressure ramps damage to a king whose side has no field pieces

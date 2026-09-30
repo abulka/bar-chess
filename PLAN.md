@@ -81,23 +81,23 @@ Attack to have a piece keep engaging on its own, or None to disengage.
   prefixes). `a` + click on an empty or friendly square is a no-op. The prefix is
   consumed by the click; hold **Shift** to keep it armed and queue several. A
   plain left-click selects and clears any armed prefix.
-- **Right-click again** (or Shift+right-click) → *append* a step to
-  the piece's **order queue**. The first right-click on a piece with nothing
-  planned creates the active order; further clicks queue `goto`/`attack` steps in
-  sequence, so `move, move, attack` is one plan (a duplicate of the active or last
-  queued step is ignored). Each step runs to completion (one move per turn) before
-  the next promotes; a merely blocked waypoint waits like a single order, while
-  one the piece's geometry can never reach is skipped. The queued remainder is
+- **Shift+right-click** → *append* a step to the piece's **order queue**. A plain
+  right-click **replaces** the piece's whole plan (active order and any queued
+  steps); Shift makes the append explicit, so `move, move, attack` is one plan
+  (a duplicate of the active or last queued step is ignored). Each step runs to
+  completion (one move per turn) before the next promotes; a merely blocked
+  waypoint waits like a single order, while one the piece's geometry can never
+  reach is skipped. The queued remainder is
   drawn as a dim dashed chain with numbered waypoint markers (a queued attack
   shows a dim threat line). `c` or `Backspace` clears the active order **and** the
   queue (and drops the current target); it does not change the stance.
 - **Pulling back mid-attack**: a move issued on a piece with an active attack
-  order *suspends* the attack instead of discarding it — the parked enemy is shown
-  with an amber dashed chain/ring. The piece travels to the objective, then
-  **regroups for two turns**: it holds position, or kites one step back while under
-  fire (raising distance while keeping the enemy in range), and only re-engages
-  once the window has elapsed *and* it is no longer under fire. A new order or `c`
-  cancels the suspension.
+  order **replaces** the attack — there is no parked target and no automatic
+  re-engagement. To pull back and then re-engage, Shift-queue a follow-up attack
+  behind the move, set the piece to **Attack** stance so it acquires a target on
+  its own, or re-issue the attack. (Autonomous **self-preservation** is separate:
+  a wounded attacker still breaks off to heal on its own and resumes its order —
+  see below.)
 - The attack's route is always shown and **theoretical**: it assumes other pieces
   will move, so only walls and the target's own square are avoided and the route
   stays visible even when the piece is boxed in. It ends on a real square — a
@@ -292,8 +292,11 @@ they are hit once they are outgunned or focused
 by two or more attackers; cheaper pieces only react once they are hurt. Costlier
 pieces bail earlier (queen/king at 50% health, rook 45%, bishop/knight 40%). Pawns
 never retreat: they can only step forward, so a "flee" would walk them into the
-enemy and drop the shot, so they hold and fire instead. A persisted
-**auto-preserve** checkbox in the toolbar turns the behaviour off.
+enemy and drop the shot, so they hold and fire instead. The persisted
+**auto-preserve** toolbar checkbox disables this automatic retreat pass, but it
+does **not** mean "never retreat": an AI-controlled or **Attack**-stance piece
+still takes its own low-HP cover step while keeping its target (the stance logic
+below).
 
 **Sustained-fire awareness and retreat commitment.** Above the HP gate a piece
 still reconsiders: after `HIT_STREAK_TRIGGER = 2` hits taken since its last
@@ -464,7 +467,8 @@ selected pieces to keep the board readable.
 
 Mouse: **left-click** to select (shift-click adds), **drag** to box-select,
 **shift-drag** or middle-drag to pan, **wheel** to zoom, **right-click** to
-order (goto on an empty square, attack on an enemy; repeat or Shift to queue).
+order (goto on an empty square, attack on an enemy; replaces the plan —
+**shift+right-click** to queue a step).
 **`m`/`a` then left-click** forces a move/attack command (Shift keeps the prefix
 armed to queue more). Hover shows a per-piece order preview (faint ghosts) and
 the square name. The board is labelled with chess coordinates; the control hints

@@ -62,6 +62,14 @@ const barHeld = computed(
 )
 const copied = ref('')
 const forkArmed = ref(false)
+/**
+ * Two-step guard shown when uncommitted order edits while viewing an earlier
+ * turn are about to be discarded by continuing (space/play). Resolved by
+ * forking, discarding the edits, or cancelling.
+ */
+const forkPrompt = ref(false)
+/** The continue action stashed while the fork prompt is open. */
+let pendingContinue: (() => void) | null = null
 const boardView = ref<InstanceType<typeof BoardView> | null>(null)
 const slots = ref<SlotMeta[]>([])
 const slotName = ref('')
@@ -725,8 +733,7 @@ function onReset(): void {
 function onTurn(): void {
   // At the latest boundary this starts a turn; while viewing an earlier turn it
   // replays the next recorded beat forward instead of forking the timeline.
-  game.advance()
-  refresh()
+  guardContinue(() => game.advance())
 }
 
 function onPlayControl(): void {
@@ -734,10 +741,26 @@ function onPlayControl(): void {
     // Pause live play / abort a replay back to its boundary. Read the live state
     // rather than the polled snapshot so the first press is never misrouted.
     game.togglePause()
+    refresh()
   } else {
     // Idle: play forward through history, then live (a mega turn).
-    game.requestPlay()
+    guardContinue(() => game.requestPlay())
   }
+}
+
+/**
+ * Run a "continue" action that would leave the boundary being viewed. If orders
+ * were edited there, replaying forward would silently discard them, so stash the
+ * action and open the fork prompt instead.
+ */
+function guardContinue(action: () => void): void {
+  if (snapshot.value.ordersTouched && snapshot.value.canRedo) {
+    pendingContinue = action
+    forkPrompt.value = true
+    refresh()
+    return
+  }
+  action()
   refresh()
 }
 
@@ -764,7 +787,33 @@ function cancelFork(): void {
   forkArmed.value = false
 }
 
-// Any timeline move or order edit invalidates a pending fork confirmation.
+/** Accept the "orders changed" prompt: fork the timeline, then continue. */
+function onForkContinue(): void {
+  const action = pendingContinue
+  pendingContinue = null
+  forkPrompt.value = false
+  confirmFork()
+  action?.()
+  refresh()
+}
+
+/** Continue without forking: replay forward, discarding the order edits. */
+function onDiscardOrderChanges(): void {
+  const action = pendingContinue
+  pendingContinue = null
+  forkPrompt.value = false
+  action?.()
+  refresh()
+}
+
+function onCancelContinue(): void {
+  pendingContinue = null
+  forkPrompt.value = false
+  refresh()
+}
+
+// Any timeline move or order edit invalidates a pending fork confirmation or
+// continue prompt (the stashed action no longer matches the boundary in view).
 watch(
   [
     () => snapshot.value.historyIndex,
@@ -773,6 +822,10 @@ watch(
   ],
   () => {
     forkArmed.value = false
+    if (forkPrompt.value) {
+      forkPrompt.value = false
+      pendingContinue = null
+    }
   },
 )
 
@@ -934,8 +987,7 @@ function onKey(event: KeyboardEvent): void {
     if (event.shiftKey) {
       // Shift+space: play continuously — forward through history first when
       // viewing an earlier turn, then live from the tip.
-      game.requestPlay()
-      refresh()
+      guardContinue(() => game.requestPlay())
     } else if (game.playing) {
       // Space during play pauses and closes the mega turn. Read the live state,
       // not the polled snapshot, so a press right after play starts cannot be
@@ -965,7 +1017,8 @@ function onKey(event: KeyboardEvent): void {
   } else if (event.key === 'e') {
     onToggleOverlay('enemyPlans')
   } else if (event.key === 'Escape') {
-    if (forkArmed.value) cancelFork()
+    if (forkPrompt.value) onCancelContinue()
+    else if (forkArmed.value) cancelFork()
     else if (game.pendingCommand !== 'none') game.clearPendingCommand()
     else game.clearSelection()
     refresh()
@@ -1167,10 +1220,14 @@ onBeforeUnmount(() => {
               <TurnList
                 :snapshot="snapshot"
                 :fork-armed="forkArmed"
+                :fork-prompt="forkPrompt"
                 @jump="onJumpTurn"
                 @play="onPlayTurn"
                 @fork="onFork"
                 @cancel-fork="cancelFork"
+                @fork-continue="onForkContinue"
+                @discard-order-changes="onDiscardOrderChanges"
+                @cancel-continue="onCancelContinue"
               />
             </div>
           </template>
@@ -1289,8 +1346,8 @@ onBeforeUnmount(() => {
             >
               <ul class="hints">
                 <li><b>left-click</b> select · <b>shift-click</b> add · <b>drag</b> box</li>
-                <li><b>right-click</b> empty → move · enemy → attack</li>
-                <li><b>right-click</b> again (or shift) → queue next step</li>
+                <li><b>right-click</b> empty → move · enemy → attack (replaces the plan)</li>
+                <li><b>shift+right-click</b> → queue the step after the active order</li>
                 <li><b>m</b>/<b>a</b> then left-click → move / attack · shift to queue</li>
                 <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
                 <li><b>space</b> next turn / replay forward · <b>shift+space</b> play · <b>s</b> step</li>

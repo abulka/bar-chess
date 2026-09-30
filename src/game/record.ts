@@ -10,7 +10,7 @@ import type { SimSettings } from './settings'
 import type { StanceMode, TeamId, Vec2 } from './types'
 
 /** Bump when the record shape changes incompatibly. */
-const RECORD_VERSION = 2
+const RECORD_VERSION = 3
 
 /**
  * A player command, normalized to board cells so it survives replay. Piece
@@ -18,7 +18,7 @@ const RECORD_VERSION = 2
  * issued — the chess-notation equivalent of naming the square.
  */
 export type GameCommandIntent =
-  | { t: 'order'; from: Vec2; to: Vec2; command?: 'move' | 'attack'; force?: boolean }
+  | { t: 'order'; from: Vec2; to: Vec2; command?: 'move' | 'attack'; force?: boolean; queue?: boolean }
   | { t: 'no-preserve'; from: Vec2 }
   | { t: 'stance'; from: Vec2; mode: StanceMode }
   | { t: 'clear'; from: Vec2 }
@@ -308,7 +308,7 @@ function applyIntents(game: Game, intents: GameCommandIntent[]): void {
         const e = at(intent.from)
         if (e === null) break
         game.selected = [e]
-        game.orderAt(intent.to, intent.command, intent.force)
+        game.orderAt(intent.to, intent.command, { force: intent.force, queue: intent.queue })
         break
       }
       case 'no-preserve': {
@@ -342,8 +342,9 @@ export function serializeRecord(record: GameRecord): string {
 export function validateRecord(data: unknown): { ok: true } | { ok: false; error: string } {
   if (!data || typeof data !== 'object') return { ok: false, error: 'not an object' }
   const record = data as Partial<GameRecord>
-  // v1 records predate the embedded baseline and replay from the default layout.
-  if (record.v !== 1 && record.v !== RECORD_VERSION) {
+  // v3 records carry an explicit `queue` flag on order intents; older records
+  // relied on the retired automatic-queue logic and cannot be replayed exactly.
+  if (record.v !== RECORD_VERSION) {
     return { ok: false, error: `unsupported record version ${String(record.v)}` }
   }
   if (typeof record.size !== 'number' || typeof record.seed !== 'number') {

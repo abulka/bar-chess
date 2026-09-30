@@ -58,7 +58,7 @@ import { PIECE_LIST, PIECES, WEAPONS, weaponDamage } from './pieces'
 import { destReachable, findPath } from './pathfind'
 import { anchorFor, clearMotion, clearOrder, noteOrder, planStep } from './queue'
 import { instaKillOrderedNote } from './instaKill'
-import { NO_PRESERVE_TURNS, armNoPreserve, noPreserveOrderedNote, orderInsists } from './noPreserve'
+import { NO_PRESERVE_TURNS, armNoPreserve, noPreserveOrderedNote } from './noPreserve'
 import {
   buildBoard,
   buildWorldSnapshot,
@@ -153,8 +153,6 @@ export interface PieceInfo {
     instaKill: PieceRef | null
     /** First turn self-preservation may run again, or -1 when not insisting. */
     noPreserveUntil: number
-    regrouping: boolean
-    parked: PieceRef | null
     queue: Array<{ kind: OrderStep['kind']; label: string; source: 'manual'; reachable: boolean }>
     /** Recent order transitions, newest first, for the "why did it change" log. */
     history: OrderLogEntry[]
@@ -317,6 +315,21 @@ export interface NoPreservePrompt {
   coords: string[]
 }
 
+/** Modifiers for a player order click (see `orderAt`). */
+export interface OrderOptions {
+  /**
+   * Alt-click insist: suspend self-preservation on the ordered piece for a few
+   * turns. Applies only when the click starts/replaces the active order.
+   */
+  force?: boolean
+  /**
+   * Shift-click: append the order as a queued step after the active order
+   * instead of replacing the plan. Without it a plain order replaces the
+   * active order and clears the queue.
+   */
+  queue?: boolean
+}
+
 export interface GameSnapshot {
   running: boolean
   paused: boolean
@@ -465,7 +478,7 @@ export class Game {
   occupancy = new Map<number, Entity>()
 
   tick = 0
-  /** Monotonic turn index, incremented when each turn begins (drives regrouping). */
+  /** Monotonic turn index, incremented when each turn begins. */
   turn = 0
   speed = 1
   running = false
@@ -2050,44 +2063,20 @@ export class Game {
   }
 
   /**
-   * Whether a piece's active order has done all it can: it has arrived, or it
-   * can make no further (theoretical) progress toward the objective. Other
-   * pieces are ignored, so a route merely blocked by a friendly still counts as
-   * progress and keeps waiting; a parked best-effort goto — and an attack on a
-   * positionally impossible target parked at the closest point — is "settled".
-   * Such an order yields to the next command instead of swallowing it in the
-   * queue (the fix for "I issued an impossible move and it ate every later
-   * order").
+   * Drop a piece's whole order plan — the active order, queued steps and the
+   * insist/insta-kill overrides — so a new plain order can replace it outright.
+   * `order.kind` is left intact so `startGoto` can still describe an attack it
+   * replaced; the caller immediately overwrites it.
    */
-  private orderSettled(e: Entity): boolean {
-    const order = this.world.get(e, Order)
-    const motion = this.world.get(e, Motion)
-    const cell = this.world.get(e, Cell)
-    const kind = this.world.get(e, PieceType)?.kind
-    const team = this.world.get(e, Team)
-    if (!order || !motion || !cell || !kind || !team) return false
-    const def = PIECES[kind]
-    if (!def) return false
-    const never = NEVER
-
-    if (order.kind === 'goto' && order.dest) {
-      return findPath(this.board, cell, order.dest, def.move, team, this.kingSafe(e, team, never)).cells.length === 0
-    }
-    if (order.kind === 'attack' && order.target !== null && this.world.isAlive(order.target)) {
-      // A positionally impossible target still settles once the piece is parked
-      // at the closest legal point its best-effort route can reach (the tie-hold
-      // in `closestEmptyCell` settles it immediately when it is already there). A
-      // *reachable* target that is merely in range is still being fulfilled, so a
-      // move suspends/regroups (resumes after) instead of abandoning it.
-      const tcell = this.world.get(order.target, Cell)
-      if (!tcell) return false
-      const geometry = WEAPONS[def.weapon].geometry
-      const avoid = this.attackAvoid(e, team, orderInsists(order, this.turn))
-      const plan = attackPlan(this.board, cell, tcell, def.move, geometry, team, never, avoid)
-      if (plan.reachable) return false
-      return findPath(this.board, cell, plan.cell, def.move, team, avoid ?? never).cells.length === 0
-    }
-    return false
+  private resetOrderPlan(order: OrderData, motion: MotionData): void {
+    noteOrder(order, this.tick, 'order replaced')
+    order.queue.length = 0
+    order.target = null
+    order.targetCell = null
+    order.chessKill = null
+    order.noPreserveUntil = -1
+    clearMotion(motion)
+    motion.path = []
   }
 
   /**
@@ -2096,22 +2085,25 @@ export class Game {
    * `command` is the resolved intent: an explicit `attack` (from an `a`
    * prefix or a right-click on an enemy) requires an enemy occupant, an explicit
    * `move` always creates a goto, and when omitted the square's occupant decides
-   * (enemy → attack, friendly → ignored, empty → move). A piece with nothing
-   * planned starts the order; a piece whose order has settled (arrived, or
-   * parked at the closest legal point) replaces it; otherwise the click appends a
-   * queued step. A move on an un-queued attacker suspends/regroups instead of
-   * queueing behind it.
+   * (enemy → attack, friendly → ignored, empty → move).
    *
-   * `force` (Alt-click) makes each ordered piece insist on this order: it
+   * A plain order replaces the piece's whole plan: the active order, any queued
+   * steps and a parked insta-kill are dropped in favour of it. `opts.queue`
+   * (Shift-click) instead appends the order as the next queued step, so a
+   * `move, move, attack` sequence is explicit.
+   *
+   * `opts.force` (Alt-click) makes each ordered piece insist on this order: it
    * suspends self-preservation for the next few turns and releases any healing
    * hold, so a wounded piece presses the clicked square instead of retreating.
    */
-  orderAt(cell: Vec2, command?: 'move' | 'attack', force = false): void {
+  orderAt(cell: Vec2, command?: 'move' | 'attack', opts: OrderOptions = {}): void {
     if (!this.board.inBounds(cell.x, cell.y)) return
-    this.liveEdit(() => this.applyOrderAt(cell, command, force))
+    this.liveEdit(() => this.applyOrderAt(cell, command, opts))
   }
 
-  private applyOrderAt(cell: Vec2, command?: 'move' | 'attack', force = false): void {
+  private applyOrderAt(cell: Vec2, command?: 'move' | 'attack', opts: OrderOptions = {}): void {
+    const force = opts.force ?? false
+    const queue = opts.queue ?? false
     const occ = buildOccupancy(this.world, this.board)
     const occupant = occ.get(this.board.cellIndex(cell.x, cell.y))
     // Any new order replaces a pending override prompt; a fresh one is raised
@@ -2142,33 +2134,22 @@ export class Game {
         continue
       }
       const activeEmpty = order.kind === 'none' && order.queue.length === 0
-      // An order that has settled (arrived, or parked at the closest legal
-      // point) yields to this new command instead of queueing behind it. An
-      // order still making progress (or merely blocked by friends) keeps its
-      // queue as before.
-      const settled = !activeEmpty && this.orderSettled(e)
       // Whether this click started/replaced the active order. Only then can it
-      // park an insta-kill: a queued step must not kill before it actually runs.
+      // park an insta-kill or insist: a queued step must not kill before it runs.
       let started = false
-      if (activeEmpty || settled) {
-        if (settled) {
-          noteOrder(order, this.tick, 'replaced settled order')
-          order.queue.length = 0
-          order.target = null
-          order.resumeTarget = null
-          order.resumeTurn = -1
-          motion.path = []
-          clearMotion(motion)
-        }
+      if (activeEmpty) {
         if (attacking) this.startAttack(e, order, motion, occupant as Entity, force)
         else this.startGoto(e, order, motion, cell, occ, team)
         started = true
-      } else if (order.kind === 'attack' && order.queue.length === 0 && !attacking) {
-        // A move on an attacking piece replaces the attack (no parked target).
-        this.startGoto(e, order, motion, cell, occ, team)
-        started = true
-      } else {
+      } else if (queue) {
+        // Explicit append (Shift): keep the plan and queue this as the next step.
         this.appendStep(e, order, motion, cell, attacking ? (occupant as Entity) : null, team)
+      } else {
+        // A plain order replaces the whole plan (active order, queue, target).
+        this.resetOrderPlan(order, motion)
+        if (attacking) this.startAttack(e, order, motion, occupant as Entity, force)
+        else this.startGoto(e, order, motion, cell, occ, team)
+        started = true
       }
       // Insta-kill: an active order against a piece already in capture range
       // kills it on the next tick.
@@ -2176,7 +2157,7 @@ export class Game {
       // Alt-clicked order: insist on it. Self-preservation is suspended for the
       // next few turns and any healing hold is released so the piece presses the
       // clicked square. Recorded on the order so it replays with the world state.
-      if (force) {
+      if (force && started) {
         armNoPreserve(order, motion, this.turn, NO_PRESERVE_TURNS)
         noteOrder(order, this.tick, noPreserveOrderedNote(NO_PRESERVE_TURNS))
       } else if (this.autoPreserve && !this.replaying && wouldSelfPreserve(this.ctx, e)) {
@@ -2192,6 +2173,7 @@ export class Game {
           to: { x: cell.x, y: cell.y },
           command,
           force: force || undefined,
+          queue: queue || undefined,
         })
       }
       n++
@@ -2330,10 +2312,8 @@ export class Game {
     order.kind = 'goto'
     order.dest = { x: cell.x, y: cell.y }
     order.target = null
-    order.resumeTarget = null
-    order.resumeTurn = -1
-    // Drop the stale combat target/retaliation too, so no engagement or parked
-    // line is left pointing at the old fight.
+    // Drop the stale combat target/retaliation too, so no engagement is left
+    // pointing at the old fight.
     const t = this.world.get(e, Target)
     if (t) {
       t.entity = null
@@ -2493,8 +2473,6 @@ export class Game {
               dest: order.dest,
               target: order.target,
               reachable: order.reachable,
-              resumeTarget: order.resumeTarget,
-              resumeTurn: order.resumeTurn,
               noPreserveUntil: order.noPreserveUntil,
               queue: order.queue,
               log: order.log,
@@ -3173,8 +3151,6 @@ export class Game {
               : true,
         instaKill: order?.chessKill != null ? this.pieceRef(order.chessKill) : null,
         noPreserveUntil: order?.noPreserveUntil ?? -1,
-        regrouping: (order?.resumeTarget ?? null) !== null && (order?.resumeTurn ?? -1) >= 0,
-        parked: order?.resumeTarget != null ? this.pieceRef(order.resumeTarget) : null,
         queue,
         history: (order?.log ?? []).slice().reverse(),
       },

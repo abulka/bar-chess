@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { GameSnapshot } from '../game/game'
 import type { StanceMode } from '../game/types'
 import { INTENT_LABELS } from '../game/intent'
 import { INSTA_KILL_NAME } from '../game/instaKill'
+import { selfPreservationThresholds } from '../game/selfPreservation'
 import { PRESERVE_COLOR, healthColor } from '../render/palette'
 
 const props = defineProps<{
@@ -68,6 +69,43 @@ const noPreserveLeft = computed(() => {
   return Math.max(0, props.snapshot.turnActive ? base : base - 1)
 })
 
+/** Pawns can never retreat (they only step forward), so they show no notches. */
+const isPawn = computed(() => info.value?.kind === 'pawn')
+
+/** This piece's health thresholds for the two notches, shared with the sim rules. */
+const thresholds = computed(() => selfPreservationThresholds(info.value?.kind ?? ''))
+
+/** Instant hover hints for the bar regions, describing what happens in each. */
+const zoneHints = computed(() => {
+  const t = thresholds.value
+  return {
+    critical: `below ${pct(t.critical)} — critical: pulls back and waits until fully healed`,
+    hurt: `below ${pct(t.preserve)} — hurt: pulls back to a healing square, returns once recovered`,
+    healthy: `${pct(t.preserve)} or more — no automatic retreat`,
+  }
+})
+
+/** An instant tooltip for the bar regions (native title has a visible delay). */
+const hoverHint = ref<{ text: string; x: number; y: number; maxW: number } | null>(null)
+function showHint(event: MouseEvent, text: string): void {
+  const el = event.currentTarget as HTMLElement
+  const panel = el.closest('.piece-panel') as HTMLElement | null
+  if (!panel) return
+  const panelRect = panel.getBoundingClientRect()
+  const rect = el.getBoundingClientRect()
+  // Centre the tip in the (narrow) panel and cap its width so it wraps instead
+  // of spilling past the rail.
+  hoverHint.value = {
+    text,
+    x: panelRect.width / 2,
+    y: rect.top - panelRect.top,
+    maxW: Math.max(120, panelRect.width - 12),
+  }
+}
+function hideHint(): void {
+  hoverHint.value = null
+}
+
 function pct(ratio: number): string {
   return `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`
 }
@@ -99,12 +137,41 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
         </div>
       </div>
 
-      <div class="stat">
+      <div class="stat health">
         <span class="stat-label">health</span>
         <div class="bar">
           <div class="fill hp" :style="{ width: pct(info.health.ratio), background: healthColor(info.health.ratio) }"></div>
+          <template v-if="!isPawn">
+            <span class="notch" :style="{ left: pct(thresholds.critical) }"></span>
+            <span class="notch" :style="{ left: pct(thresholds.preserve) }"></span>
+            <span
+              class="zone"
+              :style="{ left: '0', width: pct(thresholds.critical) }"
+              @mouseenter="showHint($event, zoneHints.critical)"
+              @mouseleave="hideHint"
+            ></span>
+            <span
+              class="zone"
+              :style="{ left: pct(thresholds.critical), width: pct(thresholds.preserve - thresholds.critical) }"
+              @mouseenter="showHint($event, zoneHints.hurt)"
+              @mouseleave="hideHint"
+            ></span>
+            <span
+              class="zone"
+              :style="{ left: pct(thresholds.preserve), right: '0' }"
+              @mouseenter="showHint($event, zoneHints.healthy)"
+              @mouseleave="hideHint"
+            ></span>
+          </template>
+          <span
+            v-else
+            class="zone"
+            :style="{ left: '0', right: '0' }"
+            @mouseenter="showHint($event, 'pawns never retreat — they hold and fire instead')"
+            @mouseleave="hideHint"
+          ></span>
         </div>
-        <span class="num">{{ hp(info.health.cur) }}/{{ hp(info.health.max) }}</span>
+        <span class="num">{{ pct(info.health.ratio) }}</span>
       </div>
 
       <div v-if="info.weapon" class="stat">
@@ -223,6 +290,14 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
         Clear orders (c)
       </button>
     </template>
+
+    <div
+      v-if="hoverHint"
+      class="bar-tip"
+      :style="{ left: hoverHint.x + 'px', top: hoverHint.y + 'px', maxWidth: hoverHint.maxW + 'px' }"
+    >
+      {{ hoverHint.text }}
+    </div>
   </div>
 </template>
 
@@ -248,6 +323,10 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
   font-size: 0.9em;
 }
 
+.piece-panel {
+  position: relative;
+}
+
 .stat {
   display: grid;
   grid-template-columns: 42px 1fr auto;
@@ -261,10 +340,51 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
 }
 
 .bar {
+  position: relative;
   height: 8px;
   background: rgba(8, 10, 14, 0.82);
   border-radius: 2px;
   overflow: hidden;
+}
+
+/* The two self-preservation notches, drawn on the bar in grey so they read as
+ * reference marks rather than health colour. A thin dark outline keeps each one
+ * readable over both the dark frame and the health fill. */
+.notch {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 1px;
+  background: #9aa1ab;
+  box-shadow: 0 0 0 1px rgba(8, 10, 14, 0.6);
+}
+
+/* Invisible regions tiling the bar; hovering one shows an instant hint. */
+.zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  cursor: help;
+}
+
+/* Instant tooltip for the bar regions (native title has a visible delay). */
+.bar-tip {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  margin-top: -6px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--panel-2, #12161d);
+  color: var(--text);
+  font-size: 0.85em;
+  line-height: 1.35;
+  text-align: center;
+  white-space: normal;
+  pointer-events: none;
+  z-index: 5;
 }
 
 .fill {

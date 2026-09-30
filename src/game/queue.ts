@@ -36,8 +36,6 @@ export function clearOrder(order: OrderData, opts?: { queue?: boolean }): void {
   // Dropping the active order also drops the player's "insist" override, so a
   // completed or replaced order stops suspending self-preservation.
   order.noPreserveUntil = -1
-  order.resumeTarget = null
-  order.resumeTurn = -1
   if (opts?.queue) order.queue.length = 0
 }
 
@@ -123,9 +121,9 @@ export function rechainQueue(
 }
 
 /**
- * Move the first queued step into the active order slot. A promoted attack
- * clears any suspended (parked) target; a promoted goto keeps it, so a regroup
- * resumes only once the whole queue has drained.
+ * Move the first queued step into the active order slot. Promotes a
+ * `goto`/`attack` step in sequence, clearing any target/insta-kill state the
+ * previous active order left behind.
  */
 export function promoteNext(order: OrderData, motion: MotionData): boolean {
   const next = order.queue.shift()
@@ -139,7 +137,6 @@ export function promoteNext(order: OrderData, motion: MotionData): boolean {
     order.target = null
     order.targetCell = null
     order.chessKill = null
-    order.resumeTurn = -1
     motion.goal = next.dest
     motion.intent = 'order'
   } else {
@@ -149,8 +146,6 @@ export function promoteNext(order: OrderData, motion: MotionData): boolean {
     order.chessKill = null
     order.dest = null
     order.reachable = next.reachable
-    order.resumeTarget = null
-    order.resumeTurn = -1
     clearMotion(motion)
   }
   motion.path = []

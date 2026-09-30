@@ -99,7 +99,7 @@ EMA. With `verbose` on it emits a `phase` event per system per tick.
 | `Render` | `{ glyph, tint, size }` | unicode glyph + team tint |
 | `Health` | `{ cur, max }` | |
 | `Stance` | `{ mode }` | persistent policy: `none` / `move` / `attack` (`none` stands ground and fires in range, with no badge) |
-| `Order` | `{ kind, dest, target, targetCell, chessKill, reachable, resumeTarget, resumeTurn, queue, log }` | active step is one-shot `none` / `goto` / `attack`; `targetCell` is the target's last known cell (order-log notes); `chessKill` parks an **insta-kill** victim (immediate chess kill, human-only, active-order-only — see `src/game/instaKill.ts`), consumed on the next tick (kept on the order so it is part of the turn snapshot); `reachable` marks an attack target that is positionally attainable; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence (`resumeTarget`/`resumeTurn` are retained for save compatibility but unused — a move now replaces an attack); `log` is a bounded list of recent order transitions (`noteOrder`) so the panel can explain why an order was issued, replaced, completed or abandoned |
+| `Order` | `{ kind, dest, target, targetCell, chessKill, reachable, noPreserveUntil, queue, log }` | active step is one-shot `none` / `goto` / `attack`; `targetCell` is the target's last known cell (order-log notes); `chessKill` parks an **insta-kill** victim (immediate chess kill, human-only, active-order-only — see `src/game/instaKill.ts`), consumed on the next tick (kept on the order so it is part of the turn snapshot); `reachable` marks an attack target that is positionally attainable; `noPreserveUntil` is the player's Alt-click insist window; `queue` holds queued `OrderStep`s (`goto`/`attack` with a pre-planned display path) that promote into the active step in sequence; `log` is a bounded list of recent order transitions (`noteOrder`) so the panel can explain why an order was issued, replaced, completed or abandoned |
 | `Target` | `{ entity, retargetAt, lastAttacker, underFireUntil }` | current engagement + retaliation bookkeeping. `underFireUntil` is a raw ~3 s latch (the AI keeps treating the recent attacker as a threat); **reporting** goes through `underFireAttacker` (`src/game/underFire.ts`), which also requires the attacker to still cover the square |
 | `Weapon` | `{ left }` | seconds until next shot |
 | `Motion` | `{ goal, intent, holdUntilHp, hitStreak, prevCell, goalSetTick, reserved, path, from/to, travel, elapsed, moving, cooldown, arrived, replanAt, blocked, steps, movedThisTurn, ease?, freeAdvance? }` | grid movement + render interpolation; `intent` is the goal's source (`order`/`preserve`/`defense`/`engage`/`rally`); `holdUntilHp` is a latched safe-hold until that HP (full health for a critical wound, the recovery threshold otherwise); `hitStreak` counts hits since the last step (sustained-fire trigger); `prevCell`/`goalSetTick` drive the anti-dither recency penalty and retreat commitment; `reserved` is the cell being entered; `ease`/`freeAdvance` mark a capture-advance glide (eased, no post-arrival cooldown) |
@@ -743,7 +743,7 @@ terrainVersion editorMode editorBrush editorDirty canEdit mapName`.
 | --------- | -------------- |
 | `Toolbar.vue` | board size, turn/pause/step/undo/redo/replay/fork, speed, overlay toggles, sound toggle, HUD toggle, auto-preserve, capture advance, chess kills, promotion, finish pressure, reset, `New game`, `New from template…`, editor toggle |
 | `BoardView.vue` | canvas + Renderer; left-click/box-select, shift-click adds, `m`/`a` prefix commands, context right-click order, shift/middle-drag pan, wheel zoom; draws the selection rectangle; routes map-editor clicks/drags (stamp, continuous erase) and exposes `cellAtClient`/`overBoard` for palette drops |
-| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed — AI, Attack stance or an active attack order — `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. It tells the situation as history / now / pending: the **order / auto changes** list shows the piece's last few transitions with their tick (e.g. `immediate chess kill → e3`, `immediate chess kill lands → e3`, `target at e3 lost — attack abandoned`, `self-preservation: retreating → …`); a parked insta-kill, a latched `safe-hold until <hp> hp` and a "self-preservation overriding the attack order" banner show the pending state; the queue shows what runs next |
+| `PiecePanel.vue` | focused piece properties (health, reload, stance, target, order, order / auto changes, queue, movement) with order-provenance labels (`manual` / `unreachable` / `auto · self-preservation`) and a target heading (`engaging` when committed — AI, Attack stance or an active attack order — `pot shot` when only firing in range), selection-wide stance buttons and clear-orders. It tells the situation as history / now / pending: the **order / auto changes** list shows the piece's last few transitions with their tick (e.g. `immediate chess kill → e3`, `immediate chess kill lands → e3`, `target at e3 lost — attack abandoned`, `self-preservation: retreating → …`); a parked insta-kill, a latched `safe-hold until <hp> hp` and a "self-preservation overriding the attack order" banner show the pending state; the queue shows what runs next. Its health bar shows the current health as a percentage at the end of the bar and draws two notches — the critical line and the retreat line — with instant hover hints over the bar regions explaining what self-preservation does in each (healthy / hurt / critical, or a pawn note); there is no separate rules block, and the live retreat/resume activity shows in the order / auto changes list |
 | `ReinforcementBar.vue` | per-team piece icons; click deploys from an entry lane, drag drops the piece on a chosen cell (or arms an editor brush in editor mode) |
 | `TurnList.vue` | left-rail **turns** tab: newest-first history rows (jump on click, replay per row), inline Fork on the active row, two-step inline confirmation before discarding future turns (warns when `ordersTouched` is false that the same outcome would repeat), backtrack warning and trimmed-history hint in a sticky footer below the list (so rows never shift and the hint stays visible while the list scrolls), per-row piece/order/time info |
 | `EditorPanel.vue` | floating map-editor controls: map name, save, eraser, blank-board size, `Maps…`, cancel/done |
@@ -829,22 +829,17 @@ Ordering is BAR-style and **context-sensitive** — there is no global order mod
 
 - **Left-click** selects; shift-click adds; a drag box-selects (`Game.selectRect`).
 - **Right-click** issues an order for every selected commandable piece:
-  enemy square → attack, empty square → goto, friendly square → no-op. A repeat
-  click (or Shift+right-click) **appends** a queued step (`Game.appendStep`), so
-  `move, move, attack` can be planned with repeated right-clicks; only the first
-  click on an unplanned piece replaces/creates the active order, and `c` clears
-  the whole plan. A move on an un-queued attacker **replaces** the attack (no
-  parked target to resume) rather than queueing behind it. A piece whose active
-  order has **settled**
-  (arrived, parked at the closest legal point a best-effort goto or attack can
-  reach — `Game.orderSettled`) yields to the new command instead of hiding it in
-  the queue, so an impossible order can no longer swallow every later click; an
-  order that is still progressing, or merely blocked by friends, keeps its queue.
+  enemy square → attack, empty square → goto, friendly square → no-op. A plain
+  click **replaces** the piece's whole plan — the active order and any queued
+  steps are dropped in favour of it. **Shift+right-click** instead **appends** a
+  queued step (`Game.appendStep`), so `move, move, attack` is planned with
+  repeated Shift-clicks; `c` clears the whole plan. A move on an attacker
+  replaces the attack (no parked target to resume).
 - **`m` / `a` + left-click** arms a transient **pending command**
-  (`Game.pendingCommand`) to force a move/attack: `Game.orderAt(cell, command)`.
-  The prefix is consumed by the click unless **Shift** is held (kept armed to
-  queue several); a plain left-click selects and clears it. `a` on an empty or
-  friendly square is a no-op (a warning is emitted).
+  (`Game.pendingCommand`) to force a move/attack: `Game.orderAt(cell, command,
+  { queue })`. The prefix is consumed by the click unless **Shift** is held (kept
+  armed to queue several); a plain left-click selects and clears it. `a` on an
+  empty or friendly square is a no-op (a warning is emitted).
 - **Insta-kills** (immediate chess kills; persisted toolbar toggle `chessKills`,
   default off): when a human orders an attack against an enemy that already sits
   inside the ordered piece's chess capture pattern — its weapon's `fireCells`,
@@ -1108,7 +1103,9 @@ auto-acquired or retaliation target (Attack stance or return fire). Pieces no
 longer draw a default ring. Target rings/chains
 are computed from **scoped** pieces only (selection + `my orders` / `enemy plans`),
 so they never float permanently. A damaged piece draws a thin
-green→red (solid red at ≤40%) health bar and a long-cooldown weapon that has fired a **teal**
+green→red (solid red at ≤40%) health bar with faint notches at its two
+self-preservation thresholds (critical and retreat; none for pawns), and a
+long-cooldown weapon that has fired a **teal**
 recharge bar, each hideable via its `health` / `reload` overlay toggle; both hide
 when effectively full and are tile-relative so the bars stay inside the cell; all
 pieces render at a uniform size.

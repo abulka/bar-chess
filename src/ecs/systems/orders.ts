@@ -13,6 +13,7 @@ import { destReachable as canReach } from '../../game/pathfind'
 import { noteOrder, clearMotion, clearOrder, promoteNext, rechainQueue } from '../../game/queue'
 import { hasInstaKill, instaKillLandedNote } from '../../game/instaKill'
 import { orderInsists, noPreserveEndedNote, noPreserveSuppressedNote } from '../../game/noPreserve'
+import { CRITICAL_WOUND, HIT_STREAK_TRIGGER, preserveThreshold, recoverThreshold } from '../../game/selfPreservation'
 import { Cell, Health, Motion, Order, PieceType, Stance, Target, Team, hasLiveCell } from '../components'
 import type { MotionData, MotionIntent, OrderData } from '../components'
 import type { Entity } from '../world'
@@ -31,13 +32,6 @@ import {
   outgunned,
 } from './preservation'
 import type { ThreatMemo } from './preservation'
-
-/** Flat HP fraction at or below which a piece is "critically wounded": it latches
- * a safe-hold to full health and will not advance its order until then. */
-const CRITICAL_WOUND = 0.2
-
-/** Consecutive hits (since the last move) that count as sustained fire. */
-const HIT_STREAK_TRIGGER = 2
 
 /** Ticks a preserve/defense goal is honoured before it may be re-evaluated. */
 const RETREAT_COMMIT_TICKS = 60
@@ -66,32 +60,6 @@ function setGoal(motion: MotionData, goal: Vec2 | null, intent: MotionIntent, ti
   }
   motion.goal = goal
   motion.intent = intent
-}
-
-/** HP ratio at which a piece starts saving itself, scaled by how costly it is. */
-function preserveThreshold(kind: string): number {
-  switch (kind) {
-    case 'queen':
-    case 'king':
-      return 0.5
-    case 'rook':
-      return 0.45
-    case 'bishop':
-    case 'knight':
-      return 0.4
-    default:
-      return 0.3
-  }
-}
-
-/**
- * HP ratio a wounded piece heals to before resuming, above the retreat trigger:
- * about one more hit absorbed (queen/king 0.70, rook 0.65, bishop/knight 0.60).
- * Without this hysteresis the heal trip is wasted — a piece crossing back over
- * the trigger immediately stops preserving and walks into the same fire again.
- */
-function recoverThreshold(kind: string): number {
-  return Math.min(0.8, preserveThreshold(kind) + 0.2)
 }
 
 /** A piece's def, cell and team, or null when any of them is missing. */

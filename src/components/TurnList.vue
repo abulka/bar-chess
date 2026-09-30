@@ -6,6 +6,8 @@ const props = defineProps<{
   snapshot: GameSnapshot
   /** True while the two-step fork confirmation is armed. */
   forkArmed: boolean
+  /** True while the "orders changed — fork and continue?" prompt is open. */
+  forkPrompt: boolean
 }>()
 
 const emit = defineEmits<{
@@ -13,6 +15,9 @@ const emit = defineEmits<{
   (e: 'play', index: number): void
   (e: 'fork'): void
   (e: 'cancel-fork'): void
+  (e: 'fork-continue'): void
+  (e: 'discard-order-changes'): void
+  (e: 'cancel-continue'): void
 }>()
 
 /** Newest boundary first so the active row stays near the top. */
@@ -102,7 +107,22 @@ watch(
     </ul>
 
     <div v-if="backtracked || snapshot.historyTrimmed > 0" class="turn-foot">
-      <div v-if="backtracked && forkArmed" class="warn fork-confirm">
+      <div v-if="backtracked && forkPrompt" class="warn fork-confirm">
+        <p class="fork-q">
+          Orders changed here — fork and continue?
+        </p>
+        <p class="fork-note">
+          Forking discards {{ dropped }} future turn{{ dropped === 1 ? '' : 's' }} and plays on
+          from this boundary with your edits. Continuing without forking replays the recorded
+          turns and drops your order changes.
+        </p>
+        <div class="fork-actions">
+          <button class="ctl small" @click="emit('fork-continue')">Fork &amp; continue</button>
+          <button class="ctl small" @click="emit('discard-order-changes')">Discard changes</button>
+          <button class="ctl small" @click="emit('cancel-continue')">Cancel</button>
+        </div>
+      </div>
+      <div v-else-if="backtracked && forkArmed" class="warn fork-confirm">
         <p class="fork-q">
           Fork game: discard {{ dropped }} future turn{{ dropped === 1 ? '' : 's' }}?
         </p>
@@ -115,6 +135,12 @@ watch(
           <button class="ctl small" @click="emit('fork')">Discard</button>
           <button class="ctl small" @click="emit('cancel-fork')">Cancel</button>
         </div>
+      </div>
+      <div v-else-if="backtracked && snapshot.ordersTouched" class="warn order-changed">
+        <p>
+          <b>orders changed</b> — continuing discards {{ dropped }} future
+          turn{{ dropped === 1 ? '' : 's' }}. <b>space</b> will ask whether to fork.
+        </p>
       </div>
       <p v-else-if="backtracked" class="hint">
         viewing turn {{ current }} of {{ latest }} — <b>space</b> replays forward ·
@@ -177,6 +203,10 @@ watch(
 }
 
 .fork-confirm p {
+  margin: 0;
+}
+
+.order-changed p {
   margin: 0;
 }
 
