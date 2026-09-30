@@ -130,6 +130,14 @@ export interface PieceRef {
   health: { cur: number; max: number; ratio: number } | null
 }
 
+/**
+ * Why a piece's route is currently blocked. `enemy-fire` is the general "will
+ * not step into enemy coverage" guard, `check` the king's own version of it,
+ * `piece` a wall or standing piece, and `unreachable` a destination this piece's
+ * movement geometry can never cover.
+ */
+export type BlockedReason = 'enemy-fire' | 'check' | 'piece' | 'unreachable'
+
 /** Everything the piece properties panel shows for the focused selection. */
 export interface PieceInfo {
   entity: Entity
@@ -166,6 +174,8 @@ export interface PieceInfo {
     intent: MotionIntent
     pathLength: number
     blocked: boolean
+    /** Why it is blocked, when `blocked` is true. */
+    blockedReason: BlockedReason | null
     moving: boolean
     movedThisTurn: boolean
     /** Latched safe-hold target HP (0 = no hold) — pending self-preservation. */
@@ -2388,14 +2398,14 @@ export class Game {
     motion.intent = 'order'
     motion.holdUntilHp = 0
     // Route around enemy firing positions too, matching the runtime guard, unless
-    // the player insisted. Fall back to a friendly-passable route when boxed in,
-    // so a blocked move still shows a path instead of a bare straight line.
+    // the player insisted. Enemy fire is a soft filter, so a blocked move still
+    // routes as close as is safe rather than stopping where it stands; the
+    // fallback drops live occupancy (friendly pieces are assumed to move) but
+    // keeps the fire guard.
     const avoid = this.attackAvoid(e, team, insist)
-    const blocked: OccupiedFn = (x, y) =>
-      occupiedExcept(this.board, occ, e)(x, y) || (avoid?.(x, y) ?? false)
-    const fallback: OccupiedFn = (x, y) =>
-      this.friendlyPass(occ, e, team)(x, y) || (avoid?.(x, y) ?? false)
-    this.planNow(e, motion, cell, blocked, fallback)
+    const hard = occupiedExcept(this.board, occ, e)
+    const fallback = this.friendlyPass(occ, e, team)
+    this.planNow(e, motion, cell, hard, avoid, fallback)
     noteOrder(
       order,
       this.tick,
@@ -2865,20 +2875,32 @@ export class Game {
       this.board.cellIndex(x, y) === targetIdx || (avoid?.(x, y) ?? false)
     motion.goal = plan.cell
     motion.intent = 'order'
-    this.planNow(e, motion, plan.cell, planOccupied)
+    this.planNow(e, motion, plan.cell, NEVER, planOccupied)
     return plan.reachable
   }
 
-  private planNow(e: Entity, motion: MotionData, dest: Vec2, occupied: OccupiedFn, fallback?: OccupiedFn): void {
+  private planNow(
+    e: Entity,
+    motion: MotionData,
+    dest: Vec2,
+    occupied: OccupiedFn,
+    avoid?: OccupiedFn,
+    fallback?: OccupiedFn,
+  ): void {
     const cell = this.world.get(e, Cell)
     const kind = this.world.get(e, PieceType)?.kind
     const team = this.world.get(e, Team)
     if (!cell || !kind || !team) return
     const def = PIECES[kind]
     if (!def) return
-    let result = findPath(this.board, cell, dest, def.move, team, this.kingSafe(e, team, occupied))
+    // `occupied` is hard (walls and standing pieces); `avoid` is soft (enemy fire,
+    // the king's check zone): a route may pass over those squares but not land on
+    // them. Only a king's own coverage needs adding here; `attackAvoid` already
+    // includes it for a king, but this keeps a king's goto route honest too.
+    const soft = this.kingSafe(e, team, avoid ?? NEVER)
+    let result = findPath(this.board, cell, dest, def.move, team, occupied, soft)
     if (!result.found && result.cells.length === 0 && fallback) {
-      result = findPath(this.board, cell, dest, def.move, team, this.kingSafe(e, team, fallback))
+      result = findPath(this.board, cell, dest, def.move, team, fallback, soft)
     }
     motion.path = result.cells
     motion.replanAt = this.tick + 15
@@ -3125,6 +3147,34 @@ export class Game {
     }
   }
 
+  /**
+   * Why a blocked piece cannot advance. The goal is first tested against the
+   * piece's own movement geometry (`unreachable`), then the route is re-planned
+   * with only walls and standing pieces blocking: if it reaches the goal that
+   * way, the refusal came from the soft guard (enemy fire, or a king's check
+   * square); otherwise a wall or piece is in the way.
+   */
+  blockedReason(e: Entity): BlockedReason | null {
+    const motion = this.world.get(e, Motion)
+    if (!motion?.blocked) return null
+    const cell = this.world.get(e, Cell)
+    const kind = this.world.get(e, PieceType)?.kind
+    const team = this.world.get(e, Team)
+    const def = kind ? PIECES[kind] : undefined
+    const goal = motion.goal
+    if (!cell || !team || !def || !goal) return 'piece'
+    if (!destReachable(this.board, cell, def.move, team, goal)) return 'unreachable'
+    const occ = buildOccupancy(this.world, this.board)
+    const hard = occupiedExcept(this.board, occ, e)
+    if (findPath(this.board, cell, goal, def.move, team, hard).found) {
+      if (kind === 'king' && enemyCoverage(this.board, this.world, occ, e, team).has(this.board.cellIndex(goal.x, goal.y))) {
+        return 'check'
+      }
+      return 'enemy-fire'
+    }
+    return 'piece'
+  }
+
   /** Curated view of one piece for the properties panel. */
   private pieceInfo(e: Entity): PieceInfo | null {
     const ref = this.pieceRef(e)
@@ -3205,6 +3255,7 @@ export class Game {
         intent: motion?.intent ?? 'none',
         pathLength: motion?.path.length ?? 0,
         blocked: motion?.blocked ?? false,
+        blockedReason: this.blockedReason(e),
         moving: motion?.moving ?? false,
         movedThisTurn: motion?.movedThisTurn ?? false,
         holdUntilHp: motion?.holdUntilHp ?? 0,

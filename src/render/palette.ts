@@ -31,6 +31,10 @@ export const UNREACHABLE_COLOR = '#a0a6ac'
 /** Normal / best-effort-partial movement route. */
 export const ROUTE_COLOR = '#ffd166'
 export const ROUTE_PARTIAL_COLOR = '#ffb347'
+/** The refused tail of a blocked route: the piece cannot advance past the last
+ * safe square. Drawn animated (marching dashes) so a refusal reads as live, not
+ * as a route the player issued. */
+export const BLOCKED_COLOR = '#ff5a46'
 /** Selected-piece ring. */
 export const SELECT_COLOR = '#ffd166'
 /** Order badge colours: green M for a move order, red A for an attack order. */

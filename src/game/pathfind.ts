@@ -196,11 +196,32 @@ export function destReachable(board: Board, from: Vec2, geom: Geometry, team: Te
   return idx >= 0 && idx < reach.length && reach[idx] === 1
 }
 
+// Tie-break cost added when a step changes direction, applied to one-step
+// sliders (the king). Movement-cost differences (terrain, and one move vs
+// another) are >= 0.3, and a route takes far fewer than 1000 turns, so a 1e-4
+// nudge can only ever break exact ties: among equally cheap routes the one that
+// turns least wins. Without it a king ordered to a square on its own file wanders
+// a staircase (up, left, up, right, up) because every monotone path ties and the
+// first-discovered parent is frozen. Longer-range sliders move in whole-ray edges
+// and knights leap, so they are left untouched.
+const TURN_PENALTY = 1e-4
+
 /**
  * A* over the graph induced by a piece's movement geometry. Other pieces are
  * passed in as `occupied` (excluding the moving piece itself), so routes respect
  * one-piece-per-square and only leaps may pass over blockers. If the goal is
  * unreachable it returns the best-effort route to the closest cell reached.
+ *
+ * `avoid` is a soft filter: a square it rejects may still be moved *over* (a
+ * sliding ray, or the intermediate square of a pawn's two-square opening step)
+ * but may not be stopped on. This keeps route planning from treating enemy fire,
+ * or the king's check zone, as a solid wall — which otherwise stops a pawn from
+ * jumping to a safe square just past a covered one, or a slider from reaching a
+ * safe square beyond the first covered square.
+ *
+ * Among equally cheap routes the straightest is returned (fewest direction
+ * changes), so a chess king walks up its file instead of zig-zagging through
+ * equivalent diagonal steps.
  */
 export function findPath(
   board: Board,
@@ -209,12 +230,15 @@ export function findPath(
   geom: Geometry,
   team: TeamId,
   occupied: OccupiedFn = NEVER,
+  avoid?: OccupiedFn,
 ): PathResult {
   const w = board.width
   const h = board.height
   const size = w * h
   const gScore = new Float64Array(size).fill(Infinity)
   const cameFrom = new Int32Array(size).fill(-1)
+  /** Arrival direction key ((sx+1)*3 + (sy+1)) per cell; -1 at the start. */
+  const dirIn = new Int16Array(size).fill(-1)
   const closed = new Uint8Array(size)
   const heap = new MinHeap(size)
 
@@ -222,7 +246,9 @@ export function findPath(
   const goalIdx = board.cellIndex(to.x, to.y)
   if (startIdx === goalIdx) return { cells: [], found: true, expanded: 0 }
 
+  const smooth = geom.kind === 'slide' && geom.range === 1
   gScore[startIdx] = 0
+  dirIn[startIdx] = -1
   heap.push(startIdx, heuristic(from.x, from.y, to.x, to.y))
 
   let expanded = 0
@@ -254,12 +280,18 @@ export function findPath(
 
     const neighbours = moveDestinations(board, { x: cx, y: cy }, geom, team, occupied)
     for (const n of neighbours) {
+      // A soft-avoided square is passed over but never landed on, so it cannot
+      // become a path node (and therefore can never be the best-effort endpoint).
+      if (avoid?.(n.x, n.y)) continue
       const nIdx = board.cellIndex(n.x, n.y)
       if (closed[nIdx]) continue
-      const tentative = gScore[current] + board.moveCost(n.x, n.y)
+      const dir = (Math.sign(n.x - cx) + 1) * 3 + (Math.sign(n.y - cy) + 1)
+      const turn = smooth && dirIn[current] !== -1 && dirIn[current] !== dir ? TURN_PENALTY : 0
+      const tentative = gScore[current] + board.moveCost(n.x, n.y) + turn
       if (tentative < gScore[nIdx]) {
         gScore[nIdx] = tentative
         cameFrom[nIdx] = current
+        dirIn[nIdx] = dir
         heap.push(nIdx, tentative + heuristic(n.x, n.y, to.x, to.y))
       }
     }

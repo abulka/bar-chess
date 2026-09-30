@@ -17,7 +17,7 @@ import { buildOccupancy } from './occupancy'
 import { hasInstaKill } from './instaKill'
 import { isInCheck } from './kingSafety'
 import { underFireAttacker } from './underFire'
-import type { Game } from './game'
+import type { BlockedReason, Game } from './game'
 import type { Entity } from '../ecs/world'
 import { pieceTag } from './trace'
 import type { TeamId, Vec2 } from './types'
@@ -25,12 +25,20 @@ import type { TeamId, Vec2 } from './types'
 const MAX_PATH = 16
 const MAX_TERRAIN = 256
 
+/** Short transcript token for each blocked-route reason. */
+const BLOCKED_TOKEN: Record<BlockedReason, string> = {
+  'enemy-fire': 'fire',
+  check: 'check',
+  piece: 'piece',
+  unreachable: 'unreachable',
+}
+
 const FORMAT_LEGEND =
   '# fmt: r|b + piece(PNBRQK) + cell; hp=cur/max; goto=<cell>; ' +
   'atk=#id(cell)[!]=attack order (! positionally unreachable); ' +
   'kill=#id(cell)=parked insta-kill (immediate chess kill, lands next tick, outranks self-preservation); ' +
   'tgt=#id(cell) current target; ' +
-  'fire=#id under retaliation; check=king stands on an enemy-covered square; goal=<cell> path end; path=hop>hop (A* move hops); blk=route blocked; ' +
+  'fire=#id under retaliation; check=king stands on an enemy-covered square; goal=<cell> path end; path=hop>hop (A* move hops); blk=<fire|check|piece|unreachable> route blocked and why; ' +
   'intent=<preserve|rally|defense|engage> why the goal was chosen (absent = explicit order or none); ' +
   'hold=<hp> wounded: holds in healing until this HP before resuming (full heal when critical); ' +
   'moving=mid-hop; res=<cell> reserved next cell; ' +
@@ -86,7 +94,9 @@ Reading a position block:
   hold=<hp>              wounded: holds in healing until this HP before resuming (recovery is about
                          one more hit absorbed; a critical wound heals to full)
   path=a>b>c             planned route waypoints; each is one move hop, not every traversed square
-  blk / moving / res     route blocked and waiting / mid-hop / reserved destination cell
+  blk=<reason>          route blocked and waiting (fire = enemy coverage, check = king's
+                         no-check rule, piece = wall/piece in the way, unreachable)
+  moving / res           mid-hop / reserved destination cell
   w=<seconds>            weapon reload remaining
   fire=#id               firing under retaliation from that unit
 Other lines: "# terrain" lists non-floor cells only; "# proj:" lists in-flight shots as
@@ -198,7 +208,10 @@ export function formatShorthand(game: Game, options: ShorthandOptions = {}): str
     if (motion.goal) flags.push(`goal=${cellName(height, motion.goal)}`)
     if (motion.intent !== 'none' && motion.intent !== 'order') flags.push(`intent=${motion.intent}`)
     if (motion.holdUntilHp > 0) flags.push(`hold=${Math.round(motion.holdUntilHp)}`)
-    if (motion.blocked) flags.push('blk')
+    if (motion.blocked) {
+      const reason = game.blockedReason(e)
+      flags.push(reason ? `blk=${BLOCKED_TOKEN[reason]}` : 'blk')
+    }
     if (motion.moving) flags.push('moving')
     if (motion.reserved) flags.push(`res=${cellName(height, motion.reserved)}`)
     if (motion.path.length > 0) {

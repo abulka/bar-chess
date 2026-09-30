@@ -137,6 +137,25 @@ describe('pathfinding system — adaptive attack routes', () => {
     run(ctx)
     expect(motion.path[motion.path.length - 1]).toEqual({ x: 0, y: 3 })
   })
+  it('advances an opening pawn past a covered intermediate square', () => {
+    const ctx = makeContext()
+    const pawn = createPiece(ctx, 'blue', PIECES.pawn, { x: 3, y: 6 }) // d2
+    // The red knight on b4 covers d3 (3,5) and d5 (3,3) but not d4 (3,4).
+    createPiece(ctx, 'red', PIECES.knight, { x: 1, y: 4 })
+    const order = ctx.world.require(pawn, Order)
+    order.kind = 'goto'
+    order.dest = { x: 3, y: 3 } // d5
+    const motion = ctx.world.require(pawn, Motion)
+    motion.goal = { x: 3, y: 3 }
+    motion.path = []
+    motion.replanAt = 0
+
+    run(ctx)
+
+    // Enemy fire is a soft filter: the pawn opens to the safe d4 and waits.
+    expect(motion.path).toEqual([{ x: 3, y: 4 }])
+    expect(motion.blocked).toBe(true)
+  })
 })
 
 describe('pathfinding system — retreats avoid the enemy king kill zone', () => {

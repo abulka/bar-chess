@@ -7,6 +7,7 @@ import { THREAT_TOLERANCE } from '../../game/constants'
 import { orderInsists } from '../../game/noPreserve'
 import { Cell, Motion, Order, PieceType, Team } from '../components'
 import type { OccupiedFn } from '../../game/geometry'
+import { NEVER } from '../../game/geometry'
 import type { System } from '../pipeline'
 import { lethalAvoid, pieceDanger, threatAvoid } from './preservation'
 
@@ -92,8 +93,11 @@ const system: System = {
       const lethal = preserve ? lethalAvoid(ctx, danger) : null
       const threats =
         exempt || preserve ? null : threatAvoid(ctx, danger, THREAT_TOLERANCE, cell)
-      const routeOccupied: OccupiedFn = (x, y) =>
-        liveOccupied(x, y) ||
+      // The threat guard is a soft filter: a route may pass over a covered square
+      // but must not land on one. Keeping it separate from `liveOccupied` lets a
+      // pawn open with its two-square step past a covered intermediate square,
+      // and a slider reach a safe square beyond the first covered one.
+      const softAvoid: OccupiedFn = (x, y) =>
         (covered?.has(ctx.board.cellIndex(x, y)) ?? false) ||
         (ring?.(x, y) ?? false) ||
         (lethal?.(x, y) ?? false) ||
@@ -103,7 +107,7 @@ const system: System = {
         const targetEnt = order.target
         const targetCell =
           targetEnt !== null && targetEnt !== undefined ? ctx.world.get(targetEnt, Cell) : undefined
-        const live = findPath(ctx.board, cell, goal, def.move, team, routeOccupied)
+        const live = findPath(ctx.board, cell, goal, def.move, team, liveOccupied, softAvoid)
         // Live route if it reaches the goal; otherwise a best-effort partial so
         // the piece still creeps toward it; otherwise a fresh theoretical route
         // (only the target's own square avoided) so the intended line stays
@@ -117,14 +121,11 @@ const system: System = {
                 goal,
                 def.move,
                 team,
+                NEVER,
                 targetCell !== undefined
                   ? (x: number, y: number) =>
-                      (x === targetCell.x && y === targetCell.y) ||
-                      (covered?.has(ctx.board.cellIndex(x, y)) ?? false) ||
-                      (ring?.(x, y) ?? false) ||
-                      (lethal?.(x, y) ?? false) ||
-                      (threats?.(x, y) ?? false)
-                  : routeOccupied,
+                      (x === targetCell.x && y === targetCell.y) || softAvoid(x, y)
+                  : softAvoid,
               )
         motion.path = result.cells
         motion.blocked = !live.found
@@ -132,7 +133,7 @@ const system: System = {
         continue
       }
 
-      const result = findPath(ctx.board, cell, goal, def.move, team, routeOccupied)
+      const result = findPath(ctx.board, cell, goal, def.move, team, liveOccupied, softAvoid)
       motion.path = result.cells
       motion.replanAt = ctx.tick + (result.found ? 15 : 10)
       motion.blocked = !result.found

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { moveDestinations } from '../../src/game/geometry'
+import { NEVER, moveDestinations } from '../../src/game/geometry'
 import { findPath, moveDistances, reachableCells } from '../../src/game/pathfind'
 import { PIECES, WEAPONS } from '../../src/game/pieces'
 import { flatBoard, occupiedCells } from '../helpers'
@@ -41,6 +41,47 @@ describe('findPath', () => {
     const result = findPath(board, { x: 0, y: 0 }, { x: 7, y: 0 }, rook, 'blue')
     expect(result.found).toBe(false)
     expect(result.cells[result.cells.length - 1]).toEqual({ x: 2, y: 0 })
+  })
+
+  it('prefers the straight route among equal-length king paths', () => {
+    // e1 -> e6 on a clear board: every monotone king path is 5 moves, but the
+    // file walk must win over the diagonal staircase.
+    const result = findPath(flatBoard(), { x: 4, y: 7 }, { x: 4, y: 2 }, PIECES.king.move, 'blue')
+    expect(result.found).toBe(true)
+    expect(result.cells).toEqual([
+      { x: 4, y: 6 },
+      { x: 4, y: 5 },
+      { x: 4, y: 4 },
+      { x: 4, y: 3 },
+      { x: 4, y: 2 },
+    ])
+  })
+
+  it('still takes a clean diagonal when the goal is diagonal', () => {
+    const result = findPath(flatBoard(), { x: 4, y: 7 }, { x: 6, y: 5 }, PIECES.king.move, 'blue')
+    expect(result.cells).toEqual([
+      { x: 5, y: 6 },
+      { x: 6, y: 5 },
+    ])
+  })
+
+  it('lets a pawn open two squares past a soft-avoided intermediate', () => {
+    // Blue pawn on d2 (3,6) ordered to d5 (3,3) with d3 (3,5) and d5 marked as
+    // "do not stop here" (e.g. under fire). The two-square opening step must
+    // still land on the safe d4 (3,4) instead of being blocked at d3.
+    const avoid = (x: number, y: number): boolean => x === 3 && (y === 5 || y === 3)
+    const result = findPath(flatBoard(), { x: 3, y: 6 }, { x: 3, y: 3 }, pawnMove, 'blue', NEVER, avoid)
+    expect(result.found).toBe(false)
+    expect(result.cells).toEqual([{ x: 3, y: 4 }])
+  })
+
+  it('lets a slider land beyond a soft-avoided square', () => {
+    // Rook a1 (0,7) to a5 (0,3) with a3 (0,5) marked avoid: the ray must not be
+    // cut at a3, so a5 is still reachable as a landing square.
+    const avoid = (x: number, y: number): boolean => x === 0 && y === 5
+    const result = findPath(flatBoard(), { x: 0, y: 7 }, { x: 0, y: 3 }, rook, 'blue', NEVER, avoid)
+    expect(result.found).toBe(true)
+    expect(result.cells).toEqual([{ x: 0, y: 3 }])
   })
 })
 

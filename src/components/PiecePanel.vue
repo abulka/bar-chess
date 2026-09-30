@@ -76,6 +76,16 @@ const noPreserveLeft = computed(() => {
 /** Pawns can never retreat (they only step forward), so they show no notches. */
 const isPawn = computed(() => info.value?.kind === 'pawn')
 
+/** Plain explanation of why a blocked route is not advancing. */
+const blockedReasonLabel = computed<string | null>(() => {
+  const reason = info.value?.motion.blockedReason
+  if (!reason) return null
+  if (reason === 'enemy-fire') return 'the destination is under enemy fire — Alt-click the order to insist'
+  if (reason === 'check') return 'the destination is in check — a king may not step there'
+  if (reason === 'unreachable') return 'this piece can never reach the destination'
+  return 'the way is blocked by a wall or another piece'
+})
+
 /** This piece's health thresholds for the two notches, shared with the sim rules. */
 const thresholds = computed(() => selfPreservationThresholds(info.value?.kind ?? ''))
 
@@ -266,6 +276,9 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
         path {{ info.motion.pathLength }}
         <span v-if="info.motion.blocked"> · blocked</span>
         <span v-if="info.motion.moving"> · moving</span>
+      </p>
+      <p v-if="info.motion.blocked && blockedReasonLabel" class="line warn">
+        blocked — {{ blockedReasonLabel }}
       </p>
 
       <div class="sub">queue ({{ info.order.queue.length }})</div>

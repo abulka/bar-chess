@@ -1421,4 +1421,26 @@ describe('Game mega turns', () => {
     game.orderAt({ x: 4, y: 0 }, 'move')
     expect(game.world.require(queen, Order).noPreserveUntil).toBe(-1)
   })
+
+  it('advances a blocked pawn as far as is safe and reports the reason', () => {
+    const game = new Game(8, 'human-vs-human')
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    const pawn = createPiece(shim, 'blue', PIECES.pawn, { x: 3, y: 6 }) // d2
+    // The red knight on b4 covers d3 and d5 but not the safe d4 in between.
+    createPiece(shim, 'red', PIECES.knight, { x: 1, y: 4 })
+    game.playerTeam = 'blue'
+    game.teams.blue.controller = 'human'
+    game.selected = [pawn]
+    game.orderAt({ x: 3, y: 3 }, 'move') // d5
+
+    runTurn(game)
+
+    // The opening two-square step is not cut short by the covered d3: the pawn
+    // moves to d4 and waits, and the panel can explain why it stopped.
+    expect(game.world.require(pawn, Cell)).toEqual({ x: 3, y: 4 })
+    const info = game.snapshot().pieceInfo
+    expect(info?.motion.blocked).toBe(true)
+    expect(info?.motion.blockedReason).toBe('enemy-fire')
+  })
 })

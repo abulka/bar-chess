@@ -33,6 +33,7 @@ import { firingLine, routePolyline, type FiringLine, type FiringSegment } from '
 import {
   BAR_BG,
   BAR_HIDE_THRESHOLD,
+  BLOCKED_COLOR,
   ENGAGE_COLOR,
   POTSHOT_COLOR,
   PRESERVE_COLOR,
@@ -294,23 +295,38 @@ export class Renderer {
     const goal = motion?.goal ?? null
     if (goal) {
       const center = board.cellCenter(goal.x, goal.y)
+      const blocked = motion?.blocked ?? false
       const partial =
-        motion?.blocked ||
-        !(order?.kind === 'goto' && order.dest && vecEquals(order.dest, goal))
+        blocked || !(order?.kind === 'goto' && order.dest && vecEquals(order.dest, goal))
       ctx.strokeStyle =
-        motion?.intent === 'preserve' ? PRESERVE_COLOR : partial ? ROUTE_PARTIAL_COLOR : ROUTE_COLOR
+        motion?.intent === 'preserve'
+          ? PRESERVE_COLOR
+          : blocked
+            ? BLOCKED_COLOR
+            : partial
+              ? ROUTE_PARTIAL_COLOR
+              : ROUTE_COLOR
       ctx.lineWidth = (full ? 2 : 1.4) / this.camera.zoom
       // Connect the route to the objective whenever the path does not already
-      // end there (empty path, or a best-effort partial route).
+      // end there (empty path, or a best-effort partial route). A blocked tail is
+      // drawn with animated dashes in the refusal colour, so the part the piece
+      // will not walk reads separately from the traversable gold route.
       const last = motion && motion.path.length > 0 ? motion.path[motion.path.length - 1] : null
       const reachesGoal = last !== null && vecEquals(last, goal)
       if (!reachesGoal) {
         const from = last ? board.cellCenter(last.x, last.y) : pos
-        ctx.setLineDash([3 / this.camera.zoom, 5 / this.camera.zoom])
+        if (blocked) {
+          const dash = 4 / this.camera.zoom
+          ctx.setLineDash([dash, dash])
+          ctx.lineDashOffset = -((this.time * 8) % (dash * 2))
+        } else {
+          ctx.setLineDash([3 / this.camera.zoom, 5 / this.camera.zoom])
+        }
         ctx.beginPath()
         ctx.moveTo(from.x, from.y)
         ctx.lineTo(center.x, center.y)
         ctx.stroke()
+        ctx.lineDashOffset = 0
       }
       if (partial) ctx.setLineDash([3 / this.camera.zoom, 3 / this.camera.zoom])
       // A hollow diamond marks the destination, so it can never be mistaken for
