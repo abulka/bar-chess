@@ -69,10 +69,14 @@ const system: System = {
       if (motion) motion.hitStreak++
 
       const team = ctx.world.get(target, Team)
+      // The victim's square at the moment it is hit, so a unit that dies
+      // mid-turn can be named by where it died rather than its last sample.
+      const targetCell = ctx.world.get(target, Cell)
+      const cell = targetCell ? { x: targetCell.x, y: targetCell.y } : undefined
       ctx.bus.emit('damage', `#${target} took ${amount} dmg (hp ${health.cur}/${health.max})`, {
         entity: target,
         team,
-        data: { amount, source: cmd.source, kind: cmd.kind, hitFx },
+        data: { amount, source: cmd.source, kind: cmd.kind, hitFx, cell },
       })
 
       if (health.cur <= 0 && !ctx.world.has(target, Dead)) {
@@ -106,7 +110,7 @@ const system: System = {
         ctx.bus.emit('kill', `#${target} destroyed by #${cmd.source ?? 'unknown'}`, {
           entity: target,
           team,
-          data: { source: cmd.source },
+          data: { source: cmd.source, cell },
         })
       }
     }

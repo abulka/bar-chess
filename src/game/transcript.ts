@@ -58,12 +58,25 @@ function turnActivities(trace: TurnTrace[], events: EventRecord[], height: numbe
   for (let i = 1; i < trace.length; i++) {
     const before = new Map(trace[i - 1].pieces.map((p) => [p.entity, p]))
     const tokens: string[] = []
-    const relabel = (text: string): string =>
+    // A unit not in this turn's end-of-turn sample died during it; name it by the
+    // square it died on (carried on the damage/kill event) rather than its last
+    // sample, which reads as if it were killed somewhere it never stood.
+    const labelWithCell = (entity: number, cell?: { x: number; y: number }): string => {
+      if (cell && !trace[i].pieces.some((p) => p.entity === entity)) {
+        const stat = statsByEntity.get(entity)
+        if (stat) return `${pieceTag(stat.team, stat.kind)} ${coordName(cell.x, cell.y, height)}`
+      }
+      return labelAt(i, entity)
+    }
+    const relabel = (text: string, dead?: { entity?: number; cell?: { x: number; y: number } }): string =>
       text
         .replace(/advanced to (\d+),(\d+)/, (_m, x: string, y: string) =>
           `advanced to ${coordName(Number(x), Number(y), height)}`,
         )
-        .replace(/#(\d+)/g, (_m, id: string) => labelAt(i, Number(id)))
+        .replace(/#(\d+)/g, (_m, id: string) => {
+          const n = Number(id)
+          return labelWithCell(n, dead?.entity === n ? dead.cell : undefined)
+        })
     for (const piece of trace[i].pieces) {
       const prev = before.get(piece.entity)
       if (prev && !vecEquals(prev.cell, piece.cell)) {
@@ -81,7 +94,8 @@ function turnActivities(trace: TurnTrace[], events: EventRecord[], height: numbe
     for (const event of events) {
       if (!ACTIVITY_TYPES.has(event.type)) continue
       if (event.tick <= trace[i - 1].tick || event.tick > trace[i].tick) continue
-      tokens.push(relabel(event.msg))
+      const data = event.data as { cell?: { x: number; y: number } } | undefined
+      tokens.push(relabel(event.msg, { entity: event.entity, cell: data?.cell }))
     }
     // Why each order changed this turn: order transitions recorded on the piece
     // that were not present at the previous boundary. Matched by content (not

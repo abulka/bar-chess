@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Motion } from '../../src/ecs/components'
+import { Cell, Health, Motion } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { createPiece } from '../../src/game/factory'
@@ -48,5 +48,40 @@ describe('movement system — self-preservation within the AI move budget', () =
     expect(bishopMotion.moving).toBe(false)
     expect(bishopMotion.reserved).toBeNull()
     expect(ctx.world.require(bishop, Cell)).toEqual({ x: 0, y: 0 })
+  })
+})
+
+describe('movement system — refuses hops into lethal fire', () => {
+  beforeEach(() => clearComponents())
+
+  /** A red rook on a6 whose next hop (a7) is covered fatally by a blue rook on a8. */
+  function setup(controller: 'ai' | 'human', intent: 'engage' | 'order') {
+    const ctx = makeContext()
+    ctx.teams.red.controller = controller
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 0, y: 2 }) // a6
+    createPiece(ctx, 'blue', PIECES.rook, { x: 0, y: 0 }) // a8, 20 damage down the a-file
+    ctx.world.require(rook, Health).cur = 10 // one rook hit is fatal
+    const motion = ctx.world.require(rook, Motion)
+    motion.intent = intent
+    motion.goal = { x: 0, y: 1 }
+    motion.path = [{ x: 0, y: 1 }]
+    motion.cooldown = 0
+    return { ctx, rook, motion }
+  }
+
+  it('holds an AI piece rather than stepping into a fatal line', () => {
+    const { ctx, rook, motion } = setup('ai', 'engage')
+    run(ctx)
+    expect(motion.moving).toBe(false)
+    expect(motion.path).toEqual([])
+    expect(motion.blocked).toBe(true)
+    expect(ctx.world.require(rook, Cell)).toEqual({ x: 0, y: 2 })
+  })
+
+  it('carries out an explicit player order even into a fatal line', () => {
+    const { ctx, motion } = setup('human', 'order')
+    run(ctx)
+    expect(motion.moving).toBe(true)
+    expect(motion.reserved).toEqual({ x: 0, y: 1 })
   })
 })

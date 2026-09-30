@@ -64,6 +64,29 @@ describe('transcript & analysis', () => {
     expect(text).not.toContain('advanced to 1,4')
   })
 
+  it('names a unit that dies mid-turn by the square it died on', () => {
+    const dying: TurnTrace[] = [
+      {
+        turn: 0,
+        tick: 0,
+        pieces: [
+          { entity: 3, team: 'red', kind: 'queen', cell: { x: 6, y: 7 }, goal: null, moving: false, movedThisTurn: false, orderKind: 'none', target: null, underFire: false, inCheck: false, hp: 42, maxHp: 165 },
+        ],
+      },
+      { turn: 1, tick: 100, pieces: [] },
+    ]
+    const kill: EventRecord[] = [
+      { seq: 1, tick: 50, phase: 'combat', type: 'shot', msg: '#1 fired kingGuard at #3', entity: 1, team: 'blue' },
+      { seq: 2, tick: 50, phase: 'damage', type: 'damage', msg: '#3 took 132 dmg (hp 0/165)', entity: 3, team: 'red', data: { amount: 132, source: 1, cell: { x: 4, y: 5 } } },
+      { seq: 3, tick: 50, phase: 'death', type: 'kill', msg: '#3 destroyed by #1', entity: 3, team: 'red', data: { source: 1, cell: { x: 4, y: 5 } } },
+    ]
+    const text = formatTranscript({ record: record(), events: kill, trace: dying })
+    // Died on e3, its last sample was g1: the transcript must say e3.
+    expect(text).toContain('rQ e3 took 132 dmg')
+    expect(text).toContain('rQ e3 destroyed by #1')
+    expect(text).not.toContain('rQ g1 took')
+  })
+
   it('flags held-under-fire, never-moved and hit rate gaps', () => {
     const analysis = analyzeGame(record(), events, trace())
     expect(analysis.shots).toBe(1)

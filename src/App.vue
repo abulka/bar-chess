@@ -409,7 +409,11 @@ function onToggleEditor(): void {
 }
 
 function onDoneEditor(): void {
+  const dirty = game.snapshot().editorDirty
   game.setEditor(false)
+  // An editor edit replaces the battle from the edited boundary on, so drop the
+  // recorder's now-abandoned future beats too.
+  if (dirty) recorder.forkTo(game.turn)
   recorderBackup = null
   refresh()
 }
@@ -779,7 +783,7 @@ function confirmFork(): void {
   game.forkTurn()
   forkArmed.value = false
   liveLog.rewind(game.turn)
-  recorder.rewindTo(game.turn)
+  recorder.forkTo(game.turn)
   refresh()
 }
 
@@ -803,6 +807,8 @@ function onDiscardOrderChanges(): void {
   pendingContinue = null
   forkPrompt.value = false
   action?.()
+  // The original branch is kept intact, so every retained beat is valid again.
+  recorder.rewindTo(Number.POSITIVE_INFINITY)
   refresh()
 }
 

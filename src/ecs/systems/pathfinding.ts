@@ -6,6 +6,7 @@ import { PIECES } from '../../game/pieces'
 import { Cell, Motion, Order, PieceType, Team } from '../components'
 import type { OccupiedFn } from '../../game/geometry'
 import type { System } from '../pipeline'
+import { lethalAvoid, pieceDanger } from './preservation'
 
 // Ordered-attack re-plan cadence in ticks: longer once a real route is found,
 // shorter while the piece is boxed in so it reacts quickly as the board opens.
@@ -75,10 +76,19 @@ const system: System = {
       // adjacent square steps into guard range and dies before it arrives (the
       // promoted-queen g1→e1→c3 case). Route around the ring instead.
       const ring = motion.intent === 'preserve' ? enemyKingDanger(ctx.board, ctx.world, team) : null
+      // Every AI piece (and every autonomous goal on a player's piece) also
+      // routes around squares whose enemy fire would kill it, so a move saved
+      // earlier never walks into a line that opened since. A square the piece
+      // can survive stays open, so "absorb a hit for the kill" needs no case.
+      const controller = ctx.teams[team].controller
+      const autonomous = controller === 'ai' || motion.intent !== 'order'
+      const danger = autonomous ? pieceDanger(ctx, e, team) : null
+      const lethal = danger ? lethalAvoid(ctx, danger) : null
       const routeOccupied: OccupiedFn = (x, y) =>
         liveOccupied(x, y) ||
         (covered?.has(ctx.board.cellIndex(x, y)) ?? false) ||
-        (ring?.(x, y) ?? false)
+        (ring?.(x, y) ?? false) ||
+        (lethal?.(x, y) ?? false)
 
       if (isAttack) {
         const targetEnt = order.target

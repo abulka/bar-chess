@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Motion, Order } from '../../src/ecs/components'
+import { Cell, Health, Motion, Order } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { createPiece } from '../../src/game/factory'
@@ -156,5 +156,25 @@ describe('pathfinding system — retreats avoid the enemy king kill zone', () =>
     // The direct route steps onto e1 (4,7), directly in front of the king.
     expect(path).not.toContainEqual({ x: 4, y: 7 })
     for (const step of path) expect(ring.has(ctx.board.cellIndex(step.x, step.y))).toBe(false)
+  })
+
+  it('routes an AI piece around a lethal firing line, not just the king ring', () => {
+    const ctx = makeContext()
+    ctx.teams.blue.controller = 'ai'
+    const rook = createPiece(ctx, 'blue', PIECES.rook, { x: 0, y: 3 }) // a5
+    createPiece(ctx, 'red', PIECES.rook, { x: 2, y: 0 }) // c8, covers the c-file
+    ctx.world.require(rook, Health).cur = 10 // a rook hit is fatal
+    const motion = ctx.world.require(rook, Motion)
+    motion.intent = 'engage'
+    motion.goal = { x: 4, y: 3 } // e5, straight across the c-file
+    motion.path = []
+    motion.replanAt = 0
+
+    run(ctx)
+
+    const path = ctx.world.require(rook, Motion).path
+    expect(path.length).toBeGreaterThan(0)
+    // c5 (2,3) sits on the direct rank-5 route and is covered fatally.
+    expect(path).not.toContainEqual({ x: 2, y: 3 })
   })
 })

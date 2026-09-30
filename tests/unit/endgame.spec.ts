@@ -5,6 +5,7 @@ import { attackPlan } from '../../src/game/approach'
 import { createPiece } from '../../src/game/factory'
 import { Game } from '../../src/game/game'
 import { chebyshev, NEVER } from '../../src/game/geometry'
+import { kingRing } from '../../src/game/kingSafety'
 import { PIECES, WEAPONS } from '../../src/game/pieces'
 import { isKingOnlyDraw } from '../../src/game/study'
 import { clearComponents, flatBoard, orderAttack } from '../helpers'
@@ -272,6 +273,80 @@ describe('ordered attack against the enemy king kill zone', () => {
     game.runTicks(1)
 
     expect(game.world.require(bishop, Motion).goal).toEqual({ x: 0, y: 0 })
+  })
+})
+
+describe('stored retreat routes and the enemy king kill zone', () => {
+  beforeEach(() => clearComponents())
+
+  it('re-routes a stored retreat out of the kill zone instead of following it', () => {
+    const game = new Game(8, 'human-vs-ai')
+    stripArmy(game)
+    createPiece(shim(game), 'red', PIECES.king, { x: 5, y: 0 }) // f8
+    const queen = createPiece(shim(game), 'red', PIECES.queen, { x: 6, y: 7 }) // g1, red AI
+    const blueKing = createPiece(shim(game), 'blue', PIECES.king, { x: 4, y: 6 }) // e2
+    createPiece(shim(game), 'blue', PIECES.pawn, { x: 0, y: 1 }) // a field piece: no finish phase
+    game.teams.red.alive = { king: 1, queen: 1 }
+    game.teams.blue.alive = { king: 1, pawn: 1 }
+    game.world.require(queen, Health).cur = 42 // a wounded promoted queen
+
+    // A retreat route saved while the blue king was elsewhere: straight through e1.
+    const motion = game.world.require(queen, Motion)
+    motion.intent = 'preserve'
+    motion.goal = { x: 2, y: 5 } // c3
+    motion.path = [{ x: 4, y: 7 }, { x: 2, y: 5 }] // e1 > c3
+    motion.replanAt = game.tick + 5
+    motion.cooldown = 0
+
+    const ring = kingRing(game.board, game.world.require(blueKing, Cell))
+    const start = { ...game.world.require(queen, Cell) }
+    let moved = false
+    for (let i = 0; i < 120; i++) {
+      game.runTicks(1)
+      const c = game.world.require(queen, Cell)
+      expect(ring.has(game.board.cellIndex(c.x, c.y))).toBe(false)
+      if (c.x !== start.x || c.y !== start.y) moved = true
+    }
+    expect(moved).toBe(true)
+  })
+
+  it('keeps the queen out of e3 when her stored route steps in front of the king', () => {
+    // The exact saved state before the "queen to e3" blunder: red queen g1 at
+    // 42 HP with a preserve goal on c3 and a stored path e3>c3, blue king e2.
+    const game = new Game(8, 'human-vs-ai')
+    stripArmy(game)
+    createPiece(shim(game), 'red', PIECES.king, { x: 5, y: 0 }) // f8
+    const blueKing = createPiece(shim(game), 'blue', PIECES.king, { x: 4, y: 6 }) // e2
+    createPiece(shim(game), 'blue', PIECES.queen, { x: 4, y: 2 }) // e6
+    const queen = createPiece(shim(game), 'red', PIECES.queen, { x: 6, y: 7 }) // g1
+    createPiece(shim(game), 'red', PIECES.pawn, { x: 5, y: 1 }) // f7
+    createPiece(shim(game), 'red', PIECES.pawn, { x: 3, y: 4 }) // d4
+    game.teams.red.alive = { king: 1, queen: 1, pawn: 2 }
+    game.teams.blue.alive = { king: 1, queen: 1 }
+    game.world.require(queen, Health).cur = 42
+    game.world.require(queen, Target).entity = blueKing
+
+    const motion = game.world.require(queen, Motion)
+    motion.intent = 'preserve'
+    motion.goal = { x: 2, y: 5 } // c3
+    motion.path = [
+      { x: 4, y: 5 }, // e3: directly in front of the blue king
+      { x: 2, y: 5 },
+    ]
+    motion.replanAt = game.tick + 5
+    motion.cooldown = 0
+
+    const ring = kingRing(game.board, game.world.require(blueKing, Cell))
+    const start = { ...game.world.require(queen, Cell) }
+    let moved = false
+    for (let i = 0; i < 120; i++) {
+      game.runTicks(1)
+      const c = game.world.require(queen, Cell)
+      expect(c).not.toEqual({ x: 4, y: 5 })
+      expect(ring.has(game.board.cellIndex(c.x, c.y))).toBe(false)
+      if (c.x !== start.x || c.y !== start.y) moved = true
+    }
+    expect(moved).toBe(true)
   })
 })
 

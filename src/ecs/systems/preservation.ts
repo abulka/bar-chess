@@ -1,13 +1,16 @@
 import { friendlyCoverageCells } from '../../game/defended'
 import { chebyshev, containsCell, fireCells } from '../../game/geometry'
+import type { OccupiedFn } from '../../game/geometry'
 import { HEAL_RADIUS } from '../../game/healing'
 import { enemyCoverage } from '../../game/kingSafety'
 import { dist, dist2, vecEquals } from '../../game/math'
 import { occupiedExcept } from '../../game/occupancy'
+import type { Occupancy } from '../../game/occupancy'
 import { reachableCells } from '../../game/pathfind'
 import { PIECES, WEAPONS, weaponDamage, weaponVision } from '../../game/pieces'
 import type { TeamId, Vec2 } from '../../game/types'
-import { Cell, Health, PieceType, Target, Team } from '../components'
+import { resolveGeometry } from '../../game/types'
+import { Cell, Dead, Health, PieceType, Target, Team } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import { buildCoverage, evaluateSafeStep } from './threatField'
@@ -120,6 +123,117 @@ export function outgunned(ctx: SimContext, piece: Entity, threats: Threat[]): bo
   let incoming = 0
   for (const t of threats) if (t.canHitNow) incoming += t.damage
   return incoming >= hp.cur
+}
+
+/** Damage a single piece would take on each square: total enemy fire covering it. */
+export interface DangerMap {
+  /** Total damage every enemy weapon covers `(x, y)` with, against this piece. */
+  danger(x: number, y: number): number
+  /** True when that total meets or exceeds the piece's current HP. */
+  lethal(x: number, y: number): boolean
+}
+
+/**
+ * Damage-weighted enemy coverage for one piece: for every square, the total
+ * damage all enemy weapons currently cover it with, computed against this
+ * piece's max HP (a king's guard deals a fraction of the target's max). The
+ * piece is removed from occupancy, so vacating its own square opens the same
+ * lines it would have to dodge. A square is "lethal" when that total meets or
+ * exceeds the piece's current HP — standing there is a guaranteed one-volley
+ * kill, the same test `outgunned` makes for the current square.
+ *
+ * The orders, pathfinding and movement systems all ask this for the same pieces
+ * in the same tick, so the result is memoised per context and tick. Occupancy is
+ * fixed for the tick (targeting rebuilds it at the top), so the shared map stays
+ * valid even as movement serialises the individual steps.
+ */
+let dangerCacheCtx: SimContext | null = null
+let dangerCacheTick = -1
+let dangerCacheOccupancy: Occupancy | null = null
+let dangerCache = new Map<Entity, DangerMap>()
+
+export function pieceDanger(ctx: SimContext, piece: Entity, team: TeamId): DangerMap {
+  if (
+    dangerCacheCtx === ctx &&
+    dangerCacheTick === ctx.tick &&
+    dangerCacheOccupancy === ctx.occupancy
+  ) {
+    const hit = dangerCache.get(piece)
+    if (hit) return hit
+  } else {
+    dangerCacheCtx = ctx
+    dangerCacheTick = ctx.tick
+    dangerCacheOccupancy = ctx.occupancy
+    dangerCache = new Map()
+  }
+  const hp = ctx.world.get(piece, Health)
+  const maxHp = hp?.max ?? 0
+  const cur = hp?.cur ?? 0
+  const selfFree = occupiedExcept(ctx.board, ctx.occupancy, piece)
+  const damage = new Map<number, number>()
+  for (const e of ctx.world.query(Cell, Team, PieceType)) {
+    if (e === piece) continue
+    const enemyTeam = ctx.world.require(e, Team)
+    if (enemyTeam === team) continue
+    const health = ctx.world.get(e, Health)
+    if (!health || health.cur <= 0) continue
+    if (ctx.world.has(e, Dead)) continue
+    const def = PIECES[ctx.world.require(e, PieceType).kind]
+    if (!def) continue
+    const cell = ctx.world.require(e, Cell)
+    const geom = WEAPONS[def.weapon].geometry
+    const dmg = weaponDamage(WEAPONS[def.weapon], maxHp)
+    // Accumulate the weapon's firing geometry straight into the map instead of
+    // allocating a `fireCells` array — this scan runs per piece per tick. Every
+    // enemy is counted, however far away: a range-1 king two squares off still
+    // covers the square the piece is about to step onto, so a distance cut
+    // against the piece's current square would miss exactly that case.
+    const g = resolveGeometry(geom, enemyTeam)
+    if (g.kind === 'leap') {
+      for (const [dx, dy] of g.offsets) {
+        const x = cell.x + dx
+        const y = cell.y + dy
+        if (!ctx.board.inBounds(x, y)) continue
+        const idx = ctx.board.cellIndex(x, y)
+        damage.set(idx, (damage.get(idx) ?? 0) + dmg)
+      }
+      continue
+    }
+    if (g.kind !== 'slide') continue
+    for (const [dx, dy] of g.dirs) {
+      for (let k = 1; k <= g.range; k++) {
+        const x = cell.x + dx * k
+        const y = cell.y + dy * k
+        if (!ctx.board.inBounds(x, y) || ctx.board.blocksVision(x, y)) break
+        const idx = ctx.board.cellIndex(x, y)
+        damage.set(idx, (damage.get(idx) ?? 0) + dmg)
+        if (selfFree(x, y)) break
+      }
+    }
+  }
+  const danger = (x: number, y: number): number => damage.get(ctx.board.cellIndex(x, y)) ?? 0
+  const map: DangerMap = { danger, lethal: (x, y) => danger(x, y) >= cur }
+  dangerCache.set(piece, map)
+  return map
+}
+
+/**
+ * An `avoid` predicate rejecting squares that would kill `piece` in one volley.
+ * A square the piece can survive — even one where it would take a heavy hit —
+ * is never rejected, so "absorb a hit to make the kill" needs no special case:
+ * the piece only refuses the squares that are actually fatal.
+ */
+export function lethalAvoid(ctx: SimContext, danger: DangerMap): OccupiedFn {
+  const cache = new Map<number, boolean>()
+  return (x: number, y: number): boolean => {
+    const idx = ctx.board.cellIndex(x, y)
+    let hit = cache.get(idx)
+    if (hit === undefined) {
+      hit = danger.lethal(x, y)
+      cache.set(idx, hit)
+    }
+    return hit
+  }
 }
 
 /** Pieces worth protecting before they are actually below the HP threshold. */

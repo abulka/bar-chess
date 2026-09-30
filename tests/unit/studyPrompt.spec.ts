@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { GameAnalysis } from '../../src/game/analysis'
 import type { GameRecord } from '../../src/game/record'
-import { buildStudyPrompt, formatGamePromptBody } from '../../src/game/studyPrompt'
+import { buildStudyPrompt, formatGamePromptBody, historyFragmentNote } from '../../src/game/studyPrompt'
 import type { StudyPromptGame } from '../../src/game/studyPrompt'
 
 function analysis(overrides: Partial<GameAnalysis> = {}): GameAnalysis {
@@ -101,5 +101,38 @@ describe('study prompt', () => {
       { includeRecord: false },
     )
     expect(lean).not.toContain('# replay record')
+  })
+})
+
+describe('history fragment note', () => {
+  it('is silent for a full history from turn 0', () => {
+    const note = historyFragmentNote({
+      turns: [{ turn: 0 }, { turn: 1 }, { turn: 2 }],
+      historyIndex: 2,
+      historyLength: 3,
+      historyTrimmed: 0,
+    })
+    expect(note).toBeNull()
+  })
+
+  it('flags a copied line that begins after turn 0', () => {
+    const note = historyFragmentNote({
+      turns: [{ turn: 13 }, { turn: 14 }],
+      historyIndex: 1,
+      historyLength: 2,
+      historyTrimmed: 0,
+    })
+    expect(note).toContain('begins at turn 13')
+  })
+
+  it('flags trimmed and backtracked histories', () => {
+    const note = historyFragmentNote({
+      turns: [{ turn: 5 }, { turn: 6 }, { turn: 7 }],
+      historyIndex: 0,
+      historyLength: 3,
+      historyTrimmed: 5,
+    })
+    expect(note).toContain('5 earlier beat(s)')
+    expect(note).toContain('parked on turn 5')
   })
 })

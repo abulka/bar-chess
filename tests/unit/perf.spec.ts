@@ -48,7 +48,10 @@ describe('performance guards', () => {
       const elapsed = performance.now() - t0
 
       // Was ~80ms/tick (tens of seconds for three turns); now a few ms/tick.
-      expect(elapsed).toBeLessThan(10_000)
+      // The per-piece kill-zone scan adds roughly a third on this 64x64 stress
+      // case, so the guard sits well above it while still catching the old
+      // per-candidate-A* blow-up (tens of seconds).
+      expect(elapsed).toBeLessThan(14_000)
     },
     15_000,
   )

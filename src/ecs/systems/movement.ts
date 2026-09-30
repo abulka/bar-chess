@@ -6,6 +6,7 @@ import { PIECES } from '../../game/pieces'
 import { Cell, Motion, Order, PieceType, Position, Team } from '../components'
 import type { Entity } from '../world'
 import type { System } from '../pipeline'
+import { pieceDanger } from './preservation'
 
 const system: System = {
   name: 'movement',
@@ -128,6 +129,20 @@ const system: System = {
         motion.replanAt = Math.min(motion.replanAt, ctx.tick + 4)
         motion.path = []
         continue
+      }
+      // Every AI piece (and every autonomous goal on a player's piece) refuses a
+      // hop onto a square whose enemy fire would kill it, then re-plans. This is
+      // the backstop for a route that was saved before the firing line opened
+      // (a forked/resumed game, or a shooter that moved in). An explicit order is
+      // carried out as clicked.
+      if (ctx.teams[team].controller === 'ai' || motion.intent !== 'order') {
+        const danger = pieceDanger(ctx, e, team)
+        if (danger.lethal(next.x, next.y)) {
+          motion.blocked = true
+          motion.replanAt = Math.min(motion.replanAt, ctx.tick + 4)
+          motion.path = []
+          continue
+        }
       }
 
       motion.path.shift()

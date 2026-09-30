@@ -27,11 +27,13 @@ import {
   escapeGoal,
   inHealingAura,
   isValuable,
+  lethalAvoid,
   nearestDefendedCell,
   nearestHealingCell,
   outgunned,
+  pieceDanger,
 } from './preservation'
-import type { ThreatMemo } from './preservation'
+import type { DangerMap, ThreatMemo } from './preservation'
 
 /** Ticks a preserve/defense goal is honoured before it may be re-evaluated. */
 const RETREAT_COMMIT_TICKS = 60
@@ -138,6 +140,22 @@ function pursue(
   }
   const plan = attackPlan(ctx.board, cell, tcell, def.move, weaponGeom, team, occupied, blocked, recent)
   return plan.inRange ? null : plan.cell
+}
+
+/**
+ * Combine a caller's own avoid rule (the enemy king's 3×3) with the general
+ * "squares this piece's enemy fire would kill it on" block, so goal selection
+ * keeps the piece out of any lethal line, not just the king's guard. The base
+ * rule stays optional so the endgame trap and Alt-click insist can waive it.
+ */
+function addLethal(
+  ctx: SimContext,
+  danger: DangerMap,
+  base?: (x: number, y: number) => boolean,
+): (x: number, y: number) => boolean {
+  const lethal = lethalAvoid(ctx, danger)
+  if (!base) return lethal
+  return (x, y) => base(x, y) || lethal(x, y)
 }
 
 /**
@@ -249,6 +267,17 @@ const system: System = {
     // and replay never see a stale entry.
     const kingThreatMemo: ThreatMemo = new Map()
     const pieceThreatMemo: ThreatMemo = new Map()
+    // Damage-weighted enemy coverage per piece, shared between the pursue call
+    // sites below so a piece's lethal squares are computed once per tick.
+    const dangerMemo = new Map<Entity, DangerMap>()
+    const dangerFor = (piece: Entity, t: TeamId): DangerMap => {
+      let d = dangerMemo.get(piece)
+      if (d === undefined) {
+        d = pieceDanger(ctx, piece, t)
+        dangerMemo.set(piece, d)
+      }
+      return d
+    }
     const kings = { red: kingOf(ctx.world, 'red'), blue: kingOf(ctx.world, 'blue') }
     // Living non-king pieces per team. Once a team is down to its king alone,
     // self-preservation is switched off for the pieces hunting it — the endgame
@@ -569,7 +598,9 @@ const system: System = {
           // distance. A player who insisted (Alt-click) may always force entry.
           const guardHit = hp ? weaponDamage(WEAPONS.kingGuard, hp.max) : Infinity
           const canTankGuard = hp !== undefined && hp.cur > guardHit
-          const avoid = (endgame && canTankGuard) || insists ? undefined : enemyDanger
+          const avoid = insists
+            ? undefined
+            : addLethal(ctx, dangerFor(e, team), endgame && canTankGuard ? undefined : enemyDanger)
           motion.goal = pursue(ctx, e, t, team, avoid)
           motion.intent = motion.goal === null ? 'none' : 'order'
           continue
@@ -671,7 +702,13 @@ const system: System = {
         target.retargetAt = ctx.tick + 12
         const guardHit = hp ? weaponDamage(WEAPONS.kingGuard, hp.max) : Infinity
         const canTankGuard = hp !== undefined && hp.cur > guardHit
-        const goal = pursue(ctx, e, enemyKing, team, canTankGuard ? undefined : enemyDanger)
+        const goal = pursue(
+          ctx,
+          e,
+          enemyKing,
+          team,
+          addLethal(ctx, dangerFor(e, team), canTankGuard ? undefined : enemyDanger),
+        )
         setGoal(motion, goal, goal === null ? 'none' : 'engage', ctx.tick)
         continue
       }
@@ -696,7 +733,9 @@ const system: System = {
             const plan = top.canHitNow
               ? screenPlan(ctx, e, team, top, kc, makeOccupied(ctx.board, ctx.occupancy), claimed)
               : { onSegment: false, cell: null }
-            const goal = plan.onSegment ? null : plan.cell ?? pursue(ctx, e, top.entity, team, enemyDanger)
+            const goal = plan.onSegment
+              ? null
+              : plan.cell ?? pursue(ctx, e, top.entity, team, addLethal(ctx, dangerFor(e, team), enemyDanger))
             setGoal(motion, goal, goal === null ? 'none' : 'defense', ctx.tick)
             continue
           }
@@ -736,7 +775,9 @@ const system: System = {
         tcell !== undefined &&
         chebyshev(cell.x, cell.y, tcell.x, tcell.y) > ATTACK_LEASH &&
         !inFiringGeometryNow(ctx, e, target.entity as number, team)
-      const goal = beyondLeash ? null : pursue(ctx, e, target.entity as number, team, enemyDanger)
+      const goal = beyondLeash
+        ? null
+        : pursue(ctx, e, target.entity as number, team, addLethal(ctx, dangerFor(e, team), enemyDanger))
       setGoal(motion, goal, goal === null ? 'none' : 'engage', ctx.tick)
     }
   },

@@ -294,3 +294,41 @@ describe('game record', () => {
     expect(validateRecord({ ...legacy, v: 2 }).ok).toBe(false)
   })
 })
+
+describe('recorder history cursor', () => {
+  beforeEach(() => clearComponents())
+
+  function turnsOf(recorder: Recorder): number[] {
+    return recorder.record.turns.map((t) => t.turn)
+  }
+
+  it('keeps earlier beats across undo and redo so a redo still exports', () => {
+    const game = new Game(8, 'ai-vs-ai', 5)
+    const recorder = new Recorder(game)
+    playTurns(game, 3)
+    expect(turnsOf(recorder)).toEqual([1, 2, 3])
+
+    game.undoTurn()
+    recorder.rewindTo(game.turn)
+    expect(turnsOf(recorder)).toEqual([1, 2])
+
+    game.redoTurn()
+    recorder.rewindTo(game.turn)
+    expect(turnsOf(recorder)).toEqual([1, 2, 3])
+  })
+
+  it('drops the abandoned future when the timeline is forked', () => {
+    const game = new Game(8, 'ai-vs-ai', 5)
+    const recorder = new Recorder(game)
+    playTurns(game, 3)
+
+    game.undoTurn()
+    recorder.rewindTo(game.turn)
+    game.forkTurn()
+    recorder.forkTo(game.turn)
+    expect(turnsOf(recorder)).toEqual([1, 2])
+
+    playTurns(game, 1)
+    expect(turnsOf(recorder)).toEqual([1, 2, 3])
+  })
+})

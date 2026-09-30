@@ -84,6 +84,12 @@ export class Recorder {
   private game: Game
   private data: GameRecord
   private byTurn = new Map<number, TurnRecord>()
+  /**
+   * Highest turn currently valid for export. Undo/redo move it without dropping
+   * the beats, so a redo can export them again; beats beyond it are hidden and
+   * are only discarded when a genuinely new branch is played or forked.
+   */
+  private cursor = Number.POSITIVE_INFINITY
   private unsubscribe: () => void
 
   constructor(game: Game) {
@@ -106,6 +112,9 @@ export class Recorder {
     if (this.game.replaying) return
     const data = event.data as { turn?: number; ticks?: number; mode?: 'turn' | 'mega' } | undefined
     const turn = typeof data?.turn === 'number' ? data.turn : this.game.turn
+    // A beat completing at the tip abandons anything recorded beyond it.
+    for (const t of [...this.byTurn.keys()]) if (t > turn) this.byTurn.delete(t)
+    this.cursor = Number.POSITIVE_INFINITY
     const existing = this.byTurn.get(turn)
     if (existing) {
       existing.mode = data?.mode
@@ -125,6 +134,12 @@ export class Recorder {
     // Orders are given while paused, before `beginTurn` increments `game.turn`,
     // so they belong to the upcoming turn.
     const turn = this.game.turn + 1
+    // An order for a turn past the export cursor starts a new branch: drop the
+    // abandoned future (including any stale same-turn entry) before recording.
+    if (turn > this.cursor) {
+      for (const t of [...this.byTurn.keys()]) if (t >= turn) this.byTurn.delete(t)
+      this.cursor = Number.POSITIVE_INFINITY
+    }
     let entry = this.byTurn.get(turn)
     if (!entry) {
       entry = { turn, intents: [], settings: this.game.simSettings() }
@@ -137,18 +152,30 @@ export class Recorder {
   reset(): void {
     this.data = headerFor(this.game)
     this.byTurn.clear()
+    this.cursor = Number.POSITIVE_INFINITY
   }
 
   /**
-   * Drop recorded beats after `turn`, following the history cursor on
-   * undo/redo/jump/replay. The baseline is untouched, so the record still
-   * replays from where it started up to the viewed boundary — without this an
-   * exported record mixed a stale baseline with beats from an abandoned future.
+   * Follow the history cursor on undo/redo/jump/replay without dropping the
+   * beats, so a later redo can export them again. Beats beyond the cursor are
+   * hidden from `record`; they are discarded only by `forkTo` or when a new
+   * branch is played.
    */
   rewindTo(turn: number): void {
+    this.cursor = turn
+    this.data.result = null
+  }
+
+  /**
+   * Drop recorded beats after `turn` when the timeline is forked — an order
+   * branch or an editor edit replaces the old future — so the exported record
+   * never mixes branches. Unlike `rewindTo`, the dropped beats cannot be redone.
+   */
+  forkTo(turn: number): void {
     for (const t of [...this.byTurn.keys()]) {
       if (t > turn) this.byTurn.delete(t)
     }
+    this.cursor = Number.POSITIVE_INFINITY
     this.data.result = null
   }
 
@@ -157,6 +184,7 @@ export class Recorder {
     this.data = structuredClone(record)
     this.byTurn = new Map()
     for (const turn of record.turns) this.byTurn.set(turn.turn, structuredClone(turn))
+    this.cursor = Number.POSITIVE_INFINITY
   }
 
   /** Fill a result, defaulting each field to the live game's current value. */
@@ -188,7 +216,9 @@ export class Recorder {
   }
 
   get record(): GameRecord {
-    this.data.turns = [...this.byTurn.values()].sort((a, b) => a.turn - b.turn)
+    this.data.turns = [...this.byTurn.values()]
+      .filter((turn) => turn.turn <= this.cursor)
+      .sort((a, b) => a.turn - b.turn)
     // Refresh the header from the live game so an export reflects settings
     // toggled after the recorder was constructed.
     this.data.settings = this.game.simSettings()

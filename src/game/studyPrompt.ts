@@ -210,6 +210,37 @@ export function formatGamePromptBody(
   return sections.join('\n\n')
 }
 
+/** The slice of a game snapshot the history-fragment check needs. */
+export interface HistoryFragment {
+  turns: Array<{ turn: number }>
+  historyIndex: number
+  historyLength: number
+  historyTrimmed: number
+}
+
+/**
+ * A one-line warning for the LLM when the copied history is a fragment rather
+ * than a full game from turn 0 — e.g. a position loaded mid-battle or a line
+ * resumed from an earlier turn. Without this the reader cannot tell that the
+ * transcript starts partway through. Returns null for a normal full history.
+ */
+export function historyFragmentNote(snap: HistoryFragment): string | null {
+  const first = snap.turns[0]?.turn ?? 0
+  const tip = snap.turns[snap.turns.length - 1]?.turn ?? first
+  const view = snap.turns[snap.historyIndex]?.turn ?? tip
+  const backtracked = view < tip
+  if (first <= 0 && snap.historyTrimmed === 0 && !backtracked) return null
+  const parts: string[] = []
+  if (first > 0) parts.push(`it begins at turn ${first}, so earlier turns are not on record`)
+  if (snap.historyTrimmed > 0) parts.push(`${snap.historyTrimmed} earlier beat(s) were dropped by the history cap`)
+  if (backtracked) parts.push(`the view is parked on turn ${view} of a line that reached turn ${tip}`)
+  return `# history: fragment of a battle, not a full game from turn 0 — ${parts.join('; ')}.`
+}
+
+function historyNote(game: Game): string | null {
+  return historyFragmentNote(game.snapshot())
+}
+
 export interface GamePromptInput {
   game: Game
   record: GameRecord
@@ -224,9 +255,11 @@ export interface GamePromptInput {
  */
 export function buildGamePrompt(input: GamePromptInput): string {
   const { game, record, transcript, analysis } = input
+  const note = historyNote(game)
   return [
     LLM_PREAMBLE.trimEnd(),
     formatShorthand(game),
+    ...(note ? [note] : []),
     formatGamePromptBody({ transcript, analysis, record }, { includeRecord: true }),
   ].join('\n\n')
 }
