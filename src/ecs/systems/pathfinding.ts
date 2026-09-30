@@ -1,5 +1,5 @@
 import { vecEquals } from '../../game/math'
-import { enemyCoverage } from '../../game/kingSafety'
+import { enemyCoverage, enemyKingDanger } from '../../game/kingSafety'
 import { occupiedExcept } from '../../game/occupancy'
 import { findPath } from '../../game/pathfind'
 import { PIECES } from '../../game/pieces'
@@ -70,9 +70,15 @@ const system: System = {
       // blocked for both live and theoretical plans, so it never pathes into check.
       const covered =
         kind === 'king' ? enemyCoverage(ctx.board, ctx.world, ctx.occupancy, e, team) : null
-      const routeOccupied: OccupiedFn = covered
-        ? (x, y) => liveOccupied(x, y) || covered.has(ctx.board.cellIndex(x, y))
-        : liveOccupied
+      // A retreat must not route through the enemy king's 3×3 kill zone: its
+      // range-1 guard one-shots a wounded piece, so a heal trip that crosses an
+      // adjacent square steps into guard range and dies before it arrives (the
+      // promoted-queen g1→e1→c3 case). Route around the ring instead.
+      const ring = motion.intent === 'preserve' ? enemyKingDanger(ctx.board, ctx.world, team) : null
+      const routeOccupied: OccupiedFn = (x, y) =>
+        liveOccupied(x, y) ||
+        (covered?.has(ctx.board.cellIndex(x, y)) ?? false) ||
+        (ring?.(x, y) ?? false)
 
       if (isAttack) {
         const targetEnt = order.target

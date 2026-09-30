@@ -89,10 +89,15 @@ describe('study batch reference', () => {
       0,
       ...results.flatMap((r) => r.analysis.heldUnderFire.map((h) => h.maxStreak)),
     )
-    expect(maxHoldStreak).toBeLessThanOrEqual(6)
+    // Attackers now stand off the enemy king's kill zone instead of walking
+    // adjacent, which can leave a trapped king under fire one turn longer.
+    expect(maxHoldStreak).toBeLessThanOrEqual(7)
     // A king trapped in check may legally have no escape and hold; mere beat
     // counts of reversals across a whole game are allowed, but not rapid dither.
-    expect(summary.oscillationCount).toBeLessThanOrEqual(30)
+    // Retreats that route around the enemy king's kill zone rather than through
+    // it let wounded pieces survive and heal, which lengthens games and adds a
+    // few endgame reversal beats.
+    expect(summary.oscillationCount).toBeLessThanOrEqual(34)
     expect(summary.kingShotsWhileAlone).toBeGreaterThanOrEqual(3)
     expect(summary.noProgressTurns).toBeLessThanOrEqual(30)
   }, 180000)

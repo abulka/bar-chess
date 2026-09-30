@@ -4,6 +4,7 @@ import type { SimContext } from '../../src/ecs/types'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { createPiece } from '../../src/game/factory'
 import { PIECES } from '../../src/game/pieces'
+import { kingRing } from '../../src/game/kingSafety'
 import pathfinding from '../../src/ecs/systems/pathfinding'
 import { clearComponents, makeContext } from '../helpers'
 
@@ -131,5 +132,29 @@ describe('pathfinding system — adaptive attack routes', () => {
     // The new goal must be routed now, not after the cadence elapses.
     run(ctx)
     expect(motion.path[motion.path.length - 1]).toEqual({ x: 0, y: 3 })
+  })
+})
+
+describe('pathfinding system — retreats avoid the enemy king kill zone', () => {
+  beforeEach(() => clearComponents())
+
+  it('routes a preserve retreat around the enemy king 3×3 instead of through it', () => {
+    const ctx = makeContext()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 6, y: 7 }) // g1
+    const king = createPiece(ctx, 'red', PIECES.king, { x: 4, y: 6 }) // e2
+    const motion = ctx.world.require(queen, Motion)
+    // A wounded promoted queen retreating to a healing/defended square at c3.
+    motion.intent = 'preserve'
+    motion.goal = { x: 2, y: 5 }
+    motion.replanAt = 0
+
+    run(ctx)
+
+    const ring = kingRing(ctx.board, ctx.world.require(king, Cell))
+    const path = ctx.world.require(queen, Motion).path
+    expect(path.length).toBeGreaterThan(0)
+    // The direct route steps onto e1 (4,7), directly in front of the king.
+    expect(path).not.toContainEqual({ x: 4, y: 7 })
+    for (const step of path) expect(ring.has(ctx.board.cellIndex(step.x, step.y))).toBe(false)
   })
 })

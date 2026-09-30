@@ -1,7 +1,7 @@
 import { ATTACK_LEASH, TEAM_IDS } from '../../game/constants'
 import { friendlyCoverageCells } from '../../game/defended'
 import { chebyshev } from '../../game/geometry'
-import { enemyCoverage } from '../../game/kingSafety'
+import { enemyCoverage, kingRing } from '../../game/kingSafety'
 import { healthRatio, vecEquals } from '../../game/math'
 import { makeOccupied } from '../../game/occupancy'
 import { HEAL_RADIUS, kingOf } from '../../game/healing'
@@ -311,15 +311,7 @@ const system: System = {
     for (const id of TEAM_IDS) {
       const k = kings[id]
       const kc = k !== null ? ctx.world.get(k, Cell) : null
-      if (!kc) continue
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (dx === 0 && dy === 0) continue
-          const x = kc.x + dx
-          const y = kc.y + dy
-          if (ctx.board.inBounds(x, y)) kingDanger[id].add(ctx.board.cellIndex(x, y))
-        }
-      }
+      if (kc) kingDanger[id] = kingRing(ctx.board, kc)
     }
     // Squares already earmarked for screening this turn, so guards spread out.
     const claimed = new Set<number>()
@@ -600,7 +592,17 @@ const system: System = {
           // that route followed by a dashed "unreachable" firing line. Targeting
           // recomputes `reachable` every tick, so the route and overlay update as
           // the piece and target move.
-          motion.goal = pursue(ctx, e, t, team)
+          //
+          // Avoid the enemy king's 3×3 kill zone (its range-1 guard hits for 80%
+          // of max HP), mirroring autonomous pursuit. The waiver for a piece that
+          // can survive one guard hit applies only in the finishing phase, where
+          // closing to trap the lone king matters — outside it a healthy but
+          // simply tanky piece (a queen at 96% still takes ~80%) keeps its
+          // distance. A player who insisted (Alt-click) may always force entry.
+          const guardHit = hp ? weaponDamage(WEAPONS.kingGuard, hp.max) : Infinity
+          const canTankGuard = hp !== undefined && hp.cur > guardHit
+          const avoid = (endgame && canTankGuard) || insists ? undefined : enemyDanger
+          motion.goal = pursue(ctx, e, t, team, avoid)
           motion.intent = motion.goal === null ? 'none' : 'order'
           continue
         }

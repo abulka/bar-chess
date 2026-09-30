@@ -91,6 +91,24 @@ describe('closestEmptyCell', () => {
     expect(closestEmptyCell(board, { x: 6, y: 2 }, { x: 7, y: 2 }, bishopMove, 'blue', occ)).toEqual({ x: 6, y: 2 })
     expect(closestEmptyCell(board, { x: 7, y: 1 }, { x: 7, y: 2 }, bishopMove, 'blue', occ)).toEqual({ x: 7, y: 1 })
   })
+
+  it('steps outside an avoided kill zone instead of onto its nearest square', () => {
+    const board = flatBoard()
+    const from = { x: 2, y: 0 } // c8
+    const target = { x: 0, y: 1 } // a7, opposite colour so only best-effort
+    const avoid = (x: number, y: number) => x <= 1 && y <= 2 // a7's 3×3
+    // Without the zone the nearest empty square is the adjacent a8; with it the
+    // bishop holds on c8, two squares off and safe.
+    expect(closestEmptyCell(board, from, target, bishopMove, 'blue', occupiedCells([]))).toEqual({ x: 0, y: 0 })
+    expect(closestEmptyCell(board, from, target, bishopMove, 'blue', occupiedCells([]), avoid)).toEqual(from)
+  })
+
+  it('falls back into the zone when every reachable square is avoided', () => {
+    const board = flatBoard()
+    // A blanket avoid must not strand the piece: it still picks the closest.
+    const cell = closestEmptyCell(board, { x: 2, y: 0 }, { x: 0, y: 1 }, bishopMove, 'blue', occupiedCells([]), () => true)
+    expect(cell).not.toBeNull()
+  })
 })
 
 describe('inFiringGeometry', () => {
@@ -142,5 +160,25 @@ describe('attackPlan', () => {
     expect(plan.reachable).toBe(false)
     expect(plan.inRange).toBe(false)
     expect(plan.cell).toEqual({ x: 6, y: 2 })
+  })
+
+  it('keeps a best-effort unreachable approach out of an avoided kill zone', () => {
+    const board = flatBoard()
+    // The reported case: bishop c8 ordered at the opposite-colour king a7. With
+    // the king's 3×3 avoided the goal is c8 (hold) rather than the adjacent a8.
+    const avoid = (x: number, y: number) => x <= 1 && y <= 2
+    const plan = attackPlan(
+      board,
+      { x: 2, y: 0 },
+      { x: 0, y: 1 },
+      bishopMove,
+      bishopWeapon,
+      'blue',
+      occupiedCells([]),
+      avoid,
+    )
+    expect(plan.reachable).toBe(false)
+    expect(plan.inRange).toBe(false)
+    expect(plan.cell).toEqual({ x: 2, y: 0 })
   })
 })

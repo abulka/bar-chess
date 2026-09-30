@@ -1,8 +1,10 @@
 import type { Board } from './board'
 import { fireCells } from './geometry'
+import type { OccupiedFn } from './geometry'
+import { kingOf } from './healing'
 import { occupiedExcept } from './occupancy'
 import { PIECES, WEAPONS } from './pieces'
-import type { TeamId } from './types'
+import type { TeamId, Vec2 } from './types'
 import { Cell, Dead, Health, PieceType, Team } from '../ecs/components'
 import type { Entity, World } from '../ecs/world'
 import type { Occupancy } from './occupancy'
@@ -55,4 +57,37 @@ export function isInCheck(
 /** A predicate that rejects every square in a precomputed coverage set. */
 export function notCovered(board: Board, covered: Set<number>): (x: number, y: number) => boolean {
   return (x, y) => !covered.has(board.cellIndex(x, y))
+}
+
+/**
+ * The 3×3 ring around `kingCell` (the centre excluded), in cell indices. A
+ * king's guard hits for 80% of max HP at range 1, so these are the squares an
+ * approaching piece treats as a kill zone.
+ */
+export function kingRing(board: Board, kingCell: Vec2): Set<number> {
+  const ring = new Set<number>()
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (dx === 0 && dy === 0) continue
+      const x = kingCell.x + dx
+      const y = kingCell.y + dy
+      if (board.inBounds(x, y)) ring.add(board.cellIndex(x, y))
+    }
+  }
+  return ring
+}
+
+/**
+ * An `avoid` predicate rejecting `team`'s enemy king's 3×3 kill zone, or null
+ * when that king is already dead so callers can skip the check. Shared by the
+ * orders system (goal selection) and the game's order preview / settled check so
+ * the executed route and the displayed one agree.
+ */
+export function enemyKingDanger(board: Board, world: World, team: TeamId): OccupiedFn | null {
+  const enemyTeam: TeamId = team === 'red' ? 'blue' : 'red'
+  const king = kingOf(world, enemyTeam)
+  const cell = king !== null ? world.get(king, Cell) : null
+  if (!cell) return null
+  const ring = kingRing(board, cell)
+  return (x, y) => ring.has(board.cellIndex(x, y))
 }

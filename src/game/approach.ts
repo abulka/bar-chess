@@ -107,10 +107,17 @@ export function previewFiringCell(
  * theoretical navigation when the target is positionally out of reach, so the
  * route stops on a real square instead of under a piece beside the target.
  *
+ * `avoid` (e.g. the enemy king's 3×3 kill zone) is filtered out of the ranking:
+ * the piece still heads for the nearest reachable square, it just refuses to
+ * stop on a square that would get it one-shot. Only when *every* reachable empty
+ * square is avoided does it fall back to them, so it never stalls.
+ *
  * Holds on ties: if the piece's own square is already as close to the target as
  * any reachable square, it returns that square. Stepping to an equally-close one
  * would only shuttle between two cells (the bishop g6↔h7 case when chasing an
- * opposite-colour target), so "as close as it can get" means standing still.
+ * opposite-colour target), so "as close as it can get" means standing still. A
+ * piece already standing inside the avoided zone does not hold there — it steps
+ * to the nearest safe square even if that is farther away.
  */
 export function closestEmptyCell(
   board: Board,
@@ -119,6 +126,7 @@ export function closestEmptyCell(
   moveGeom: Geometry,
   team: TeamId,
   occupied: OccupiedFn,
+  avoid?: OccupiedFn,
 ): Vec2 | null {
   const reach = reachableCells(board, from, moveGeom, team)
   const here = dist2(from.x, from.y, targetCell.x, targetCell.y)
@@ -131,10 +139,15 @@ export function closestEmptyCell(
       candidates.push({ c: { x, y }, d: dist2(x, y, targetCell.x, targetCell.y) })
     }
   }
-  candidates.sort((a, b) => a.d - b.d)
-  const best = candidates[0]
+  // Prefer squares outside the danger zone; only when none exists (or `avoid` is
+  // absent) consider the avoided ones, so a boxed-in piece still creeps closer.
+  const safe = avoid ? candidates.filter((o) => !avoid(o.c.x, o.c.y)) : candidates
+  const pool = safe.length > 0 ? safe : candidates
+  pool.sort((a, b) => a.d - b.d)
+  const best = pool[0]
   if (!best) return null
-  if (here <= best.d) return { x: from.x, y: from.y }
+  const hereAvoided = avoid ? avoid(from.x, from.y) : false
+  if (!hereAvoided && here <= best.d) return { x: from.x, y: from.y }
   return best.c
 }
 
@@ -168,6 +181,8 @@ export interface AttackPlan {
  * always the walk-to goal chain (firing cell → closest empty → target), even
  * when holding: callers that do not hold (`orderSettled`, `planStep`) need that
  * chain, while holders (`planAttack`, `pursue`) check `inRange` first and ignore it.
+ * `avoid` (the enemy king's 3×3) steers both the firing-cell pick and the
+ * unreachable-target fallback, so a best-effort approach stops on a safe square.
  */
 export function attackPlan(
   board: Board,
@@ -184,7 +199,7 @@ export function attackPlan(
   const inRange = inFiringGeometry(board, from, targetCell, weaponGeom, team, occupied)
   const cell =
     previewFiringCell(board, from, targetCell, moveGeom, weaponGeom, team, occupied, avoid, recent) ??
-    closestEmptyCell(board, from, targetCell, moveGeom, team, occupied) ??
+    closestEmptyCell(board, from, targetCell, moveGeom, team, occupied, avoid) ??
     { x: targetCell.x, y: targetCell.y }
   return { reachable, inRange, cell }
 }

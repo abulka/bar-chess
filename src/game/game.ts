@@ -45,7 +45,7 @@ import {
 import { coordName } from './coords'
 import { containsCell, fireCells, NEVER } from './geometry'
 import type { OccupiedFn } from './geometry'
-import { enemyCoverage } from './kingSafety'
+import { enemyCoverage, enemyKingDanger } from './kingSafety'
 import { dist2, healthRatio, vecEquals } from './math'
 import { attackPlan } from './approach'
 import { advantageDetail, describeAdvantage } from './advantage'
@@ -54,11 +54,11 @@ import { buildOccupancy, makeOccupied, occupiedExcept } from './occupancy'
 import type { Occupancy } from './occupancy'
 import { underFireAttacker } from './underFire'
 import type { OrderKind, StanceMode, TeamId, Vec2 } from './types'
-import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
+import { PIECE_LIST, PIECES, WEAPONS, weaponDamage } from './pieces'
 import { destReachable, findPath } from './pathfind'
 import { anchorFor, clearMotion, clearOrder, noteOrder, planStep } from './queue'
 import { instaKillOrderedNote } from './instaKill'
-import { NO_PRESERVE_TURNS, armNoPreserve, noPreserveOrderedNote } from './noPreserve'
+import { NO_PRESERVE_TURNS, armNoPreserve, noPreserveOrderedNote, orderInsists } from './noPreserve'
 import {
   buildBoard,
   buildWorldSnapshot,
@@ -2082,7 +2082,7 @@ export class Game {
       const tcell = this.world.get(order.target, Cell)
       if (!tcell) return false
       const geometry = WEAPONS[def.weapon].geometry
-      const avoid = kind === 'king' ? this.kingSafe(e, team, never) : undefined
+      const avoid = this.attackAvoid(e, team, orderInsists(order, this.turn))
       const plan = attackPlan(this.board, cell, tcell, def.move, geometry, team, never, avoid)
       if (plan.reachable) return false
       return findPath(this.board, cell, plan.cell, def.move, team, avoid ?? never).cells.length === 0
@@ -2160,7 +2160,7 @@ export class Game {
           motion.path = []
           clearMotion(motion)
         }
-        if (attacking) this.startAttack(e, order, motion, occupant as Entity)
+        if (attacking) this.startAttack(e, order, motion, occupant as Entity, force)
         else this.startGoto(e, order, motion, cell, occ, team)
         started = true
       } else if (order.kind === 'attack' && order.queue.length === 0 && !attacking) {
@@ -2299,7 +2299,7 @@ export class Game {
     noteOrder(order, this.tick, instaKillOrderedNote(coordName(vcell.x, vcell.y, this.board.height)))
   }
 
-  private startAttack(e: Entity, order: OrderData, motion: MotionData, target: Entity): void {
+  private startAttack(e: Entity, order: OrderData, motion: MotionData, target: Entity, insist = false): void {
     clearOrder(order)
     order.kind = 'attack'
     order.target = target
@@ -2308,7 +2308,7 @@ export class Game {
     motion.path = []
     motion.arrived = true
     // Plan the route to a firing position now so it is visible while paused.
-    order.reachable = this.planAttack(e, motion, target)
+    order.reachable = this.planAttack(e, motion, target, insist)
     const tc = this.world.get(target, Cell)
     order.targetCell = tc ? { x: tc.x, y: tc.y } : null
     const at = tc ? coordName(tc.x, tc.y, this.board.height) : '?'
@@ -2764,10 +2764,39 @@ export class Game {
   }
 
   /**
+   * The `avoid` predicate for an ordered attack's route: the enemy king's 3×3
+   * kill zone, dropped when the ordered piece can survive one guard hit
+   * (`hp > 0.8 × maxHp`) *during the finishing phase* — where closing to trap a
+   * lone king is the point — or when the player insisted. Outside that phase a
+   * merely tanky piece still keeps its distance. A king also refuses to route
+   * through squares that would put it in check. Returns undefined when there is
+   * nothing to avoid (no living enemy king).
+   */
+  private attackAvoid(e: Entity, team: TeamId, insist: boolean): OccupiedFn | undefined {
+    const isKing = this.world.get(e, PieceType)?.kind === 'king'
+    const danger = enemyKingDanger(this.board, this.world, team)
+    const hp = this.world.get(e, Health)
+    const canTankGuard = hp !== undefined && hp.cur > weaponDamage(WEAPONS.kingGuard, hp.max)
+    const enemyTeam: TeamId = team === 'red' ? 'blue' : 'red'
+    let enemyField = 0
+    for (const o of this.world.query(PieceType, Team, Health)) {
+      if (this.world.require(o, Team) !== enemyTeam) continue
+      if (this.world.require(o, PieceType).kind === 'king') continue
+      if (this.world.require(o, Health).cur <= 0) continue
+      enemyField++
+    }
+    const endgame = enemyField === 0
+    const ring = !danger || (endgame && canTankGuard) || insist ? undefined : danger
+    if (ring) return isKing ? this.kingSafe(e, team, ring) : ring
+    // A king still refuses to route through squares that would put it in check.
+    return isKing ? this.kingSafe(e, team, NEVER) : undefined
+  }
+
+  /**
    * Route an attack order to the nearest firing position (skipped if in range).
    * Returns whether the target is positionally reachable at all.
    */
-  private planAttack(e: Entity, motion: MotionData, target: Entity): boolean {
+  private planAttack(e: Entity, motion: MotionData, target: Entity, insist = false): boolean {
     const cell = this.world.get(e, Cell)
     const kind = this.world.get(e, PieceType)?.kind
     const team = this.world.get(e, Team)
@@ -2778,7 +2807,7 @@ export class Game {
     const geometry = WEAPONS[def.weapon].geometry
     const occ = buildOccupancy(this.world, this.board)
     const blocked = occupiedExcept(this.board, occ, e)
-    const avoid = kind === 'king' ? this.kingSafe(e, team, NEVER) : undefined
+    const avoid = this.attackAvoid(e, team, insist)
     const plan = attackPlan(this.board, cell, tcell, def.move, geometry, team, blocked, avoid)
     if (plan.inRange) {
       clearMotion(motion)
@@ -2790,8 +2819,9 @@ export class Game {
     // when the board is currently blocked. It should still end on a real square,
     // so the goal is chosen against the live board (a firing cell, else the
     // closest empty reachable cell — a positionally unreachable target still
-    // routes best-effort to that nearest square). The firing line itself is
-    // judged against the live board: clear / blocked / out of reach.
+    // routes best-effort to that nearest square, minus the enemy king's 3×3 kill
+    // zone). The firing line itself is judged against the live board: clear /
+    // blocked / out of reach.
     const targetIdx = this.board.cellIndex(tcell.x, tcell.y)
     const planOccupied: OccupiedFn = (x, y) => this.board.cellIndex(x, y) === targetIdx
     motion.goal = plan.cell

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Health, Motion, PieceType, Target } from '../../src/ecs/components'
+import { Cell, Health, Motion, Order, PieceType, Target } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { attackPlan } from '../../src/game/approach'
 import { createPiece } from '../../src/game/factory'
@@ -7,7 +7,7 @@ import { Game } from '../../src/game/game'
 import { chebyshev, NEVER } from '../../src/game/geometry'
 import { PIECES, WEAPONS } from '../../src/game/pieces'
 import { isKingOnlyDraw } from '../../src/game/study'
-import { clearComponents, flatBoard } from '../helpers'
+import { clearComponents, flatBoard, orderAttack } from '../helpers'
 
 function shim(game: Game): SimContext {
   return { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
@@ -204,6 +204,74 @@ describe('king-adjacent danger', () => {
       () => true,
     )
     expect(plan.cell).toBeTruthy()
+  })
+})
+
+describe('ordered attack against the enemy king kill zone', () => {
+  beforeEach(() => clearComponents())
+
+  /** Blue bishop c8 ordered at the opposite-colour red king a7. */
+  function duel(): { game: Game; bishop: number; king: number } {
+    const game = new Game(8, 'human-vs-ai')
+    stripArmy(game)
+    const bishop = createPiece(shim(game), 'blue', PIECES.bishop, { x: 2, y: 0 })
+    const king = createPiece(shim(game), 'red', PIECES.king, { x: 0, y: 1 })
+    game.teams.blue.alive = { bishop: 1 }
+    game.teams.red.alive = { king: 1 }
+    return { game, bishop, king }
+  }
+
+  it('holds a doomed ordered piece outside the lone king 3×3', () => {
+    const { game, bishop, king } = duel()
+    game.world.require(bishop, Health).cur = 40 // one guard hit (60) would kill it
+    orderAttack(game, bishop, king, false)
+
+    game.runTicks(1)
+
+    // The best-effort approach still points at the king, but parks on the safe
+    // c8 rather than the adjacent a8.
+    expect(game.world.require(bishop, Motion).goal).toEqual({ x: 2, y: 0 })
+  })
+
+  it('lets an ordered piece that can survive a guard hit approach the ring', () => {
+    const { game, bishop, king } = duel()
+    // Full 75 hp > 0.8 × 75 = 60: it may take one hit, so it closes to a8.
+    orderAttack(game, bishop, king, false)
+
+    game.runTicks(1)
+
+    expect(game.world.require(bishop, Motion).goal).toEqual({ x: 0, y: 0 })
+  })
+
+  it('keeps a tanky ordered piece out of the ring while the enemy still has field pieces', () => {
+    const game = new Game(8, 'human-vs-ai')
+    stripArmy(game)
+    const queen = createPiece(shim(game), 'blue', PIECES.queen, { x: 4, y: 2 }) // e6
+    const king = createPiece(shim(game), 'red', PIECES.king, { x: 5, y: 0 }) // f8
+    createPiece(shim(game), 'red', PIECES.pawn, { x: 5, y: 1 }) // f7: a field piece
+    game.teams.blue.alive = { queen: 1 }
+    game.teams.red.alive = { king: 1, pawn: 1 }
+    // 158 > 0.8 × 165, yet the finish is not on, so avoiding the ring wins.
+    game.world.require(queen, Health).cur = 158
+    orderAttack(game, queen, king, false)
+
+    game.runTicks(1)
+
+    const goal = game.world.require(queen, Motion).goal
+    expect(goal).not.toBeNull()
+    expect(chebyshev(goal!.x, goal!.y, 5, 0)).toBeGreaterThan(1)
+  })
+
+  it('lets an insisting player force the approach past the kill zone', () => {
+    const { game, bishop, king } = duel()
+    game.world.require(bishop, Health).cur = 40
+    orderAttack(game, bishop, king, false)
+    // Alt-click insist suspends the kill-zone avoidance for the window.
+    game.world.require(bishop, Order).noPreserveUntil = game.turn + 3
+
+    game.runTicks(1)
+
+    expect(game.world.require(bishop, Motion).goal).toEqual({ x: 0, y: 0 })
   })
 })
 
