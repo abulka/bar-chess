@@ -21,12 +21,21 @@ export const SPEEDS = [0.5, 1, 2, 4]
 export const ATTACK_LEASH = 8
 
 /**
+ * Threat tolerance: total enemy fire a piece will still voluntarily walk into.
+ * Set to the weakest weapon (a pawn shot, 7) so a piece shrugs off a single
+ * graze but refuses to step into a bishop, rook, queen or king-guard line.
+ * Used by every voluntary move decision (pursuit goals, routes, hops, capture
+ * steps), so pieces stay out of enemy firing positions, not just the king's.
+ */
+export const THREAT_TOLERANCE = 7
+
+/**
  * Simulation/rules version. Bump this by hand on any change to AI, combat or
  * movement behaviour that would make an old recorded beat replay differently.
  * Saves stamped with a different version load position-only (their turn history
  * is cleared) so a replay can never mix old recorded states with new rules.
  */
-export const SIM_VERSION = 4
+export const SIM_VERSION = 5
 
 /** Seconds a capture-advance step glides for (slower than a normal step). */
 export const CAPTURE_ADVANCE_TRAVEL = 0.75

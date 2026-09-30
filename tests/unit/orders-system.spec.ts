@@ -771,10 +771,12 @@ describe('orders system — attack orders', () => {
   it('parks on the closest square to an unreachable target instead of shuttling', () => {
     const ctx = makeContext()
     const bishop = createPiece(ctx, 'blue', PIECES.bishop, { x: 6, y: 2 }) // g6 (light)
-    const king = createPiece(ctx, 'red', PIECES.king, { x: 7, y: 2 }) // h6 (dark)
+    // A red bishop on h6 (dark): a same-colour target the blue bishop can never
+    // fire on, so only best-effort approach is possible (no king ring in play).
+    const target = createPiece(ctx, 'red', PIECES.bishop, { x: 7, y: 2 })
     const order = ctx.world.require(bishop, Order)
     order.kind = 'attack'
-    order.target = king
+    order.target = target
     order.reachable = false
 
     run(ctx)

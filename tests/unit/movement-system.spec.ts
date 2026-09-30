@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Cell, Health, Motion } from '../../src/ecs/components'
+import { Cell, Health, Motion, Order } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { createPiece } from '../../src/game/factory'
@@ -78,10 +78,37 @@ describe('movement system — refuses hops into lethal fire', () => {
     expect(ctx.world.require(rook, Cell)).toEqual({ x: 0, y: 2 })
   })
 
-  it('carries out an explicit player order even into a fatal line', () => {
+  it('holds an explicit player order rather than stepping into a firing line', () => {
     const { ctx, motion } = setup('human', 'order')
+    run(ctx)
+    expect(motion.moving).toBe(false)
+    expect(motion.path).toEqual([])
+    expect(motion.blocked).toBe(true)
+  })
+
+  it('carries the order through when the player insists (Alt-click)', () => {
+    const { ctx, rook, motion } = setup('human', 'order')
+    ctx.world.require(rook, Order).noPreserveUntil = ctx.turn + 3
     run(ctx)
     expect(motion.moving).toBe(true)
     expect(motion.reserved).toEqual({ x: 0, y: 1 })
+  })
+
+  it('holds an explicit order rather than stepping beside the enemy king', () => {
+    const ctx = makeContext()
+    ctx.teams.red.controller = 'human'
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 0, y: 2 }) // a6
+    createPiece(ctx, 'blue', PIECES.king, { x: 1, y: 0 }) // b8: its guard covers a7
+    const motion = ctx.world.require(rook, Motion)
+    motion.intent = 'order'
+    motion.goal = { x: 0, y: 1 }
+    motion.path = [{ x: 0, y: 1 }]
+    motion.cooldown = 0
+    run(ctx)
+    // A guard hit is a heavy but survivable fraction of max HP; the hop is still
+    // refused, so a piece no longer parks in the enemy king's kill zone.
+    expect(motion.moving).toBe(false)
+    expect(motion.path).toEqual([])
+    expect(motion.blocked).toBe(true)
   })
 })

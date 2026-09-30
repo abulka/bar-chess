@@ -3,10 +3,12 @@ import { enemyCoverage } from '../../game/kingSafety'
 import { lerp, vecEquals } from '../../game/math'
 import { buildOccupancy, occupiedExcept } from '../../game/occupancy'
 import { PIECES } from '../../game/pieces'
+import { THREAT_TOLERANCE } from '../../game/constants'
+import { orderInsists } from '../../game/noPreserve'
 import { Cell, Motion, Order, PieceType, Position, Team } from '../components'
 import type { Entity } from '../world'
 import type { System } from '../pipeline'
-import { pieceDanger } from './preservation'
+import { pieceDanger, threatAvoid } from './preservation'
 
 const system: System = {
   name: 'movement',
@@ -130,14 +132,22 @@ const system: System = {
         motion.path = []
         continue
       }
-      // Every AI piece (and every autonomous goal on a player's piece) refuses a
-      // hop onto a square whose enemy fire would kill it, then re-plans. This is
-      // the backstop for a route that was saved before the firing line opened
-      // (a forked/resumed game, or a shooter that moved in). An explicit order is
-      // carried out as clicked.
-      if (ctx.teams[team].controller === 'ai' || motion.intent !== 'order') {
+      // Every piece refuses a hop into enemy fire above the small threat
+      // tolerance, then re-plans. This is the backstop for a route saved before
+      // a firing line opened (a forked/resumed game, or an enemy that moved in
+      // during the turn), and it now covers explicit orders too, so a click is
+      // not carried into a kill zone. The player can Alt-click to insist, a
+      // deliberate screen or a necessary lone-king finish (`threatExempt`) is
+      // exempt, and a preserve retreat keeps the narrower lethal guard so it can
+      // still escape through heavy-but-survivable fire. Within the tolerance a
+      // scratch is still allowed.
+      if (!motion.threatExempt && !orderInsists(order, ctx.turn)) {
         const danger = pieceDanger(ctx, e, team)
-        if (danger.lethal(next.x, next.y)) {
+        const refusing =
+          motion.intent === 'preserve'
+            ? danger.lethal(next.x, next.y)
+            : threatAvoid(ctx, danger, THREAT_TOLERANCE, cell)(next.x, next.y)
+        if (refusing) {
           motion.blocked = true
           motion.replanAt = Math.min(motion.replanAt, ctx.tick + 4)
           motion.path = []

@@ -221,7 +221,8 @@ export function pieceDanger(ctx: SimContext, piece: Entity, team: TeamId): Dange
  * An `avoid` predicate rejecting squares that would kill `piece` in one volley.
  * A square the piece can survive — even one where it would take a heavy hit —
  * is never rejected, so "absorb a hit to make the kill" needs no special case:
- * the piece only refuses the squares that are actually fatal.
+ * the piece only refuses the squares that are actually fatal. `threatAvoid` is
+ * the wider version used by normal navigation.
  */
 export function lethalAvoid(ctx: SimContext, danger: DangerMap): OccupiedFn {
   const cache = new Map<number, boolean>()
@@ -230,6 +231,36 @@ export function lethalAvoid(ctx: SimContext, danger: DangerMap): OccupiedFn {
     let hit = cache.get(idx)
     if (hit === undefined) {
       hit = danger.lethal(x, y)
+      cache.set(idx, hit)
+    }
+    return hit
+  }
+}
+
+/**
+ * An `avoid` predicate rejecting any square whose enemy fire exceeds both a
+ * small `tolerance` and the piece's exposure on `from` — the general "do not
+ * walk into an enemy firing position" rule. A pawn graze is shrugged off, a
+ * bishop, rook, queen or king-guard line is refused. Comparing against the
+ * current square matters: a piece already under fire may still step to a
+ * least-bad square to escape, while a piece in the open refuses any coverage.
+ * Callers fall back to an avoided square only when no safer option exists, so a
+ * piece can still force a needed kill. Pass no `from` for a strict absolute rule.
+ */
+export function threatAvoid(
+  ctx: SimContext,
+  danger: DangerMap,
+  tolerance: number,
+  from?: Vec2 | null,
+): OccupiedFn {
+  const here = from ? danger.danger(from.x, from.y) : 0
+  const cache = new Map<number, boolean>()
+  return (x: number, y: number): boolean => {
+    const idx = ctx.board.cellIndex(x, y)
+    let hit = cache.get(idx)
+    if (hit === undefined) {
+      const d = danger.danger(x, y)
+      hit = d > tolerance && d >= here
       cache.set(idx, hit)
     }
     return hit

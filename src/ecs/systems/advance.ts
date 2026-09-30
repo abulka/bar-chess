@@ -1,32 +1,31 @@
-import { CAPTURE_ADVANCE_TRAVEL } from '../../game/constants'
+import { CAPTURE_ADVANCE_TRAVEL, THREAT_TOLERANCE } from '../../game/constants'
 import { containsCell, fireCells } from '../../game/geometry'
 import { enemyCoverage } from '../../game/kingSafety'
 import { vecEquals } from '../../game/math'
-import { buildOccupancy, makeOccupied, occupiedExcept } from '../../game/occupancy'
+import { buildOccupancy, makeOccupied } from '../../game/occupancy'
 import { clearMotion } from '../../game/queue'
 import { PIECES, WEAPONS } from '../../game/pieces'
 import { Cell, Health, Motion, Order, PieceType, Position, Render, Team } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
 import type { System } from '../pipeline'
-import { COVER_RADIUS, coverageThreats } from './preservation'
-import { buildCoverage, dangerAt } from './threatField'
+import { pieceDanger, threatAvoid } from './preservation'
 
 /**
- * Whether stepping onto `dest` is survivable under the enemies currently
- * covering it. A kill should keep momentum, not walk a piece into a volley that
- * would delete it.
+ * Whether stepping onto `dest` is safe enough to take. A kill should keep
+ * momentum, not walk a piece into an enemy firing position: the capture step is
+ * free and voluntary, so it is refused whenever the square is covered by more
+ * than the small threat tolerance (the king's guard ring included). The chess
+ * capture of the king itself bypasses this, because taking that square is the
+ * win.
  */
 function advanceSafe(ctx: SimContext, killer: Entity, dest: { x: number; y: number }): boolean {
   const hp = ctx.world.get(killer, Health)
   if (!hp || hp.cur <= 0) return false
   const team = ctx.world.get(killer, Team)
   if (!team) return true
-  const threats = coverageThreats(ctx, killer, team, new Map(), { proximityRadius: COVER_RADIUS })
-  if (threats.length === 0) return true
-  const selfFree = occupiedExcept(ctx.board, ctx.occupancy, killer)
-  const coverages = buildCoverage(ctx, threats, selfFree)
-  return dangerAt(coverages, threats, dest.x, dest.y) < hp.cur
+  const cell = ctx.world.get(killer, Cell)
+  return !threatAvoid(ctx, pieceDanger(ctx, killer, team), THREAT_TOLERANCE, cell)(dest.x, dest.y)
 }
 
 /**

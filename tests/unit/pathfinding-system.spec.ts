@@ -28,7 +28,11 @@ function attackingQueen(blockers: Array<{ x: number; y: number }> = []): {
   order.kind = 'attack'
   order.target = king
   order.dest = null
-  ctx.world.require(queen, Motion).goal = { x: 3, y: 0 }
+  const motion = ctx.world.require(queen, Motion)
+  motion.goal = { x: 3, y: 0 }
+  // These tests exercise occupancy routing, not the threat guard; the goal sits
+  // in the king's guard ring, so exempt it (as the planner would for a fallback).
+  motion.threatExempt = true
   return { ctx, queen, king }
 }
 

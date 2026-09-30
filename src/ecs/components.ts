@@ -131,6 +131,13 @@ export interface MotionData {
   ease?: boolean
   /** a free capture-advance step: do not apply the post-arrival move cooldown */
   freeAdvance?: boolean
+  /**
+   * The current goal deliberately enters enemy fire: a bodyguard screening its
+   * own king, or a finisher that must close on a lone king because no safe
+   * firing square exists. The route planner and movement honour it by suspending
+   * the general "stay out of enemy coverage" guard. Set by `orders` each tick.
+   */
+  threatExempt: boolean
 }
 
 export interface ProjectileData {

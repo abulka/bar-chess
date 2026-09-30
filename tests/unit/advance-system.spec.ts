@@ -91,6 +91,21 @@ describe('advance system — chess-style capture step', () => {
     expect(ctx.world.require(queen, Motion).moving).toBe(false)
   })
 
+  it('skips an advance onto a square beside the enemy king even when survivable', () => {
+    const ctx = context()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 7 }) // a1, full HP
+    const victim = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 4 }) // a4
+    createPiece(ctx, 'red', PIECES.king, { x: 1, y: 4 }) // b4, its guard covers a4
+    kill(ctx, queen, victim)
+
+    advance.update(ctx)
+
+    // A guard hit is 80% of her max HP — survivable — but a4 is enemy fire, and
+    // the capture step is free and voluntary, so it is not taken.
+    expect(cellOf(ctx, queen)).toEqual({ x: 0, y: 7 })
+    expect(ctx.world.require(queen, Motion).moving).toBe(false)
+  })
+
   it('leaves an occupied destination alone', () => {
     const ctx = context()
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })

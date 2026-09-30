@@ -51,6 +51,7 @@ export function createPiece(ctx: SimContext, team: 'red' | 'blue', def: PieceDef
     blocked: false,
     steps: 0,
     movedThisTurn: false,
+    threatExempt: false,
   })
   return e
 }

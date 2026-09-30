@@ -3,10 +3,12 @@ import { enemyCoverage, enemyKingDanger } from '../../game/kingSafety'
 import { occupiedExcept } from '../../game/occupancy'
 import { findPath } from '../../game/pathfind'
 import { PIECES } from '../../game/pieces'
+import { THREAT_TOLERANCE } from '../../game/constants'
+import { orderInsists } from '../../game/noPreserve'
 import { Cell, Motion, Order, PieceType, Team } from '../components'
 import type { OccupiedFn } from '../../game/geometry'
 import type { System } from '../pipeline'
-import { lethalAvoid, pieceDanger } from './preservation'
+import { lethalAvoid, pieceDanger, threatAvoid } from './preservation'
 
 // Ordered-attack re-plan cadence in ticks: longer once a real route is found,
 // shorter while the piece is boxed in so it reacts quickly as the board opens.
@@ -71,24 +73,31 @@ const system: System = {
       // blocked for both live and theoretical plans, so it never pathes into check.
       const covered =
         kind === 'king' ? enemyCoverage(ctx.board, ctx.world, ctx.occupancy, e, team) : null
-      // A retreat must not route through the enemy king's 3×3 kill zone: its
-      // range-1 guard one-shots a wounded piece, so a heal trip that crosses an
-      // adjacent square steps into guard range and dies before it arrives (the
-      // promoted-queen g1→e1→c3 case). Route around the ring instead.
-      const ring = motion.intent === 'preserve' ? enemyKingDanger(ctx.board, ctx.world, team) : null
-      // Every AI piece (and every autonomous goal on a player's piece) also
-      // routes around squares whose enemy fire would kill it, so a move saved
-      // earlier never walks into a line that opened since. A square the piece
-      // can survive stays open, so "absorb a hit for the kill" needs no case.
-      const controller = ctx.teams[team].controller
-      const autonomous = controller === 'ai' || motion.intent !== 'order'
-      const danger = autonomous ? pieceDanger(ctx, e, team) : null
-      const lethal = danger ? lethalAvoid(ctx, danger) : null
+      // Every voluntary move routes around enemy firing positions — the king's
+      // guard ring included — via the shared threat tolerance, so a route saved
+      // earlier never walks into a line that opened since (e.g. a healer crossing
+      // a square the king now guards). A deliberate screen or a necessary finish
+      // (`threatExempt`) and a player's Alt-click insist waive it; within the
+      // tolerance a scratch is still allowed, so "absorb a pawn shot" needs no
+      // special case.
+      const preserve = motion.intent === 'preserve'
+      const exempt =
+        motion.threatExempt || (order !== undefined && orderInsists(order, ctx.turn))
+      const danger = pieceDanger(ctx, e, team)
+      // A preserve retreat keeps the older, narrower guard: the enemy king's
+      // kill zone and outright lethal squares only, so a wounded piece can still
+      // find a route home through heavy-but-survivable fire. Every other
+      // voluntary move refuses any enemy firing position above the tolerance.
+      const ring = preserve ? enemyKingDanger(ctx.board, ctx.world, team) : null
+      const lethal = preserve ? lethalAvoid(ctx, danger) : null
+      const threats =
+        exempt || preserve ? null : threatAvoid(ctx, danger, THREAT_TOLERANCE, cell)
       const routeOccupied: OccupiedFn = (x, y) =>
         liveOccupied(x, y) ||
         (covered?.has(ctx.board.cellIndex(x, y)) ?? false) ||
         (ring?.(x, y) ?? false) ||
-        (lethal?.(x, y) ?? false)
+        (lethal?.(x, y) ?? false) ||
+        (threats?.(x, y) ?? false)
 
       if (isAttack) {
         const targetEnt = order.target
@@ -111,7 +120,10 @@ const system: System = {
                 targetCell !== undefined
                   ? (x: number, y: number) =>
                       (x === targetCell.x && y === targetCell.y) ||
-                      (covered?.has(ctx.board.cellIndex(x, y)) ?? false)
+                      (covered?.has(ctx.board.cellIndex(x, y)) ?? false) ||
+                      (ring?.(x, y) ?? false) ||
+                      (lethal?.(x, y) ?? false) ||
+                      (threats?.(x, y) ?? false)
                   : routeOccupied,
               )
         motion.path = result.cells

@@ -235,14 +235,16 @@ describe('ordered attack against the enemy king kill zone', () => {
     expect(game.world.require(bishop, Motion).goal).toEqual({ x: 2, y: 0 })
   })
 
-  it('lets an ordered piece that can survive a guard hit approach the ring', () => {
+  it('keeps even a guard-hit-surviving ordered piece outside the lone king 3×3', () => {
     const { game, bishop, king } = duel()
-    // Full 75 hp > 0.8 × 75 = 60: it may take one hit, so it closes to a8.
+    // Full 75 hp > 0.8 × 75 = 60, which used to license entering the ring to
+    // "trap" the king. There is no safe firing square on this colour, so it
+    // holds at c8, two squares off, instead of parking on the adjacent a8.
     orderAttack(game, bishop, king, false)
 
     game.runTicks(1)
 
-    expect(game.world.require(bishop, Motion).goal).toEqual({ x: 0, y: 0 })
+    expect(game.world.require(bishop, Motion).goal).toEqual({ x: 2, y: 0 })
   })
 
   it('keeps a tanky ordered piece out of the ring while the enemy still has field pieces', () => {

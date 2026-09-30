@@ -1,13 +1,13 @@
-import { ATTACK_LEASH, TEAM_IDS } from '../../game/constants'
+import { ATTACK_LEASH, TEAM_IDS, THREAT_TOLERANCE } from '../../game/constants'
 import { friendlyCoverageCells } from '../../game/defended'
 import { chebyshev } from '../../game/geometry'
-import { enemyCoverage, kingRing } from '../../game/kingSafety'
+import { enemyCoverage } from '../../game/kingSafety'
 import { healthRatio, vecEquals } from '../../game/math'
 import { makeOccupied } from '../../game/occupancy'
 import { HEAL_RADIUS, kingOf } from '../../game/healing'
 import { attackPlan, inFiringGeometry } from '../../game/approach'
 import { coordName } from '../../game/coords'
-import { PIECES, WEAPONS, weaponDamage } from '../../game/pieces'
+import { PIECES, WEAPONS } from '../../game/pieces'
 import type { PieceDef } from '../../game/pieces'
 import { destReachable as canReach } from '../../game/pathfind'
 import { noteOrder, clearMotion, clearOrder, promoteNext, rechainQueue } from '../../game/queue'
@@ -27,11 +27,11 @@ import {
   escapeGoal,
   inHealingAura,
   isValuable,
-  lethalAvoid,
   nearestDefendedCell,
   nearestHealingCell,
   outgunned,
   pieceDanger,
+  threatAvoid,
 } from './preservation'
 import type { DangerMap, ThreatMemo } from './preservation'
 
@@ -143,19 +143,33 @@ function pursue(
 }
 
 /**
- * Combine a caller's own avoid rule (the enemy king's 3×3) with the general
- * "squares this piece's enemy fire would kill it on" block, so goal selection
- * keeps the piece out of any lethal line, not just the king's guard. The base
- * rule stays optional so the endgame trap and Alt-click insist can waive it.
+ * An `avoid` predicate rejecting squares where enemy fire exceeds the small
+ * threat tolerance, so goal selection keeps a piece out of every enemy firing
+ * position — the enemy king's guard ring included — not merely out of the
+ * squares that would kill it. Callers fall back to a threatened square only
+ * when no safer option exists.
  */
-function addLethal(
+function addThreat(
   ctx: SimContext,
   danger: DangerMap,
-  base?: (x: number, y: number) => boolean,
+  from: Vec2,
 ): (x: number, y: number) => boolean {
-  const lethal = lethalAvoid(ctx, danger)
-  if (!base) return lethal
-  return (x, y) => base(x, y) || lethal(x, y)
+  return threatAvoid(ctx, danger, THREAT_TOLERANCE, from)
+}
+
+/**
+ * Flag a goal the planner could only satisfy inside enemy fire as exempt from
+ * the runtime threat guard. The planner falls back to a threatened square only
+ * when no safer firing position exists, so the move is necessary (a short-range
+ * finisher, or a piece whose attack geometry only reaches from a covered
+ * square) and must be allowed through.
+ */
+function markThreatExempt(
+  motion: MotionData,
+  goal: Vec2 | null,
+  avoid?: (x: number, y: number) => boolean,
+): void {
+  if (goal !== null && avoid !== undefined && avoid(goal.x, goal.y)) motion.threatExempt = true
 }
 
 /**
@@ -299,15 +313,6 @@ const system: System = {
         runtime.kingOnlySince = -1
       }
     }
-    // The 3×3 ring around each king, in cell indices. A king's guard hits for
-    // 80% of max HP at range 1, so a piece should treat those squares as a kill
-    // zone and pick a firing position outside it.
-    const kingDanger: Record<TeamId, Set<number>> = { red: new Set(), blue: new Set() }
-    for (const id of TEAM_IDS) {
-      const k = kings[id]
-      const kc = k !== null ? ctx.world.get(k, Cell) : null
-      if (kc) kingDanger[id] = kingRing(ctx.board, kc)
-    }
     // Squares already earmarked for screening this turn, so guards spread out.
     const claimed = new Set<number>()
     // Cells each team's weapons cover (chess-protected squares), when the
@@ -327,9 +332,10 @@ const system: System = {
       const team = ctx.world.require(e, Team)
       const target = ctx.world.require(e, Target)
       const enemyTeam: TeamId = team === 'red' ? 'blue' : 'red'
-      // Firing positions inside the enemy king's 3×3 are a kill zone (its guard
-      // hits for 80% of max HP), so pursuit prefers to shoot from outside it.
-      const enemyDanger = (x: number, y: number) => kingDanger[enemyTeam].has(ctx.board.cellIndex(x, y))
+      // A goal that deliberately enters enemy fire (a bodyguard screen or a
+      // necessary lone-king finish) is re-armed below; clear last tick's flag so
+      // the general threat guard applies to ordinary goals again.
+      motion.threatExempt = false
 
       // 0a. Consume an insta-kill (immediate chess kill): it was decided when the
       // order was issued and lands here on the next tick. It is the highest
@@ -583,18 +589,12 @@ const system: System = {
           // recomputes `reachable` every tick, so the route and overlay update as
           // the piece and target move.
           //
-          // Avoid the enemy king's 3×3 kill zone (its range-1 guard hits for 80%
-          // of max HP), mirroring autonomous pursuit. The waiver for a piece that
-          // can survive one guard hit applies only in the finishing phase, where
-          // closing to trap the lone king matters — outside it a healthy but
-          // simply tanky piece (a queen at 96% still takes ~80%) keeps its
-          // distance. A player who insisted (Alt-click) may always force entry.
-          const guardHit = hp ? weaponDamage(WEAPONS.kingGuard, hp.max) : Infinity
-          const canTankGuard = hp !== undefined && hp.cur > guardHit
-          const avoid = insists
-            ? undefined
-            : addLethal(ctx, dangerFor(e, team), endgame && canTankGuard ? undefined : enemyDanger)
+          // Keep out of every enemy firing position, the king's guard ring
+          // included, not merely the lethal ones. A player who insisted
+          // (Alt-click) may always force entry.
+          const avoid = insists ? undefined : addThreat(ctx, dangerFor(e, team), cell)
           motion.goal = pursue(ctx, e, t, team, avoid)
+          markThreatExempt(motion, motion.goal, avoid)
           motion.intent = motion.goal === null ? 'none' : 'order'
           continue
         }
@@ -685,23 +685,19 @@ const system: System = {
       }
 
       // Finishing phase: the enemy has only its king left, so hunt it directly.
-      // This deliberately skips bodyguard duty and self-preservation — a
-      // wounded attacker must still take the shot that ends the game. A piece
-      // that survives one king guard (`hp > 0.8*maxHp`) may also enter the
-      // enemy king's 3×3 to trap it; a piece that would die there keeps its
-      // distance and shoots from outside the ring.
+      // This deliberately skips bodyguard duty and self-preservation — a wounded
+      // attacker must still take the shot that ends the game. Pieces shoot from
+      // outside enemy fire by default; only when the lone king's sole firing
+      // square is itself threatened does the attacker close, because finishing
+      // matters more than the safe square (the special king capture).
       if (endgame && enemyKing !== null) {
         target.entity = enemyKing
         target.retargetAt = ctx.tick + 12
-        const guardHit = hp ? weaponDamage(WEAPONS.kingGuard, hp.max) : Infinity
-        const canTankGuard = hp !== undefined && hp.cur > guardHit
-        const goal = pursue(
-          ctx,
-          e,
-          enemyKing,
-          team,
-          addLethal(ctx, dangerFor(e, team), canTankGuard ? undefined : enemyDanger),
-        )
+        const avoid = addThreat(ctx, dangerFor(e, team), cell)
+        const goal = pursue(ctx, e, enemyKing, team, avoid)
+        // No safe firing square exists anywhere, so this closing move is the
+        // finish; let movement carry it through the fire.
+        markThreatExempt(motion, goal, avoid)
         setGoal(motion, goal, goal === null ? 'none' : 'engage', ctx.tick)
         continue
       }
@@ -726,9 +722,14 @@ const system: System = {
             const plan = top.canHitNow
               ? screenPlan(ctx, e, team, top, kc, makeOccupied(ctx.board, ctx.occupancy), claimed)
               : { onSegment: false, cell: null }
-            const goal = plan.onSegment
-              ? null
-              : plan.cell ?? pursue(ctx, e, top.entity, team, addLethal(ctx, dangerFor(e, team), enemyDanger))
+            const avoid = addThreat(ctx, dangerFor(e, team), cell)
+            const screenCell = plan.onSegment ? null : plan.cell
+            const goal =
+              screenCell ?? (plan.onSegment ? null : pursue(ctx, e, top.entity, team, avoid))
+            // A screen cell is deliberately inside enemy fire; exempt it from the
+            // general threat guard so the bodyguard can take the line.
+            if (screenCell !== null) motion.threatExempt = true
+            markThreatExempt(motion, goal, avoid)
             setGoal(motion, goal, goal === null ? 'none' : 'defense', ctx.tick)
             continue
           }
@@ -768,9 +769,9 @@ const system: System = {
         tcell !== undefined &&
         chebyshev(cell.x, cell.y, tcell.x, tcell.y) > ATTACK_LEASH &&
         !inFiringGeometryNow(ctx, e, target.entity as number, team)
-      const goal = beyondLeash
-        ? null
-        : pursue(ctx, e, target.entity as number, team, addLethal(ctx, dangerFor(e, team), enemyDanger))
+      const avoid = addThreat(ctx, dangerFor(e, team), cell)
+      const goal = beyondLeash ? null : pursue(ctx, e, target.entity as number, team, avoid)
+      markThreatExempt(motion, goal, avoid)
       setGoal(motion, goal, goal === null ? 'none' : 'engage', ctx.tick)
     }
   },
