@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Cell, Health, Motion, Order } from '../../src/ecs/components'
+import type { MotionData } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { createPiece } from '../../src/game/factory'
@@ -110,5 +111,50 @@ describe('movement system — refuses hops into lethal fire', () => {
     expect(motion.moving).toBe(false)
     expect(motion.path).toEqual([])
     expect(motion.blocked).toBe(true)
+  })
+})
+
+describe('movement system — checkmate freezes movement', () => {
+  beforeEach(() => clearComponents())
+
+  function marcher(checkmate: boolean): { ctx: SimContext; motion: MotionData } {
+    const ctx = makeContext()
+    const rook = createPiece(ctx, 'red', PIECES.rook, { x: 0, y: 2 })
+    const motion = ctx.world.require(rook, Motion)
+    motion.intent = 'rally'
+    motion.goal = { x: 0, y: 0 }
+    motion.path = [{ x: 0, y: 1 }]
+    motion.cooldown = 0
+    ctx.checkmate.red = checkmate
+    return { ctx, motion }
+  }
+
+  it('starts a hop when no king is trapped', () => {
+    const { ctx, motion } = marcher(false)
+    run(ctx)
+    expect(motion.moving).toBe(true)
+    expect(motion.reserved).toEqual({ x: 0, y: 1 })
+  })
+
+  it('refuses a new hop while either king is checkmated', () => {
+    const { ctx, motion } = marcher(true)
+    run(ctx)
+    expect(motion.moving).toBe(false)
+    expect(motion.reserved).toBeNull()
+    expect(motion.path).toEqual([{ x: 0, y: 1 }])
+  })
+
+  it('still finishes a hop already in flight', () => {
+    const { ctx, motion } = marcher(true)
+    motion.moving = true
+    motion.fromX = 0
+    motion.fromY = 96
+    motion.toX = 0
+    motion.toY = 48
+    motion.travel = 0.01
+    motion.elapsed = 1
+    motion.reserved = { x: 0, y: 1 }
+    run(ctx)
+    expect(motion.moving).toBe(false)
   })
 })

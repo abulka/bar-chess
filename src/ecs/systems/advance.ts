@@ -46,6 +46,12 @@ const system: System = {
   update(ctx) {
     const intents = ctx.cmds.advance
     if (intents.length === 0) return
+    // Checkmate freezes movement, and a capture advance is a move. Drop any
+    // pending steps so the battle resolves by fire instead.
+    if (ctx.checkmate.red || ctx.checkmate.blue) {
+      intents.length = 0
+      return
+    }
 
     const board = ctx.board
     const occupancy = buildOccupancy(ctx.world, board)

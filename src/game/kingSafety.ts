@@ -1,8 +1,9 @@
 import type { Board } from './board'
-import { fireCells } from './geometry'
+import { TEAM_IDS } from './constants'
+import { fireCells, moveDestinations } from './geometry'
 import type { OccupiedFn } from './geometry'
 import { kingOf } from './healing'
-import { occupiedExcept } from './occupancy'
+import { makeOccupied, occupiedExcept } from './occupancy'
 import { PIECES, WEAPONS } from './pieces'
 import type { TeamId, Vec2 } from './types'
 import { Cell, Dead, Health, PieceType, Team } from '../ecs/components'
@@ -52,6 +53,34 @@ export function isInCheck(
   const cell = world.get(king, Cell)
   if (!cell) return false
   return enemyCoverage(board, world, occupancy, king, team).has(board.cellIndex(cell.x, cell.y))
+}
+
+/**
+ * Which kings are checkmated: in check with no legal square to escape to. A king
+ * trapped like this cannot be saved by material, so the battle is decided by
+ * fire. Computed from the live world (not a `Game`), so the simulation and the
+ * snapshot share one definition.
+ */
+export function checkmateSides(
+  board: Board,
+  world: World,
+  occupancy: Occupancy,
+): Record<TeamId, boolean> {
+  const out: Record<TeamId, boolean> = { red: false, blue: false }
+  const occupied = makeOccupied(board, occupancy)
+  for (const team of TEAM_IDS) {
+    const king = kingOf(world, team)
+    if (king === null) continue
+    const cell = world.get(king, Cell)
+    if (!cell) continue
+    const covered = enemyCoverage(board, world, occupancy, king, team)
+    if (!covered.has(board.cellIndex(cell.x, cell.y))) continue
+    const canMove = moveDestinations(board, cell, PIECES.king.move, team, occupied).some(
+      (c) => !covered.has(board.cellIndex(c.x, c.y)),
+    )
+    if (!canMove) out[team] = true
+  }
+  return out
 }
 
 /** A predicate that rejects every square in a precomputed coverage set. */

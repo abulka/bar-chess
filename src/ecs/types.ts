@@ -83,4 +83,9 @@ export interface SimContext {
   finishPressure: boolean
   /** when true, a piece covered by a friendly weapon slowly regenerates */
   defendedHeal: boolean
+  /**
+   * Which kings are checkmated this tick: in check with no legal square. While
+   * any is true, no piece may take a new step; firing still resolves the battle.
+   */
+  checkmate: Record<TeamId, boolean>
 }

@@ -89,9 +89,10 @@ describe('study batch reference', () => {
       0,
       ...results.flatMap((r) => r.analysis.heldUnderFire.map((h) => h.maxStreak)),
     )
-    // Attackers now stand off the enemy king's kill zone instead of walking
-    // adjacent, which can leave a trapped king under fire one turn longer.
-    expect(maxHoldStreak).toBeLessThanOrEqual(7)
+    // Checkmate now freezes movement and decides the game by fire, so a trapped
+    // king legitimately holds under fire for many turns while the winning side
+    // shoots it down (rather than the old walk-adjacent finish).
+    expect(maxHoldStreak).toBeLessThanOrEqual(14)
     // A king trapped in check may legally have no escape and hold; mere beat
     // counts of reversals across a whole game are allowed, but not rapid dither.
     // Retreats that route around the enemy king's kill zone rather than through
@@ -100,7 +101,10 @@ describe('study batch reference', () => {
     // more often. The batch is still decisive with no stalls (noProgressTurns=0,
     // timeouts=0), so the reversal budget is raised to match the safer movement.
     expect(summary.oscillationCount).toBeLessThanOrEqual(50)
-    expect(summary.kingShotsWhileAlone).toBeGreaterThanOrEqual(3)
+    // A checkmate now finishes mid-battle, so this batch rarely grinds all the
+    // way down to the lone-king phase where a cornered king trades fire. The
+    // trapped-king count confirms the checkmate mechanic is genuinely exercised.
+    expect(summary.kingCheckTurns).toBeGreaterThan(0)
     expect(summary.noProgressTurns).toBeLessThanOrEqual(30)
   }, 180000)
 })

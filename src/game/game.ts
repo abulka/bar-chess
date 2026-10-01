@@ -47,7 +47,7 @@ import { coordName } from './coords'
 import { hasLivingKing, isKingOnlyDraw } from './endgame'
 import { containsCell, fireCells, NEVER } from './geometry'
 import type { OccupiedFn } from './geometry'
-import { enemyCoverage } from './kingSafety'
+import { checkmateSides, enemyCoverage } from './kingSafety'
 import { pieceDanger, threatAvoid } from '../ecs/systems/preservation'
 import { dist2, healthRatio, vecEquals } from './math'
 import { attackPlan } from './approach'
@@ -505,6 +505,13 @@ export class Game {
   winner: TeamId | null = null
   /** True once a both-kings-only standoff has run its grace turns: a draw. */
   drawn = false
+  /**
+   * Which kings are checkmated: in check with no legal square. While any is
+   * true, movement is frozen on both sides; firing continues, so the position
+   * resolves by fire. Kept on the instance so the renderer can mark the trapped
+   * king without recomputing each frame.
+   */
+  checkmate: Record<TeamId, boolean> = { red: false, blue: false }
   /** Completed beats the current standoff has run (reset when field pieces return). */
   private stalemateTurns = 0
   terrainVersion = 0
@@ -745,6 +752,7 @@ export class Game {
       promotion: this.promotion,
       finishPressure: this.finishPressure,
       defendedHeal: this.defendedHeal,
+      checkmate: this.checkmate,
     }
   }
 
@@ -1658,6 +1666,12 @@ export class Game {
     // must apply. A mega-turn replay runs exactly like free play (turnActive
     // off) so its parallel movement is reproduced.
     this.ctx.turnActive = this.turnActive || (this.replaying && !this.replayContinuous)
+    // Checkmate freezes all movement for both sides; firing still resolves it.
+    // Read the live board once per tick so the movement system and the renderer
+    // agree on which king is trapped.
+    const mate = checkmateSides(this.board, this.world, buildOccupancy(this.world, this.board))
+    this.checkmate.red = mate.red
+    this.checkmate.blue = mate.blue
     this.bus.tick = this.tick
     this.bus.phase = 'tick'
     // Replay events are duplicates of ones already in the log: tag them and keep
@@ -1879,6 +1893,8 @@ export class Game {
     this.editorBackup = null
     this.editorDirty = false
     this.ordersTouched = false
+    this.checkmate.red = false
+    this.checkmate.blue = false
     this.ctx = this.buildContext()
     this.placeArmy(army)
     this.history = [this.boundary()]
@@ -2991,6 +3007,11 @@ export class Game {
     const adv = advantageDetail(this)
     const advantage = adv.score
     const advantageTooltip = describeAdvantage(adv)
+    // Keep the instance flag in step with the displayed position, so undo/restore
+    // (which change the world without a tick) update the renderer's trapped-king
+    // marker. Mutated in place because `ctx.checkmate` shares the object.
+    this.checkmate.red = adv.lost.red
+    this.checkmate.blue = adv.lost.blue
 
     const focused = this.selected.find((e) => this.world.isAlive(e))
     const pieceInfo = focused !== undefined ? this.pieceInfo(focused) : null
@@ -3050,7 +3071,7 @@ export class Game {
       drawn: this.drawn,
       advantage,
       advantageTooltip,
-      checkmate: { red: adv.lost.red, blue: adv.lost.blue },
+      checkmate: { red: this.checkmate.red, blue: this.checkmate.blue },
       overlays: { ...this.overlays },
       hudVisible: this.hudVisible,
       autoPreserve: this.autoPreserve,

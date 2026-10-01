@@ -40,6 +40,8 @@ export const SELECT_COLOR = '#ffd166'
 /** Order badge colours: green M for a move order, red A for an attack order. */
 export const ORDER_MOVE_COLOR = '#4ad991'
 export const ORDER_ATTACK_COLOR = '#ff3b30'
+/** The small red cross drawn over a checkmated king. */
+export const CHECKMATE_CROSS_COLOR = '#ff3b30'
 
 const HEALTH_FULL: [number, number, number] = [76, 217, 100]
 const HEALTH_EMPTY: [number, number, number] = [255, 59, 48]

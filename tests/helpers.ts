@@ -92,6 +92,7 @@ export function makeContext(
     promotion: opts?.promotion ?? true,
     finishPressure: opts?.finishPressure ?? true,
     defendedHeal: opts?.defendedHeal ?? true,
+    checkmate: { red: false, blue: false },
   }
 }
 

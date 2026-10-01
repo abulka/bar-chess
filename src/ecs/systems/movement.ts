@@ -82,6 +82,11 @@ const system: System = {
         continue
       }
 
+      // Checkmate freezes the battle: no piece may take a new step while either
+      // king is trapped. In-flight hops above still finish, and firing continues,
+      // so the position resolves by fire rather than manoeuvre.
+      if (ctx.checkmate.red || ctx.checkmate.blue) continue
+
       if (ctx.turnActive && (motion.movedThisTurn || anyMoving)) continue
       // AI move budget: an AI team facing a human may not out-move them within a
       // turn. It may make at most as many moves this turn as the human has, and

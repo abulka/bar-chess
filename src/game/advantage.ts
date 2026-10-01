@@ -1,9 +1,9 @@
 import { Cell, Health, PieceType, Team } from '../ecs/components'
 import { makeOccupied, buildOccupancy } from './occupancy'
 import { TEAM_IDS, TEAM_NAMES } from './constants'
-import { containsCell, fireCells, moveDestinations } from './geometry'
+import { containsCell, fireCells } from './geometry'
 import type { Game } from './game'
-import { enemyCoverage, isInCheck } from './kingSafety'
+import { checkmateSides } from './kingSafety'
 import { PIECES, WEAPONS, weaponDamage } from './pieces'
 import type { TeamId, Vec2 } from './types'
 
@@ -106,7 +106,6 @@ export function advantageDetail(game: Game): AdvantageDetail {
   const kingCell: Record<TeamId, Vec2 | null> = { red: null, blue: null }
   const kingMax: Record<TeamId, number> = { red: 0, blue: 0 }
   const kingCur: Record<TeamId, number> = { red: 0, blue: 0 }
-  const kingEntity: Record<TeamId, number | null> = { red: null, blue: null }
   const pieces: ScoredPiece[] = []
 
   for (const e of world.query(Cell, Team, Health, PieceType)) {
@@ -120,7 +119,6 @@ export function advantageDetail(game: Game): AdvantageDetail {
       kingCell[team] = cell
       kingMax[team] = hp.max
       kingCur[team] = hp.cur
-      kingEntity[team] = e
       king[team] = ratio
       kingValue[team] = kingValueAt(ratio)
       continue
@@ -155,16 +153,8 @@ export function advantageDetail(game: Game): AdvantageDetail {
 
   // A king in check with no legal square is checkmate under the no-check rule:
   // no material can save it.
-  for (const id of TEAM_IDS) {
-    const e = kingEntity[id]
-    if (e === null || kingCell[id] === null) continue
-    if (!isInCheck(board, world, occupancy, e, id)) continue
-    const covered = enemyCoverage(board, world, occupancy, e, id)
-    const canMove = moveDestinations(board, kingCell[id]!, PIECES.king.move, id, occupied).some(
-      (c) => !covered.has(board.cellIndex(c.x, c.y)),
-    )
-    if (!canMove) lost[id] = true
-  }
+  const mate = checkmateSides(board, world, occupancy)
+  for (const id of TEAM_IDS) lost[id] = mate[id]
 
   let score: number
   if (lost.red && !lost.blue) score = -LOST_SCORE

@@ -34,6 +34,7 @@ import {
   BAR_BG,
   BAR_HIDE_THRESHOLD,
   BLOCKED_COLOR,
+  CHECKMATE_CROSS_COLOR,
   ENGAGE_COLOR,
   POTSHOT_COLOR,
   PRESERVE_COLOR,
@@ -797,6 +798,23 @@ export class Renderer {
       const weapon = game.world.get(e, Weapon)
       const kind = game.world.get(e, PieceType)?.kind
       const def = kind ? PIECES[kind] : undefined
+
+      // A checkmated king wears a small red cross: he is trapped and can no
+      // longer move, so this is the board's cue that the side is lost.
+      const team = game.world.get(e, Team)
+      if (kind === 'king' && team && game.checkmate[team]) {
+        const arm = size * 0.32
+        ctx.strokeStyle = CHECKMATE_CROSS_COLOR
+        ctx.lineWidth = Math.max(1.4, size * 0.11)
+        ctx.lineCap = 'round'
+        ctx.beginPath()
+        ctx.moveTo(pos.x - arm, pos.y - arm)
+        ctx.lineTo(pos.x + arm, pos.y + arm)
+        ctx.moveTo(pos.x + arm, pos.y - arm)
+        ctx.lineTo(pos.x - arm, pos.y + arm)
+        ctx.stroke()
+        ctx.lineCap = 'butt'
+      }
       // Subtle notches mark the two self-preservation thresholds (critical and
       // retreat). Pawns never retreat, so they get none.
       let marks: number[] | undefined

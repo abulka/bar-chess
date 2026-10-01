@@ -11,7 +11,7 @@ import { Game } from '../../src/game/game'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { WEAPONS } from '../../src/game/pieces'
 import { HEAL_COLOR, HEAL_TIP_COLOR } from '../../src/game/healing'
-import { BAR_BG, POTSHOT_COLOR, PRESERVE_COLOR, RELOAD_FILL, healthColor } from '../../src/render/palette'
+import { BAR_BG, CHECKMATE_CROSS_COLOR, POTSHOT_COLOR, PRESERVE_COLOR, RELOAD_FILL, healthColor } from '../../src/render/palette'
 import { Renderer } from '../../src/render/renderer'
 import { orderAttack, placePiece } from '../helpers'
 
@@ -778,5 +778,35 @@ describe('Renderer health and recharge bars', () => {
     ctx.fills = []
     renderer.draw(game)
     expect(ctx.fills.some((f) => f.style === healthColor(0.8))).toBe(true)
+  })
+})
+
+describe('Renderer checkmate cross', () => {
+  it('marks a trapped king with a small red cross', () => {
+    const { renderer, ctx, game } = setup()
+    placePiece(game, 'king', 'red', { x: 2, y: 2 })
+    game.checkmate.red = true
+
+    renderer.draw(game)
+
+    const cross = ctx.strokes.filter((st) => st.style === CHECKMATE_CROSS_COLOR)
+    expect(cross).toHaveLength(1)
+    expect(cross[0].points).toHaveLength(4)
+    // Two diagonal arms centred on the king's cell.
+    const c = center(2, 2)
+    const arm = 0.8 * TILE * 0.32
+    expect(cross[0].points[0]).toEqual({ x: c.x - arm, y: c.y - arm })
+    expect(cross[0].points[1]).toEqual({ x: c.x + arm, y: c.y + arm })
+    expect(cross[0].points[2]).toEqual({ x: c.x + arm, y: c.y - arm })
+    expect(cross[0].points[3]).toEqual({ x: c.x - arm, y: c.y + arm })
+  })
+
+  it('draws no cross when no king is trapped', () => {
+    const { renderer, ctx, game } = setup()
+    placePiece(game, 'king', 'red', { x: 2, y: 2 })
+
+    renderer.draw(game)
+
+    expect(ctx.strokes.some((st) => st.style === CHECKMATE_CROSS_COLOR)).toBe(false)
   })
 })

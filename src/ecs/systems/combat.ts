@@ -1,7 +1,8 @@
 import { containsCell, fireCells } from '../../game/geometry'
+import { kingOf } from '../../game/healing'
 import { makeOccupied } from '../../game/occupancy'
 import { PIECES, WEAPONS, projectileDef, weaponDamage } from '../../game/pieces'
-import type { Vec2 } from '../../game/types'
+import type { TeamId, Vec2 } from '../../game/types'
 import { Cell, Dead, Health, PieceType, Position, Projectile, Target, Team, Weapon, hasLiveCell } from '../components'
 import type { Entity } from '../world'
 import type { SimContext } from '../types'
@@ -73,11 +74,6 @@ const system: System = {
       }
 
       const target = ctx.world.require(e, Target).entity
-      if (!hasLiveCell(ctx.world, target)) continue
-      // A chess kill already queued for this target this tick: it dies before the
-      // shot would land, so don't waste a projectile on it.
-      if (ctx.world.has(target, Dead)) continue
-      if (ctx.cmds.damage.some((d) => d.target === target && d.lethal)) continue
 
       const kind = ctx.world.require(e, PieceType).kind
       const def = PIECES[kind]
@@ -85,20 +81,41 @@ const system: System = {
       const wdef = WEAPONS[def.weapon]
       const team = ctx.world.require(e, Team)
       const cell = ctx.world.require(e, Cell)
-      const tcell = ctx.world.require(target, Cell)
-
       const cells = fireCells(ctx.board, cell, wdef.geometry, team, occupied)
+
+      // Checkmate freezes all movement, so the winning side finishes by fire: a
+      // piece covering the trapped king shoots it even when its standing order
+      // points at a target it can no longer walk into range. This runs after the
+      // orders pass, so the focus cannot be overwritten before the shot lands.
+      let victim = target
+      const enemyTeam: TeamId = team === 'red' ? 'blue' : 'red'
+      if (ctx.checkmate[enemyTeam]) {
+        const king = kingOf(ctx.world, enemyTeam)
+        const kcell = king !== null ? ctx.world.get(king, Cell) : undefined
+        if (king !== null && kcell && containsCell(cells, kcell.x, kcell.y)) {
+          victim = king
+          ctx.world.require(e, Target).entity = king
+        }
+      }
+
+      if (!hasLiveCell(ctx.world, victim)) continue
+      // A chess kill already queued for this target this tick: it dies before the
+      // shot would land, so don't waste a projectile on it.
+      if (ctx.world.has(victim, Dead)) continue
+      if (ctx.cmds.damage.some((d) => d.target === victim && d.lethal)) continue
+
+      const tcell = ctx.world.require(victim, Cell)
       if (!containsCell(cells, tcell.x, tcell.y)) continue
 
-      const targetHealth = ctx.world.get(target, Health)
+      const targetHealth = ctx.world.get(victim, Health)
       const damage = weaponDamage(wdef, targetHealth?.max ?? 0)
-      const projectile = spawnProjectile(ctx, e, team, def.weapon, target, tcell, damage)
+      const projectile = spawnProjectile(ctx, e, team, def.weapon, victim, tcell, damage)
       weapon.left = wdef.cooldown
       weapon.fired = true
-      ctx.bus.emit('shot', `#${e} fired ${wdef.key} at #${target}`, {
+      ctx.bus.emit('shot', `#${e} fired ${wdef.key} at #${victim}`, {
         entity: e,
         team,
-        data: { projectile, target, weapon: wdef.key, piece: kind, projectileKind: wdef.projectile },
+        data: { projectile, target: victim, weapon: wdef.key, piece: kind, projectileKind: wdef.projectile },
       })
     }
   },
