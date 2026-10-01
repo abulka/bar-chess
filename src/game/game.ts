@@ -61,7 +61,7 @@ import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { destReachable, findPath } from './pathfind'
 import { anchorFor, clearMotion, clearOrder, noteOrder, planStep } from './queue'
 import { instaKillOrderedNote } from './instaKill'
-import { NO_PRESERVE_TURNS, armNoPreserve, noPreserveOrderedNote, orderInsists } from './noPreserve'
+import { armNoPreserve, noPreserveOrderedNote, orderInsists } from './noPreserve'
 import {
   buildBoard,
   buildWorldSnapshot,
@@ -161,9 +161,15 @@ export interface PieceInfo {
     reachable: boolean
     /** Pending insta-kill (immediate chess kill) victim, set only while parked. */
     instaKill: PieceRef | null
-    /** First turn self-preservation may run again, or -1 when not insisting. */
-    noPreserveUntil: number
-    queue: Array<{ kind: OrderStep['kind']; label: string; source: 'manual'; reachable: boolean }>
+    /** The player's Alt-click insist: self-preservation is off while this order runs. */
+    noPreserve: boolean
+    queue: Array<{
+      kind: OrderStep['kind']
+      label: string
+      source: 'manual'
+      reachable: boolean
+      noPreserve: boolean
+    }>
     /** Recent order transitions, newest first, for the "why did it change" log. */
     history: OrderLogEntry[]
   }
@@ -184,15 +190,13 @@ export interface PieceInfo {
   /**
    * Whether the automatic retreat rule applies to this piece right now, mirroring
    * the `orders` system's preserve gate. `reason` explains an inactive state:
-   * `insist` (the player force-ordered it, with `until` the auto-restore turn),
+   * `insist` (the player force-ordered it, off until the order completes),
    * `finishing` (a king-only endgame/side), `rule` (auto-preserve is off) or
    * `ai-king` (an AI king defends its post instead).
    */
   preserve: {
     active: boolean
     reason: 'pawn' | 'rule' | 'finishing' | 'insist' | 'ai-king' | null
-    /** For `insist`: first turn preservation may run again, else -1. */
-    until: number
   }
 }
 
@@ -2242,7 +2246,7 @@ export class Game {
     order.target = null
     order.targetCell = null
     order.chessKill = null
-    order.noPreserveUntil = -1
+    order.noPreserve = false
     clearMotion(motion)
     motion.path = []
   }
@@ -2311,7 +2315,8 @@ export class Game {
         started = true
       } else if (queue) {
         // Explicit append (Shift): keep the plan and queue this as the next step.
-        this.appendStep(e, order, motion, cell, attacking ? (occupant as Entity) : null, team)
+        // With Alt also held the queued step is itself a suspension step.
+        this.appendStep(e, order, motion, cell, attacking ? (occupant as Entity) : null, team, force)
       } else {
         // A plain order replaces the whole plan (active order, queue, target).
         this.resetOrderPlan(order, motion)
@@ -2322,12 +2327,15 @@ export class Game {
       // Insta-kill: an active order against a piece already in capture range
       // kills it on the next tick.
       if (started && enemyOccupied && occupant !== undefined) this.maybeInstaKill(e, occupant, order, occ)
-      // Alt-clicked order: insist on it. Self-preservation is suspended for the
-      // next few turns and any healing hold is released so the piece presses the
-      // clicked square. Recorded on the order so it replays with the world state.
-      if (force && started) {
-        armNoPreserve(order, motion, this.turn, NO_PRESERVE_TURNS)
-        noteOrder(order, this.tick, noPreserveOrderedNote(NO_PRESERVE_TURNS))
+      // Alt-clicked order: insist on it. Self-preservation is suspended while
+      // this order runs and any healing hold is released so the piece presses the
+      // clicked square. A queued force step carries its own flag instead (see
+      // `appendStep`). Recorded on the order so it replays with the world state.
+      if (force) {
+        if (started) {
+          armNoPreserve(order, motion)
+          noteOrder(order, this.tick, noPreserveOrderedNote())
+        }
       } else if (this.autoPreserve && !this.replaying && wouldSelfPreserve(this.ctx, e)) {
         // This order will be countered by a self-preservation retreat: collect
         // the piece so the player can be asked whether to insist.
@@ -2384,8 +2392,8 @@ export class Game {
     const order = this.world.get(e, Order)
     const motion = this.world.get(e, Motion)
     if (!order || !motion || order.kind === 'none') return false
-    armNoPreserve(order, motion, this.turn, NO_PRESERVE_TURNS)
-    noteOrder(order, this.tick, noPreserveOrderedNote(NO_PRESERVE_TURNS))
+    armNoPreserve(order, motion)
+    noteOrder(order, this.tick, noPreserveOrderedNote())
     return true
   }
 
@@ -2478,6 +2486,7 @@ export class Game {
     // resume later. A piece ordered to a healing square therefore stays there
     // instead of kiting back to its old victim.
     const replacedAttack = order.kind === 'attack'
+    order.noPreserve = false
     order.kind = 'goto'
     order.dest = { x: cell.x, y: cell.y }
     order.target = null
@@ -2514,6 +2523,7 @@ export class Game {
     cell: Vec2,
     attackTarget: Entity | null,
     team: TeamId,
+    noPreserve = false,
   ): void {
     const kind = this.world.get(e, PieceType)?.kind
     const from = this.world.get(e, Cell)
@@ -2521,6 +2531,7 @@ export class Game {
     if (!def || !from) return
     const last = order.queue[order.queue.length - 1] ?? null
     const anchor = anchorFor(order, motion, from)
+    const insist = noPreserve ? ' (no-preserve)' : ''
 
     if (attackTarget !== null) {
       if (
@@ -2530,11 +2541,18 @@ export class Game {
         return
       }
       const tcell = this.world.get(attackTarget, Cell) ?? null
-      const step: OrderStep = { kind: 'attack', target: attackTarget, path: [], goal: null, reachable: true }
+      const step: OrderStep = {
+        kind: 'attack',
+        target: attackTarget,
+        path: [],
+        goal: null,
+        reachable: true,
+        noPreserve,
+      }
       planStep(this.board, anchor, step, def, team, tcell)
       order.queue.push(step)
       const at = tcell ? coordName(tcell.x, tcell.y, this.board.height) : '?'
-      noteOrder(order, this.tick, `queued attack → ${at}${step.reachable ? '' : ' (unreachable)'}`)
+      noteOrder(order, this.tick, `queued attack → ${at}${step.reachable ? '' : ' (unreachable)'}${insist}`)
       return
     }
 
@@ -2544,10 +2562,10 @@ export class Game {
     ) {
       return
     }
-    const step: OrderStep = { kind: 'goto', dest: { x: cell.x, y: cell.y }, path: [] }
+    const step: OrderStep = { kind: 'goto', dest: { x: cell.x, y: cell.y }, path: [], noPreserve }
     planStep(this.board, anchor, step, def, team)
     order.queue.push(step)
-    noteOrder(order, this.tick, `queued move ${coordName(cell.x, cell.y, this.board.height)}`)
+    noteOrder(order, this.tick, `queued move ${coordName(cell.x, cell.y, this.board.height)}${insist}`)
   }
 
   clearOrders(): void {
@@ -2645,7 +2663,7 @@ export class Game {
               dest: order.dest,
               target: order.target,
               reachable: order.reachable,
-              noPreserveUntil: order.noPreserveUntil,
+              noPreserve: order.noPreserve,
               queue: order.queue,
               log: order.log,
             }
@@ -3305,6 +3323,7 @@ export class Game {
       kind: step.kind,
       source: 'manual' as const,
       reachable: step.kind === 'attack' ? step.reachable : gotoReachable(step.dest),
+      noPreserve: step.noPreserve,
       label:
         step.kind === 'goto'
           ? `move ${coord(step.dest) ?? '—'}`
@@ -3333,7 +3352,7 @@ export class Game {
       else fieldAlive[t]++
     }
     const kingOnly = (t: TeamId): boolean => kingAlive[t] && fieldAlive[t] === 0
-    const insists = order !== undefined && orderInsists(order, this.turn)
+    const insists = order !== undefined && orderInsists(order)
     const preserveReason: PieceInfo['preserve']['reason'] =
       !this.autoPreserve
         ? 'rule'
@@ -3376,7 +3395,7 @@ export class Game {
               ? gotoReachable(order.dest)
               : true,
         instaKill: order?.chessKill != null ? this.pieceRef(order.chessKill) : null,
-        noPreserveUntil: order?.noPreserveUntil ?? -1,
+        noPreserve: order?.noPreserve ?? false,
         queue,
         history: (order?.log ?? []).slice().reverse(),
       },
@@ -3394,7 +3413,6 @@ export class Game {
       preserve: {
         active: preserveReason === null,
         reason: preserveReason,
-        until: insists && order !== undefined ? order.noPreserveUntil : -1,
       },
     }
   }

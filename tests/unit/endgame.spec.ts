@@ -270,8 +270,8 @@ describe('ordered attack against the enemy king kill zone', () => {
     const { game, bishop, king } = duel()
     game.world.require(bishop, Health).cur = 40
     orderAttack(game, bishop, king, false)
-    // Alt-click insist suspends the kill-zone avoidance for the window.
-    game.world.require(bishop, Order).noPreserveUntil = game.turn + 3
+    // Alt-click insist suspends the kill-zone avoidance while the order runs.
+    game.world.require(bishop, Order).noPreserve = true
 
     game.runTicks(1)
 

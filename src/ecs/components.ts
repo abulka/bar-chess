@@ -29,8 +29,15 @@ export interface HealthData {
 
 /** One queued waypoint, planned from the previous step's endpoint. */
 export type OrderStep =
-  | { kind: 'goto'; dest: Vec2; path: Vec2[] }
-  | { kind: 'attack'; target: Entity; path: Vec2[]; goal: Vec2 | null; reachable: boolean }
+  | { kind: 'goto'; dest: Vec2; path: Vec2[]; noPreserve: boolean }
+  | {
+      kind: 'attack'
+      target: Entity
+      path: Vec2[]
+      goal: Vec2 | null
+      reachable: boolean
+      noPreserve: boolean
+    }
 
 /** One recorded order transition, for the piece panel's "why did it change" log. */
 export interface OrderLogEntry {
@@ -55,15 +62,14 @@ export interface OrderData {
    */
   chessKill: Entity | null
   /**
-   * First turn on which self-preservation may run again for this order; `-1`
-   * when the player has not insisted on the order. Set by an Alt-clicked order
-   * to suspend the wounded-retreat behaviour for a few turns — see
-   * `src/game/noPreserve.ts`. It ends when the order is replaced, completed or
-   * cleared, so a promoted queued step does not inherit it. Kept on the order
-   * (not in `cmds`) so it is part of the world snapshot and replays
-   * deterministically, like `chessKill`.
+   * The player's Alt-click insist: while true, self-preservation is suspended
+   * for this order so the piece presses it instead of retreating — see
+   * `src/game/noPreserve.ts`. It lasts until the order completes (a goto arrives,
+   * an attack's ordered victim dies) or the order is replaced, promoted or
+   * cleared. Kept on the order (not in `cmds`) so it is part of the world
+   * snapshot and replays deterministically, like `chessKill`.
    */
-  noPreserveUntil: number
+  noPreserve: boolean
   /** For an attack order: whether the target is positionally reachable at all. */
   reachable: boolean
   /** Steps queued behind the active order, executed in sequence. */

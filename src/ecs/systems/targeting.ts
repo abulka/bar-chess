@@ -149,7 +149,15 @@ const system: System = {
           target.entity = next
           target.retargetAt = ctx.tick + RETARGET_TICKS
           const at = nextCell ? coordName(nextCell.x, nextCell.y, ctx.board.height) : '?'
-          noteOrder(order, ctx.tick, `target lost — engaging ${at}`)
+          // Re-engaging a new enemy is a fresh fight: the player's insist on the
+          // original victim ends here, so self-preservation comes back on.
+          const noPreserve = order.noPreserve
+          order.noPreserve = false
+          noteOrder(
+            order,
+            ctx.tick,
+            noPreserve ? `target lost — no-preserve over, engaging ${at}` : `target lost — engaging ${at}`,
+          )
           continue
         }
         const last = order.targetCell

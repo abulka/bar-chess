@@ -1165,7 +1165,7 @@ onBeforeUnmount(() => {
           :class="snapshot.pendingCommand"
         >
           {{ snapshot.pendingCommand === 'attack' ? 'ATTACK — left-click a target' : 'MOVE — left-click a square' }}
-          · shift to queue · alt to insist (no-preserve) · esc to cancel
+          · shift to queue · alt to insist (no-preserve) · shift+alt to queue an insist · esc to cancel
         </span>
       </div>
 
@@ -1393,6 +1393,7 @@ onBeforeUnmount(() => {
                 <li><b>left-click</b> select · <b>shift-click</b> add · <b>drag</b> box</li>
                 <li><b>right-click</b> empty → move · enemy → attack (replaces the plan)</li>
                 <li><b>shift+right-click</b> → queue the step after the active order</li>
+                <li><b>alt</b> with an order → press it (self-preservation off); <b>shift+alt</b> queues that</li>
                 <li><b>m</b>/<b>a</b> then left-click → move / attack · shift to queue</li>
                 <li><b>shift-drag</b>/middle pan · <b>wheel</b> zoom</li>
                 <li><b>space</b> next turn / replay forward · <b>shift+space</b> play · <b>s</b> step</li>

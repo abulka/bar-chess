@@ -68,6 +68,25 @@ describe('targeting system — Attack leash', () => {
     expect(order.log[order.log.length - 1].text).toContain('engaging')
   })
 
+  it('ends the insist when the ordered victim dies and a new enemy is engaged', () => {
+    const ctx = context()
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 0, y: 0 })
+    const first = createPiece(ctx, 'red', PIECES.pawn, { x: 0, y: 3 })
+    const second = createPiece(ctx, 'red', PIECES.rook, { x: 5, y: 0 })
+    const order = ctx.world.require(queen, Order)
+    order.kind = 'attack'
+    order.target = first
+    order.noPreserve = true
+    ctx.world.destroy(first)
+
+    run(ctx)
+
+    // Re-engaging a new enemy is a fresh fight, so the original insist ends.
+    expect(order.target).toBe(second)
+    expect(order.noPreserve).toBe(false)
+    expect(order.log.some((n) => n.text.includes('no-preserve over'))).toBe(true)
+  })
+
   it('records why an attack order was abandoned when its target disappears', () => {
     const ctx = context()
     const knight = createPiece(ctx, 'blue', PIECES.knight, { x: 2, y: 2 })

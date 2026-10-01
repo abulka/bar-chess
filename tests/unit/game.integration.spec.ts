@@ -732,7 +732,7 @@ describe('Game integration — no-preserve prompt', () => {
     game.orderAt({ x: 1, y: 4 }, 'move')
     game.confirmNoPreservePrompt()
 
-    expect(game.world.require(piece, Order).noPreserveUntil).toBeGreaterThan(0)
+    expect(game.world.require(piece, Order).noPreserve).toBe(true)
     expect(game.snapshot().noPreservePrompt).toBeNull()
   })
 
@@ -741,7 +741,7 @@ describe('Game integration — no-preserve prompt', () => {
     game.orderAt({ x: 1, y: 4 }, 'move')
     game.dismissNoPreservePrompt()
 
-    expect(game.world.require(piece, Order).noPreserveUntil).toBe(-1)
+    expect(game.world.require(piece, Order).noPreserve).toBe(false)
     expect(game.snapshot().noPreservePrompt).toBeNull()
   })
 
@@ -774,10 +774,10 @@ describe('Game integration — piece preserve descriptor', () => {
 
   it('reports preservation on by default', () => {
     const { game } = fieldGame()
-    expect(game.snapshot().pieceInfo?.preserve).toEqual({ active: true, reason: null, until: -1 })
+    expect(game.snapshot().pieceInfo?.preserve).toEqual({ active: true, reason: null })
   })
 
-  it('reports an insist window with the turn it auto-restores', () => {
+  it('reports an insist as off until the order completes', () => {
     const { game, piece } = fieldGame()
     game.orderAt({ x: 3, y: 4 }, 'move')
     expect(game.insistOn(piece)).toBe(true)
@@ -785,7 +785,6 @@ describe('Game integration — piece preserve descriptor', () => {
     const preserve = game.snapshot().pieceInfo!.preserve
     expect(preserve.active).toBe(false)
     expect(preserve.reason).toBe('insist')
-    expect(preserve.until).toBe(game.world.require(piece, Order).noPreserveUntil)
   })
 
   it('reports the finishing phase when the enemy is down to its king', () => {
@@ -812,7 +811,7 @@ describe('Game integration — piece preserve descriptor', () => {
     expect(game.snapshot().pieceInfo!.preserve).toMatchObject({ active: false, reason: 'pawn' })
   })
 
-  it('keeps the insist countdown for a force-ordered pawn', () => {
+  it('keeps the insist for a force-ordered pawn', () => {
     const game = new Game(8)
     for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
     const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
@@ -827,7 +826,46 @@ describe('Game integration — piece preserve descriptor', () => {
     const preserve = game.snapshot().pieceInfo!.preserve
     expect(preserve.active).toBe(false)
     expect(preserve.reason).toBe('insist')
-    expect(preserve.until).toBeGreaterThan(0)
+  })
+})
+
+describe('Game integration — per-step insist', () => {
+  beforeEach(() => clearComponents())
+
+  function rookGame(): { game: Game; rook: number } {
+    const game = new Game(8, 'human-vs-human')
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    createPiece(shim, 'blue', PIECES.king, { x: 4, y: 7 })
+    const rook = createPiece(shim, 'blue', PIECES.rook, { x: 4, y: 6 })
+    createPiece(shim, 'red', PIECES.king, { x: 4, y: 0 })
+    game.playerTeam = 'blue'
+    game.teams.blue.controller = 'human'
+    game.selected = [rook]
+    return { game, rook }
+  }
+
+  it('stores the insist per queued step (Alt+Shift vs plain Shift)', () => {
+    const { game, rook } = rookGame()
+    game.orderAt({ x: 4, y: 5 }, 'move')
+    game.orderAt({ x: 4, y: 4 }, 'move', { queue: true, force: true })
+    game.orderAt({ x: 4, y: 3 }, 'move', { queue: true })
+
+    const order = game.world.require(rook, Order)
+    expect(order.queue.map((s) => s.noPreserve)).toEqual([true, false])
+  })
+
+  it('carries the step insist into the active order on promotion', () => {
+    const { game, rook } = rookGame()
+    game.orderAt({ x: 4, y: 5 }, 'move')
+    game.orderAt({ x: 4, y: 4 }, 'move', { queue: true, force: true })
+    game.orderAt({ x: 4, y: 3 }, 'move', { queue: true })
+
+    const order = game.world.require(rook, Order)
+    runTurn(game)
+    expect(order.noPreserve).toBe(true)
+    runTurn(game)
+    expect(order.noPreserve).toBe(false)
   })
 })
 
@@ -1463,12 +1501,11 @@ describe('Game mega turns', () => {
     expect(game.snapshot().queuedPlay).toBe(false)
   })
 
-  it('an Alt-clicked order suspends self-preservation for two turns', () => {
+  it('an Alt-clicked order suspends self-preservation until the piece arrives', () => {
     const game = new Game(8)
     for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
     const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
-    // A king steps one square per turn, so the move stays active long enough to
-    // observe the whole two-turn override window.
+    // A king steps one square per turn, so the move spans several turns.
     const king = createPiece(shim, 'blue', PIECES.king, { x: 4, y: 4 })
     game.playerTeam = 'blue'
     game.teams.blue.controller = 'human'
@@ -1476,15 +1513,15 @@ describe('Game mega turns', () => {
     game.orderAt({ x: 4, y: 0 }, 'move', { force: true })
 
     const order = game.world.require(king, Order)
-    // Active at issue and through the next two simulated turns, then lapsed.
-    expect(orderInsists(order, game.turn)).toBe(true)
+    // Suspended at issue and through every turn of the move, then restored on arrival.
+    expect(orderInsists(order)).toBe(true)
+    for (let i = 0; i < 3; i++) {
+      runTurn(game)
+      expect(orderInsists(order)).toBe(true)
+    }
     runTurn(game)
-    expect(orderInsists(order, game.turn)).toBe(true)
-    runTurn(game)
-    expect(orderInsists(order, game.turn)).toBe(true)
-    runTurn(game)
-    expect(orderInsists(order, game.turn)).toBe(false)
-    expect(order.noPreserveUntil).toBe(-1)
+    expect(orderInsists(order)).toBe(false)
+    expect(game.world.require(king, Cell)).toEqual({ x: 4, y: 0 })
   })
 
   it('a plain order does not arm the no-preserve override', () => {
@@ -1494,7 +1531,7 @@ describe('Game mega turns', () => {
     const queen = createPiece(shim, 'blue', PIECES.queen, { x: 4, y: 4 })
     game.selected = [queen]
     game.orderAt({ x: 4, y: 0 }, 'move')
-    expect(game.world.require(queen, Order).noPreserveUntil).toBe(-1)
+    expect(game.world.require(queen, Order).noPreserve).toBe(false)
   })
 
   it('advances a blocked pawn as far as is safe and reports the reason', () => {

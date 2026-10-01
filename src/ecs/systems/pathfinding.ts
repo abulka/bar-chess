@@ -83,7 +83,7 @@ const system: System = {
       // special case.
       const preserve = motion.intent === 'preserve'
       const exempt =
-        motion.threatExempt || (order !== undefined && orderInsists(order, ctx.turn))
+        motion.threatExempt || (order !== undefined && orderInsists(order))
       const danger = pieceDanger(ctx, e, team)
       // A preserve retreat keeps the older, narrower guard: the enemy king's
       // kill zone and outright lethal squares only, so a wounded piece can still

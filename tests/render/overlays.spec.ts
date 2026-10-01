@@ -22,8 +22,15 @@ describe('routePolyline', () => {
 describe('queueMarkers', () => {
   it('marks the endpoint of each queued step in order', () => {
     const steps: OrderStep[] = [
-      { kind: 'goto', dest: { x: 2, y: 2 }, path: [{ x: 1, y: 1 }, { x: 2, y: 2 }] },
-      { kind: 'attack', target: 7, path: [{ x: 3, y: 3 }], goal: { x: 3, y: 3 }, reachable: true },
+      { kind: 'goto', dest: { x: 2, y: 2 }, path: [{ x: 1, y: 1 }, { x: 2, y: 2 }], noPreserve: false },
+      {
+        kind: 'attack',
+        target: 7,
+        path: [{ x: 3, y: 3 }],
+        goal: { x: 3, y: 3 },
+        reachable: true,
+        noPreserve: false,
+      },
     ]
     expect(queueMarkers(steps)).toEqual([
       { cell: { x: 2, y: 2 }, index: 0, kind: 'goto' },
@@ -32,7 +39,7 @@ describe('queueMarkers', () => {
   })
 
   it('falls back to the objective when a step has no planned path', () => {
-    const steps: OrderStep[] = [{ kind: 'goto', dest: { x: 5, y: 5 }, path: [] }]
+    const steps: OrderStep[] = [{ kind: 'goto', dest: { x: 5, y: 5 }, path: [], noPreserve: false }]
     expect(queueMarkers(steps)).toEqual([{ cell: { x: 5, y: 5 }, index: 0, kind: 'goto' }])
   })
 })

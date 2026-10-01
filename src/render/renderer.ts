@@ -866,7 +866,7 @@ export class Renderer {
       // A player "insist" (Alt-click force order) suspends self-preservation:
       // an amber "!" disc on the piece's other corner shows its kamikaze
       // commitment, mirroring the green M / red A order badges.
-      if (order && orderInsists(order, game.turn)) {
+      if (order && orderInsists(order)) {
         const bx = pos.x - size * 0.34
         const by = pos.y + size * 0.36
         const br = size * 0.17

@@ -12,7 +12,7 @@ import type { PieceDef } from '../../game/pieces'
 import { destReachable as canReach } from '../../game/pathfind'
 import { noteOrder, clearMotion, clearOrder, promoteNext, rechainQueue } from '../../game/queue'
 import { hasInstaKill, instaKillLandedNote } from '../../game/instaKill'
-import { orderInsists, noPreserveEndedNote, noPreserveEndedSuppressedNote, noPreserveSuppressedNote } from '../../game/noPreserve'
+import { orderInsists, noPreserveSuppressedNote } from '../../game/noPreserve'
 import { CRITICAL_WOUND, HIT_STREAK_TRIGGER, preserveThreshold, recoverThreshold } from '../../game/selfPreservation'
 import { Cell, Health, Motion, Order, PieceType, Target, Team, hasLiveCell } from '../components'
 import type { MotionData, MotionIntent, OrderData } from '../components'
@@ -205,7 +205,7 @@ export function wouldSelfPreserve(ctx: SimContext, e: Entity): boolean {
   const kind = ctx.world.get(e, PieceType)?.kind
   if (!order || !motion || !target || !hp || !cell || !team || !kind) return false
   if (hasInstaKill(order)) return false
-  if (orderInsists(order, ctx.turn)) return false
+  if (orderInsists(order)) return false
 
   const enemyTeam: TeamId = team === 'red' ? 'blue' : 'red'
   const kings = { red: kingOf(ctx.world, 'red'), blue: kingOf(ctx.world, 'blue') }
@@ -404,25 +404,13 @@ const system: System = {
       const enemyKing = kings[enemyTeam]
       const endgame = enemyKing !== null && fieldCount[enemyTeam] === 0
       // A player can insist on an order (Alt-click): self-preservation is
-      // suspended until `noPreserveUntil`, and a healing hold latched before the
-      // order was given is released so it cannot veto the order anyway. When the
-      // window lapses, restore normal behaviour and record it once so the order
-      // history tells the whole story. See `src/game/noPreserve.ts`.
-      const insists = orderInsists(order, ctx.turn)
+      // suspended while the order runs, and a healing hold latched before the
+      // order was given is released so it cannot veto it. It ends with the order
+      // (arrival, target destroyed, replaced or cleared), never on a turn cap.
+      // See `src/game/noPreserve.ts`.
+      const insists = orderInsists(order)
       if (insists) {
         motion.holdUntilHp = 0
-      } else if (order.noPreserveUntil >= 0 && ctx.turn >= order.noPreserveUntil) {
-        // Say "restored" only when the rule can actually run; a finishing phase,
-        // the auto-preserve toggle being off, or an AI king's post still
-        // suppresses it, and the history should not promise otherwise.
-        const canPreserve =
-          ctx.autoPreserve && !endgame && !lastStandKing && !(controller === 'ai' && isKing)
-        noteOrder(
-          order,
-          ctx.tick,
-          canPreserve ? noPreserveEndedNote() : noPreserveEndedSuppressedNote(endgame || lastStandKing),
-        )
-        order.noPreserveUntil = -1
       }
       if (
         ctx.autoPreserve &&
@@ -577,7 +565,7 @@ const system: System = {
           order,
           ctx.tick,
           insists
-            ? noPreserveSuppressedNote(order.noPreserveUntil)
+            ? noPreserveSuppressedNote()
             : order.kind === 'none'
               ? 'self-preservation: no longer needed — holding'
               : order.kind === 'attack' && !order.reachable
@@ -642,6 +630,12 @@ const system: System = {
         }
         // Not there yet: keep advancing (a blocked, pathless piece simply waits).
         if (!arrived) {
+          // An impossible destination never completes, so end the insist rather
+          // than leaving the piece kamikaze forever.
+          if (unreachable && order.noPreserve && order.queue.length === 0) {
+            order.noPreserve = false
+            noteOrder(order, ctx.tick, 'no-preserve over — destination unreachable')
+          }
           motion.goal = order.dest
           motion.intent = 'order'
           continue

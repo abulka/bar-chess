@@ -266,7 +266,7 @@ describe('Renderer insist badge', () => {
 
   it('draws an amber "!" disc while a force order suspends preservation', () => {
     orderAttack(s.game, attacker, target, true)
-    s.game.world.require(attacker, Order).noPreserveUntil = s.game.turn + 3
+    s.game.world.require(attacker, Order).noPreserve = true
     s.renderer.draw(s.game)
 
     expect(s.ctx.discs.some((d) => d.style === NO_PRESERVE_BADGE_COLOR)).toBe(true)
@@ -279,9 +279,9 @@ describe('Renderer insist badge', () => {
     expect(s.ctx.discs.some((d) => d.style === NO_PRESERVE_BADGE_COLOR)).toBe(false)
   })
 
-  it('drops the badge once the insist window has lapsed', () => {
+  it('drops the badge once the insist flag is cleared', () => {
     orderAttack(s.game, attacker, target, true)
-    s.game.world.require(attacker, Order).noPreserveUntil = s.game.turn
+    s.game.world.require(attacker, Order).noPreserve = false
     s.renderer.draw(s.game)
 
     expect(s.ctx.discs.some((d) => d.style === NO_PRESERVE_BADGE_COLOR)).toBe(false)

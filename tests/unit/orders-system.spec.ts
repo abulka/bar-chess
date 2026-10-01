@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { Health, Motion, Order, Target } from '../../src/ecs/components'
+import { Cell, Health, Motion, Order, Target } from '../../src/ecs/components'
 import type { SimContext } from '../../src/ecs/types'
 import { chebyshev } from '../../src/game/geometry'
 import { enemyCoverage } from '../../src/game/kingSafety'
@@ -315,7 +315,7 @@ describe('orders system — automatic self-preservation', () => {
     const order = ctx.world.require(queen, Order)
     order.kind = 'goto'
     order.dest = { x: 0, y: 4 }
-    order.noPreserveUntil = ctx.turn + 3 // active on the next two turns
+    order.noPreserve = true
     fireOn(ctx, queen, rook)
 
     run(ctx)
@@ -327,7 +327,7 @@ describe('orders system — automatic self-preservation', () => {
     expect(motion.holdUntilHp).toBe(0)
   })
 
-  it('logs the override and restores self-preservation once it lapses', () => {
+  it('logs the override and restores self-preservation when the order completes', () => {
     const ctx = hurtContext(true)
     const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
     const rook = createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 0 })
@@ -341,38 +341,34 @@ describe('orders system — automatic self-preservation', () => {
     // Player insists: the retreat is suppressed and the order history says so.
     order.kind = 'goto'
     order.dest = { x: 0, y: 4 }
-    order.noPreserveUntil = ctx.turn + 2
+    order.noPreserve = true
     run(ctx)
 
     expect(ctx.world.require(queen, Motion).intent).toBe('order')
     expect(order.log.some((n) => n.text.includes('self-preservation suppressed'))).toBe(true)
 
-    // The window lapses: normal preservation returns and the log closes the story.
-    ctx.turn = order.noPreserveUntil
+    // Arrival completes the order, so the insist ends and preservation returns.
+    const cell = ctx.world.require(queen, Cell)
+    cell.x = 0
+    cell.y = 4
     run(ctx)
-    expect(order.noPreserveUntil).toBe(-1)
-    expect(order.log.some((n) => n.text.includes('no-preserve over'))).toBe(true)
+    expect(order.noPreserve).toBe(false)
+    run(ctx)
     expect(ctx.world.require(queen, Motion).intent).toBe('preserve')
   })
 
-  it('does not promise "restored" when the finishing phase keeps it pressing', () => {
+  it('ends the insist when a goto destination is positionally unreachable', () => {
     const ctx = hurtContext(true)
-    createPiece(ctx, 'blue', PIECES.king, { x: 3, y: 7 })
-    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
-    // Red is already down to its king, so self-preservation is suppressed for
-    // the whole finishing phase regardless of the insist window.
-    createPiece(ctx, 'red', PIECES.king, { x: 4, y: 0 })
-    const order = ctx.world.require(queen, Order)
+    const bishop = createPiece(ctx, 'blue', PIECES.bishop, { x: 4, y: 4 })
+    const order = ctx.world.require(bishop, Order)
     order.kind = 'goto'
-    order.dest = { x: 0, y: 4 }
-    order.noPreserveUntil = ctx.turn + 2
+    order.dest = { x: 3, y: 4 } // opposite colour: a bishop can never reach it
+    order.noPreserve = true
 
-    ctx.turn = order.noPreserveUntil
     run(ctx)
 
-    expect(order.noPreserveUntil).toBe(-1)
-    expect(order.log.some((n) => n.text.includes('finishing phase'))).toBe(true)
-    expect(order.log.some((n) => n.text.includes('restored'))).toBe(false)
+    expect(order.noPreserve).toBe(false)
+    expect(order.log.some((n) => n.text.includes('destination unreachable'))).toBe(true)
   })
 
   it('lets cheap pieces hold where expensive ones bail', () => {

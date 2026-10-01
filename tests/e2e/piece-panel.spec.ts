@@ -49,33 +49,18 @@ test('pawns show no notches and a self-preservation off pill', async ({ page }) 
   await expect(panel.locator('.line.preserve-note')).toContainText('never retreat')
 })
 
-test('a force-ordered pawn counts down to auto-restore', async ({ page }) => {
-  await page.evaluate(() => {
-    const g = (window as any).game
-    const pawn = g.toDebugJson().pieces.find((p: any) => p.team === 'blue' && p.kind === 'pawn')
-    g.selected = [pawn.e]
-    const orders = g.world.allStores.find((s: any) => s.name === 'Order')
-    orders.map.get(pawn.e).noPreserveUntil = g.turn + 3
-  })
-  await settle(page)
-
-  const panel = page.locator('.piece-panel')
-  await expect(panel.locator('.status-pill.preserve.off')).toContainText('off')
-  await expect(panel.locator('.line.preserve-note')).toContainText('auto-restores in 2 turns')
-})
-
-test('a force order flips the pill off and counts down to auto-restore', async ({ page }) => {
+test('a force order flips the pill off until the order completes', async ({ page }) => {
   await page.evaluate(() => {
     const g = (window as any).game
     const knight = g.toDebugJson().pieces.find((p: any) => p.team === 'blue' && p.kind === 'knight')
     g.selected = [knight.e]
     const orders = g.world.allStores.find((s: any) => s.name === 'Order')
-    orders.map.get(knight.e).noPreserveUntil = g.turn + 3
+    orders.map.get(knight.e).noPreserve = true
   })
   await settle(page)
 
   const panel = page.locator('.piece-panel')
   await expect(panel.locator('.status-pill.preserve.off')).toContainText('off')
-  // Paused on the turn the order was issued: two turns of suspension remain.
-  await expect(panel.locator('.line.preserve-note')).toContainText('auto-restores in 2 turns')
+  await expect(panel.locator('.line.preserve-note')).toContainText('off until the order completes')
+  await expect(panel.locator('.line.no-preserve')).toContainText('until it completes')
 })

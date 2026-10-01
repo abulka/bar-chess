@@ -146,7 +146,7 @@ const system: System = {
       // exempt, and a preserve retreat keeps the narrower lethal guard so it can
       // still escape through heavy-but-survivable fire. Within the tolerance a
       // scratch is still allowed.
-      if (!motion.threatExempt && !orderInsists(order, ctx.turn)) {
+      if (!motion.threatExempt && !orderInsists(order)) {
         const danger = pieceDanger(ctx, e, team)
         const refusing =
           motion.intent === 'preserve'

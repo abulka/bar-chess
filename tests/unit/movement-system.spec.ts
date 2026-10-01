@@ -89,7 +89,7 @@ describe('movement system — refuses hops into lethal fire', () => {
 
   it('carries the order through when the player insists (Alt-click)', () => {
     const { ctx, rook, motion } = setup('human', 'order')
-    ctx.world.require(rook, Order).noPreserveUntil = ctx.turn + 3
+    ctx.world.require(rook, Order).noPreserve = true
     run(ctx)
     expect(motion.moving).toBe(true)
     expect(motion.reserved).toEqual({ x: 0, y: 1 })

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { NoPreservePrompt } from '../game/game'
-import { NO_PRESERVE_TURNS } from '../game/noPreserve'
 
 defineProps<{ prompt: NoPreservePrompt }>()
 
@@ -17,11 +16,11 @@ const emit = defineEmits<{
       <p class="title">Self-preservation will interrupt {{ prompt.label }}</p>
       <p class="detail">
         <span class="coords">{{ prompt.coords.join(' · ') }}</span>
-        would stop following the order to protect itself. Override for {{ NO_PRESERVE_TURNS }} turns?
+        would stop following the order to protect itself. Keep pressing until it completes?
       </p>
       <div class="actions">
         <button type="button" class="ctl small primary" @click="emit('confirm')">
-          Override {{ NO_PRESERVE_TURNS }} turns
+          Keep pressing
         </button>
         <button type="button" class="ctl small" @click="emit('dismiss')">Leave it</button>
       </div>

@@ -167,7 +167,7 @@ describe('game record', () => {
     game.selected = []
 
     // The override rides the order and the command records that Alt was held.
-    expect(game.world.require(e, Order).noPreserveUntil).toBeGreaterThan(0)
+    expect(game.world.require(e, Order).noPreserve).toBe(true)
     expect(recorder.record.turns[0].intents[0]).toMatchObject({ t: 'order', force: true })
 
     playTurns(game, 3)

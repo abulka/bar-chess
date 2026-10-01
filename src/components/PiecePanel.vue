@@ -59,20 +59,6 @@ const instaKillName = INSTA_KILL_NAME
 const preserveOverride = computed(
   () => info.value?.order.kind === 'attack' && intent.value === 'preserve',
 )
-/**
- * Remaining turns of a player "no-preserve" insist order (0 when none). The
- * order stores the first turn self-preservation may run again, so the count is
- * that turn minus the current one. While play is paused the current turn has not
- * run yet, so one is subtracted to keep the readout honest ("2 turns" when the
- * order is given, not 3).
- */
-const noPreserveLeft = computed(() => {
-  const until = info.value?.order.noPreserveUntil ?? -1
-  if (until < 0) return 0
-  const base = until - props.snapshot.turn
-  return Math.max(0, props.snapshot.turnActive ? base : base - 1)
-})
-
 /** Whether the automatic retreat rule applies to this piece right now. */
 const preserve = computed(() => info.value?.preserve ?? null)
 const preserveOff = computed(() => !!preserve.value && !preserve.value.active)
@@ -84,10 +70,8 @@ const preserveReason = computed(() => {
   const p = preserve.value
   if (!p || p.active) return ''
   switch (p.reason) {
-    case 'insist': {
-      const n = noPreserveLeft.value
-      return `auto-restores in ${n} turn${n === 1 ? '' : 's'}`
-    }
+    case 'insist':
+      return 'off until the order completes'
     case 'finishing':
       return 'finishing phase — no retreat until the enemy king falls'
     case 'rule':
@@ -274,9 +258,8 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
       <p v-if="preserveOverride" class="line warn">
         self-preservation overriding the attack order — resumes after healing
       </p>
-      <p v-if="noPreserveLeft > 0" class="line no-preserve">
-        <b>no-preserve</b> · self-preservation off for
-        {{ noPreserveLeft }} more turn{{ noPreserveLeft === 1 ? '' : 's' }} — pressing this order
+      <p v-if="info.order.noPreserve" class="line no-preserve">
+        <b>no-preserve</b> · pressing this order — self-preservation off until it completes
       </p>
       <p
         v-else-if="info.order.kind === 'attack' && !info.order.reachable"
@@ -327,6 +310,7 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
         <li v-for="(q, i) in info.order.queue" :key="i">
           {{ q.label }}
           <span class="muted"> · {{ q.source }}</span>
+          <span v-if="q.noPreserve" class="no-preserve"> · no-preserve</span>
           <span v-if="!q.reachable" class="unreachable"> (unreachable)</span>
         </li>
       </ol>
@@ -560,6 +544,10 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
   padding-left: 18px;
   color: var(--muted);
   line-height: 1.6;
+}
+
+.queue .no-preserve {
+  color: #ffd166;
 }
 
 .order-log {
