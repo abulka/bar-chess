@@ -512,6 +512,12 @@ export class Game {
    * king without recomputing each frame.
    */
   checkmate: Record<TeamId, boolean> = { red: false, blue: false }
+  /**
+   * Whether a checkmate ends the game immediately. Study batches set this true
+   * so a run stops on the mate. Live games leave it false: movement is frozen
+   * and the cross shows, but the player keeps taking turns to shoot as normal.
+   */
+  mateEndsGame = false
   /** Completed beats the current standoff has run (reset when field pieces return). */
   private stalemateTurns = 0
   terrainVersion = 0
@@ -1020,7 +1026,14 @@ export class Game {
     }
     this.bus.emit('phase', 'turn end', { data: { turn: this.turn, tick: this.tick, ticks, mode: 'mega' } })
     this.bus.emit('info', ticks > 0 ? `play ended after ${ticks} ticks` : 'play ended')
-    if (drew) this.bus.emit('draw', 'draw \u2014 both sides are down to only their king')
+    if (drew) {
+      this.bus.emit(
+        'draw',
+        isKingOnlyDraw(this)
+          ? 'draw \u2014 both sides are down to only their king'
+          : 'draw \u2014 both kings are checkmated',
+      )
+    }
   }
 
   /** Append a completed beat, replacing any undone redo branch. */
@@ -1380,7 +1393,12 @@ export class Game {
       data: { turn: this.turn, tick: this.tick, ticks: this.turnTicks, mode: 'turn' },
     })
     if (drew) {
-      this.bus.emit('draw', 'draw \u2014 both sides are down to only their king')
+      this.bus.emit(
+        'draw',
+        isKingOnlyDraw(this)
+          ? 'draw \u2014 both sides are down to only their king'
+          : 'draw \u2014 both kings are checkmated',
+      )
       return
     }
     // Buffered requests start once this turn ends, back-to-back.
@@ -1454,6 +1472,14 @@ export class Game {
     this.winnerLocked = false
     this.captureOutro = false
     this.captureOutroTicks = 0
+    // Restored states are settled, so refresh the mate marker the renderer reads.
+    this.checkmate.red = false
+    this.checkmate.blue = false
+    if (this.settled()) {
+      const mate = checkmateSides(this.board, this.world, buildOccupancy(this.world, this.board))
+      this.checkmate.red = mate.red
+      this.checkmate.blue = mate.blue
+    }
     // Re-run undo/redo/replay under the rules the turn was captured with, not
     // whatever is toggled now.
     if (state.settings) this.applySimSettings(state.settings)
@@ -1667,11 +1693,14 @@ export class Game {
     // off) so its parallel movement is reproduced.
     this.ctx.turnActive = this.turnActive || (this.replaying && !this.replayContinuous)
     // Checkmate freezes all movement for both sides; firing still resolves it.
-    // Read the live board once per tick so the movement system and the renderer
-    // agree on which king is trapped.
-    const mate = checkmateSides(this.board, this.world, buildOccupancy(this.world, this.board))
-    this.checkmate.red = mate.red
-    this.checkmate.blue = mate.blue
+    // Judge it only on a settled board, so a piece mid-hop (which claims both its
+    // old and its new square) can never fake a mate. The renderer reads the same
+    // flag, so the cross cannot flash en-route.
+    if (this.settled()) {
+      const mate = checkmateSides(this.board, this.world, buildOccupancy(this.world, this.board))
+      this.checkmate.red = mate.red
+      this.checkmate.blue = mate.blue
+    }
     this.bus.tick = this.tick
     this.bus.phase = 'tick'
     // Replay events are duplicates of ones already in the log: tag them and keep
@@ -1696,6 +1725,7 @@ export class Game {
       this.megaTicks++
     }
     const before = this.winner
+    const wasDrawn = this.drawn
     // Lock the result the moment a king falls, so the capture outro cannot turn
     // a win into a draw. This is derived from the state, so live play and replay
     // reach it on the same tick.
@@ -1704,9 +1734,18 @@ export class Game {
       if (this.winner !== null) this.winnerLocked = true
     }
 
+    // Both kings mated on the same tick: a draw, closed like the king-only draw.
+    if (this.drawn && !wasDrawn && !this.replaying) {
+      if (this.turnActive) this.turnTicks++
+      this.endGame(null)
+      return
+    }
+
     // A king just fell during a live turn: let a capture glide finish first,
     // then close the turn (so the history boundary includes the glide) and
-    // freeze. Undo reopens the game.
+    // freeze. Undo reopens the game. A checkmate does not enter here in a live
+    // game (the winner is left null), so play stays turn-based: the player keeps
+    // taking turns to shoot the trapped king until it dies.
     if (this.winner !== null && before === null && !this.replaying) {
       if (this.hasFreeAdvance()) {
         this.captureOutro = true
@@ -1788,27 +1827,51 @@ export class Game {
     return false
   }
 
+  /**
+   * True when no piece is mid-hop, so every piece stands on one real square.
+   * Checkmate is only judged on a settled board: a moving piece claims both its
+   * old and its new square, and that transient occupancy can fake a mate.
+   */
+  private settled(): boolean {
+    for (const e of this.world.query(Motion)) {
+      if (this.world.get(e, Motion)?.moving) return false
+    }
+    return true
+  }
+
   /** A winner is set and a capture glide is still playing. */
   private captureOutroActive(): boolean {
     return this.winner !== null && this.hasFreeAdvance()
   }
 
   /**
-   * Chess-style decisive condition: a team is defeated the moment it has no
-   * living king. If both kings fall on the same tick the battle is a draw and
-   * play continues. Undo/redo/replay recompute this deterministically.
+   * Chess-style decisive condition. A team loses the moment it has no living
+   * king. A checkmate decides the game only when `mateEndsGame` is set (a study
+   * run); in a live game it freezes movement and leaves the winner undecided so
+   * the player keeps taking turns to shoot the trapped king. If both kings fall
+   * on the same tick, or both are mated, the battle is a draw. Undo/redo/replay
+   * recompute this deterministically.
    */
   private updateWinner(): void {
     const redKing = this.teams.red.alive.king ?? 0
     const blueKing = this.teams.blue.alive.king ?? 0
-    if (redKing > 0 && blueKing > 0) this.winner = null
-    else if (redKing === 0 && blueKing > 0) this.winner = 'blue'
+    if (redKing > 0 && blueKing > 0) {
+      if (this.checkmate.red && this.checkmate.blue) {
+        this.winner = null
+        this.drawn = true
+      } else if (this.checkmate.red) this.winner = this.mateEndsGame ? 'blue' : null
+      else if (this.checkmate.blue) this.winner = this.mateEndsGame ? 'red' : null
+      else this.winner = null
+    } else if (redKing === 0 && blueKing > 0) this.winner = 'blue'
     else if (blueKing === 0 && redKing > 0) this.winner = 'red'
     else this.winner = null
   }
 
-  /** Freeze the battle on a victory and record the state it ended on. */
-  private endGame(winner: TeamId): void {
+  /**
+   * Freeze the battle on a victory, or `null` for a drawn checkmate, and record
+   * the state it ended on.
+   */
+  private endGame(winner: TeamId | null): void {
     if (this.turnActive) {
       this.finishTurn()
     } else if (this.megaActive) {
@@ -1831,7 +1894,9 @@ export class Game {
     this.queuedPlay = false
     this.queuedForward = 0
     this.forwardPlay = false
-    this.bus.emit('win', `${TEAM_NAMES[winner]} wins \u2014 undo (u) to continue`, { team: winner })
+    if (winner !== null) {
+      this.bus.emit('win', `${TEAM_NAMES[winner]} wins \u2014 undo (u) to continue`, { team: winner })
+    }
   }
 
   loadSize(size: BoardSize, seed: number = this.seed): void {
@@ -3009,9 +3074,13 @@ export class Game {
     const advantageTooltip = describeAdvantage(adv)
     // Keep the instance flag in step with the displayed position, so undo/restore
     // (which change the world without a tick) update the renderer's trapped-king
-    // marker. Mutated in place because `ctx.checkmate` shares the object.
-    this.checkmate.red = adv.lost.red
-    this.checkmate.blue = adv.lost.blue
+    // marker. Only on a settled board: a piece mid-hop claims two squares, and
+    // that transient occupancy must never drive the cross. Mutated in place
+    // because `ctx.checkmate` shares the object.
+    if (this.settled()) {
+      this.checkmate.red = adv.lost.red
+      this.checkmate.blue = adv.lost.blue
+    }
 
     const focused = this.selected.find((e) => this.world.isAlive(e))
     const pieceInfo = focused !== undefined ? this.pieceInfo(focused) : null

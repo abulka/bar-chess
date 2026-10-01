@@ -89,10 +89,9 @@ describe('study batch reference', () => {
       0,
       ...results.flatMap((r) => r.analysis.heldUnderFire.map((h) => h.maxStreak)),
     )
-    // Checkmate now freezes movement and decides the game by fire, so a trapped
-    // king legitimately holds under fire for many turns while the winning side
-    // shoots it down (rather than the old walk-adjacent finish).
-    expect(maxHoldStreak).toBeLessThanOrEqual(14)
+    // A study run stops the moment mate is called, so the long holds of the old
+    // shoot-the-king-to-death finish are gone; only ordinary fire holds remain.
+    expect(maxHoldStreak).toBeLessThanOrEqual(7)
     // A king trapped in check may legally have no escape and hold; mere beat
     // counts of reversals across a whole game are allowed, but not rapid dither.
     // Retreats that route around the enemy king's kill zone rather than through
@@ -103,7 +102,8 @@ describe('study batch reference', () => {
     expect(summary.oscillationCount).toBeLessThanOrEqual(50)
     // A checkmate now finishes mid-battle, so this batch rarely grinds all the
     // way down to the lone-king phase where a cornered king trades fire. The
-    // trapped-king count confirms the checkmate mechanic is genuinely exercised.
+    // trapped-king count confirms the checkmate mechanic is genuinely exercised;
+    // the lone-king logic itself is covered directly in `endgame.spec.ts`.
     expect(summary.kingCheckTurns).toBeGreaterThan(0)
     expect(summary.noProgressTurns).toBeLessThanOrEqual(30)
   }, 180000)

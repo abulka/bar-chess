@@ -1,6 +1,6 @@
 import type { Board } from './board'
 import { TEAM_IDS } from './constants'
-import { fireCells, moveDestinations } from './geometry'
+import { cellsBetween, chebyshev, containsCell, fireCells, moveDestinations } from './geometry'
 import type { OccupiedFn } from './geometry'
 import { kingOf } from './healing'
 import { makeOccupied, occupiedExcept } from './occupancy'
@@ -56,10 +56,61 @@ export function isInCheck(
 }
 
 /**
- * Which kings are checkmated: in check with no legal square to escape to. A king
- * trapped like this cannot be saved by material, so the battle is decided by
- * fire. Computed from the live world (not a `Game`), so the simulation and the
- * snapshot share one definition.
+ * Whether the checked side can answer a single check by taking the checker or by
+ * stepping a piece onto the line between the checker and the king. Taking means
+ * covering the checker's square with a weapon, which is how this game captures;
+ * blocking only works against a line weapon, because a knight cannot be
+ * interposed and a range-one shot has no square in between.
+ */
+function canAnswerCheck(
+  board: Board,
+  world: World,
+  team: TeamId,
+  king: Entity,
+  kingCell: Vec2,
+  attacker: Entity,
+  occupied: OccupiedFn,
+): boolean {
+  const attackerCell = world.get(attacker, Cell)
+  if (!attackerCell) return false
+  const attackerDef = PIECES[world.require(attacker, PieceType).kind]
+  const canBlock = attackerDef !== undefined && WEAPONS[attackerDef.weapon].geometry.kind === 'slide'
+  const blocks = canBlock ? cellsBetween(board, attackerCell, kingCell) : []
+
+  for (const e of world.query(Cell, Team, PieceType)) {
+    if (e === king) continue
+    if (world.require(e, Team) !== team) continue
+    const health = world.get(e, Health)
+    if (!health || health.cur <= 0) continue
+    if (world.has(e, Dead)) continue
+    const def = PIECES[world.require(e, PieceType).kind]
+    if (!def) continue
+    const cell = world.require(e, Cell)
+    // Take the checker: this piece's weapon already covers its square.
+    if (
+      containsCell(
+        fireCells(board, cell, WEAPONS[def.weapon].geometry, team, occupied),
+        attackerCell.x,
+        attackerCell.y,
+      )
+    ) {
+      return true
+    }
+    // Block the line: a legal step onto an interior square of the firing ray.
+    if (blocks.length > 0) {
+      const dests = moveDestinations(board, cell, def.move, team, occupied)
+      if (dests.some((d) => blocks.some((b) => b.x === d.x && b.y === d.y))) return true
+    }
+  }
+  return false
+}
+
+/**
+ * Which kings are genuinely checkmated: in check, with no safe square to move
+ * to, no friendly piece that can take the checker, and no friendly piece that
+ * can step between the checker and the king to block the line. Two checks at
+ * once can only be answered by moving the king. Computed from the live world
+ * (not a `Game`), so the simulation and the snapshot share one definition.
  */
 export function checkmateSides(
   board: Board,
@@ -75,10 +126,53 @@ export function checkmateSides(
     if (!cell) continue
     const covered = enemyCoverage(board, world, occupancy, king, team)
     if (!covered.has(board.cellIndex(cell.x, cell.y))) continue
-    const canMove = moveDestinations(board, cell, PIECES.king.move, team, occupied).some(
+
+    const free = occupiedExcept(board, occupancy, king)
+    const attackers: Entity[] = []
+    for (const e of world.query(Cell, Team, PieceType)) {
+      if (e === king) continue
+      const enemyTeam = world.require(e, Team)
+      if (enemyTeam === team) continue
+      const health = world.get(e, Health)
+      if (!health || health.cur <= 0) continue
+      if (world.has(e, Dead)) continue
+      const def = PIECES[world.require(e, PieceType).kind]
+      if (!def) continue
+      const acell = world.require(e, Cell)
+      const hitsKing = containsCell(
+        fireCells(board, acell, WEAPONS[def.weapon].geometry, enemyTeam, free),
+        cell.x,
+        cell.y,
+      )
+      if (hitsKing) attackers.push(e)
+    }
+    if (attackers.length === 0) continue
+
+    const canStepOut = moveDestinations(board, cell, PIECES.king.move, team, occupied).some(
       (c) => !covered.has(board.cellIndex(c.x, c.y)),
     )
-    if (!canMove) out[team] = true
+    if (canStepOut) continue
+
+    // The king may take an adjacent checker that no other enemy defends.
+    if (attackers.length === 1) {
+      const attackerCell = world.get(attackers[0], Cell)
+      if (
+        attackerCell &&
+        chebyshev(cell.x, cell.y, attackerCell.x, attackerCell.y) === 1 &&
+        !covered.has(board.cellIndex(attackerCell.x, attackerCell.y))
+      ) {
+        continue
+      }
+    }
+
+    // Two checks at once can only be answered by a king move, already ruled out.
+    if (attackers.length > 1) {
+      out[team] = true
+      continue
+    }
+
+    if (canAnswerCheck(board, world, team, king, cell, attackers[0], occupied)) continue
+    out[team] = true
   }
   return out
 }

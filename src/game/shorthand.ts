@@ -62,15 +62,19 @@ its own move geometry, so one "path" cell is one hop (a rook's next hop can be f
 fixed). All randomness is seeded, so a position plus inputs replays identically.
 Kings obey the chess check rule: a king may never move onto a square covered by an enemy weapon
 this moment (including the enemy king's adjacent ring), so kings can never be adjacent and cannot
-walk into a firing line. A king already in check simply holds and fights; the battle still ends
-only when a king dies.
+walk into a firing line. Checkmate is a genuine mate: the king is in check, has no safe square,
+no friendly piece can take the checker, and no friendly piece can step between the checker and the
+king to block the line (a knight check cannot be blocked, and a range-one shot has no square in
+between). A mated side is trapped: both sides stop moving so the mate cannot be undone, and the
+mated king wears a red cross. A study run ends on the mate; a live game stays turn-based, so the
+player keeps taking normal turns to fire on the trapped king until it dies.
 An AI army acts on its own. A human piece follows its orders and otherwise stands and fires at
 anything already in range; its attack orders keep engaging nearby enemies after the current target
 dies, and "clear orders" stands it down.
-Win: the battle ends when a king dies and the other team wins; both kings down on the same tick is a
-draw. Once neither side has a non-king piece the two lone kings can never reach each other, so the
-battle is also drawn after a 4-turn grace; a game stopped at the turn cap without a king death is a
-partial, not a draw.
+Win: the battle ends when a king dies and the other team wins; both kings down (or both kings
+mated) on the same tick is a draw. A study run also ends on a checkmate. Once neither side has a
+non-king piece the two lone kings can never reach each other, so the battle is also drawn after a
+4-turn grace; a game stopped at the turn cap without a decided result is a partial, not a draw.
 Rules toggles: autoPreserve enables the automatic self-preservation retreat for any wounded piece
 (with it off, an AI piece still makes its own low-HP cover step); captureAdvance
 lets an idle killer step onto a victim's now-empty square; chessKills enables the parked immediate

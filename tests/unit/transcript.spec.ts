@@ -98,6 +98,51 @@ describe('transcript & analysis', () => {
     expect(analysis.neverFired).toContain('rP e2')
   })
 
+  it('counts king-only turns and the lone king’s shots directly', () => {
+    const piece = (
+      entity: number,
+      team: 'red' | 'blue',
+      kind: string,
+      x: number,
+      y: number,
+    ) => ({
+      entity,
+      team,
+      kind,
+      cell: { x, y },
+      goal: null,
+      moving: false,
+      movedThisTurn: false,
+      orderKind: 'none' as const,
+      target: null,
+      underFire: false,
+      inCheck: false,
+      hp: kind === 'king' ? 240 : 42,
+      maxHp: kind === 'king' ? 240 : 42,
+    })
+    const alone: TurnTrace[] = [
+      {
+        turn: 0,
+        tick: 0,
+        pieces: [piece(1, 'red', 'king', 4, 0), piece(2, 'blue', 'king', 4, 7), piece(3, 'blue', 'pawn', 3, 6)],
+      },
+      {
+        turn: 1,
+        tick: 100,
+        pieces: [piece(1, 'red', 'king', 4, 0), piece(2, 'blue', 'king', 4, 7), piece(3, 'blue', 'pawn', 3, 6)],
+      },
+    ]
+    const shots: EventRecord[] = [
+      { seq: 1, tick: 50, phase: 'combat', type: 'shot', msg: '#1 fired kingGuard at #3', entity: 1, team: 'red' },
+      { seq: 2, tick: 50, phase: 'combat', type: 'shot', msg: '#3 fired pawnShot at #1', entity: 3, team: 'blue' },
+    ]
+
+    const analysis = analyzeGame(record(), shots, alone)
+
+    expect(analysis.kingOnlyTurns).toBe(2)
+    expect(analysis.kingShotsWhileAlone).toBe(1)
+  })
+
   it('summarizes per-piece movement', () => {
     const stats = summarizePieces(trace(), events)
     const pawn = stats.find((s) => s.entity === 2)

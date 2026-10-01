@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { Cell, Motion } from '../../src/ecs/components'
 import { createPiece } from '../../src/game/factory'
-import { enemyCoverage, isInCheck } from '../../src/game/kingSafety'
+import { checkmateSides, enemyCoverage, isInCheck } from '../../src/game/kingSafety'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { PIECES } from '../../src/game/pieces'
 import movement from '../../src/ecs/systems/movement'
@@ -123,5 +123,72 @@ describe('king safety — movement and pathfinding', () => {
     for (const step of motion.path) {
       expect(covered.has(ctx.board.cellIndex(step.x, step.y))).toBe(false)
     }
+  })
+})
+
+describe('king safety — checkmate', () => {
+  beforeEach(() => clearComponents())
+
+  /**
+   * A red king trapped in the a8 corner: a blue rook checks down the file, and a
+   * blue king on c7 covers the two escape squares (1,0) and (1,1). Only the rook
+   * gives check, so this is the single-check case.
+   */
+  function cornered(): SimContext {
+    const ctx = makeContext()
+    createPiece(ctx, 'red', PIECES.king, { x: 0, y: 0 }) // a8
+    createPiece(ctx, 'blue', PIECES.rook, { x: 0, y: 7 }) // checks the a-file
+    createPiece(ctx, 'blue', PIECES.king, { x: 2, y: 1 }) // covers (1,0) and (1,1)
+    ctx.occupancy = buildOccupancy(ctx.world, ctx.board)
+    return ctx
+  }
+
+  it('calls a trapped king with no reply mate', () => {
+    const ctx = cornered()
+    expect(checkmateSides(ctx.board, ctx.world, ctx.occupancy).red).toBe(true)
+  })
+
+  it('lets a friendly piece block the line and save the king', () => {
+    const ctx = cornered()
+    createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 3 }) // slides to (0,3) to interpose
+    ctx.occupancy = buildOccupancy(ctx.world, ctx.board)
+    expect(checkmateSides(ctx.board, ctx.world, ctx.occupancy).red).toBe(false)
+  })
+
+  it('lets a friendly piece take the checker and save the king', () => {
+    const ctx = cornered()
+    createPiece(ctx, 'red', PIECES.rook, { x: 7, y: 7 }) // covers the rook on the rank
+    ctx.occupancy = buildOccupancy(ctx.world, ctx.board)
+    expect(checkmateSides(ctx.board, ctx.world, ctx.occupancy).red).toBe(false)
+  })
+
+  it('lets the king take an adjacent, undefended checker', () => {
+    const ctx = makeContext()
+    createPiece(ctx, 'red', PIECES.king, { x: 0, y: 0 })
+    createPiece(ctx, 'blue', PIECES.queen, { x: 1, y: 1 }) // b7: adjacent check, undefended
+    ctx.occupancy = buildOccupancy(ctx.world, ctx.board)
+    expect(checkmateSides(ctx.board, ctx.world, ctx.occupancy).red).toBe(false)
+  })
+
+  it('cannot block a knight check', () => {
+    const ctx = makeContext()
+    createPiece(ctx, 'red', PIECES.king, { x: 0, y: 0 })
+    createPiece(ctx, 'blue', PIECES.knight, { x: 2, y: 1 }) // checks a8
+    createPiece(ctx, 'blue', PIECES.knight, { x: 3, y: 1 }) // covers b8
+    createPiece(ctx, 'blue', PIECES.king, { x: 1, y: 2 }) // covers a7 and b7
+    createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 3 }) // a blocker that cannot help
+    ctx.occupancy = buildOccupancy(ctx.world, ctx.board)
+    expect(checkmateSides(ctx.board, ctx.world, ctx.occupancy).red).toBe(true)
+  })
+
+  it('treats a double check as mate even when one line could be blocked', () => {
+    const ctx = makeContext()
+    createPiece(ctx, 'red', PIECES.king, { x: 0, y: 0 })
+    createPiece(ctx, 'blue', PIECES.rook, { x: 0, y: 7 }) // checks the file
+    createPiece(ctx, 'blue', PIECES.bishop, { x: 2, y: 2 }) // checks the diagonal
+    createPiece(ctx, 'blue', PIECES.king, { x: 2, y: 1 }) // covers the rank escapes
+    createPiece(ctx, 'red', PIECES.rook, { x: 4, y: 3 }) // could block the file only
+    ctx.occupancy = buildOccupancy(ctx.world, ctx.board)
+    expect(checkmateSides(ctx.board, ctx.world, ctx.occupancy).red).toBe(true)
   })
 })

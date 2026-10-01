@@ -247,6 +247,7 @@ export class StudyController {
 
   dispose(): void {
     this.log.dispose()
+    this.game.mateEndsGame = false
   }
 
   start(options: StudyOptions): void {
@@ -255,6 +256,9 @@ export class StudyController {
     this.running = true
     this.index = -1
     this.kingOnlyAtTurn = -1
+    // A study run stops at the checkmate: the mate is the result, so the run ends
+    // on the decision rather than playing out the king's death.
+    this.game.mateEndsGame = true
     this.startNext()
   }
 
@@ -269,6 +273,7 @@ export class StudyController {
     this.running = false
     this.index = -1
     this.results = []
+    this.game.mateEndsGame = false
     this.log.begin()
   }
 
@@ -351,6 +356,8 @@ export class StudyController {
     if (!this.options || this.index >= this.options.games) {
       this.running = false
       this.index = -1
+      // The batch is over; live play goes back to leaving the mate undecided.
+      this.game.mateEndsGame = false
       return
     }
     this.kingOnlyAtTurn = -1

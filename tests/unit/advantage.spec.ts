@@ -113,7 +113,7 @@ describe('position evaluation', () => {
     const game = new Game(8, 'ai-vs-ai')
     stripArmy(game)
     place(game, 'king', 'red', 0, 0) // a8
-    place(game, 'king', 'blue', 7, 7)
+    place(game, 'king', 'blue', 1, 2) // b6: defends the queen and covers a7
     place(game, 'queen', 'blue', 1, 1) // b7: checks a8 and covers every escape
 
     const detail = advantageDetail(game)
