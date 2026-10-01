@@ -45,12 +45,14 @@ import {
   SELECT_COLOR,
   ORDER_ATTACK_COLOR,
   ORDER_MOVE_COLOR,
+  NO_PRESERVE_BADGE_COLOR,
   TRACK_COLOR,
   UNREACHABLE_COLOR,
   healTint,
   healthColor,
 } from './palette'
 import { selfPreservationThresholds } from '../game/selfPreservation'
+import { orderInsists } from '../game/noPreserve'
 import { bakeTerrain } from './terrain'
 
 export class Renderer {
@@ -859,6 +861,24 @@ export class Renderer {
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.fillText(letter, bx, by + br * 0.06)
+      }
+
+      // A player "insist" (Alt-click force order) suspends self-preservation:
+      // an amber "!" disc on the piece's other corner shows its kamikaze
+      // commitment, mirroring the green M / red A order badges.
+      if (order && orderInsists(order, game.turn)) {
+        const bx = pos.x - size * 0.34
+        const by = pos.y + size * 0.36
+        const br = size * 0.17
+        ctx.fillStyle = NO_PRESERVE_BADGE_COLOR
+        ctx.beginPath()
+        ctx.arc(bx, by, br, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.fillStyle = '#0b0f16'
+        ctx.font = `bold ${br * 1.5}px ui-monospace, monospace`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText('!', bx, by + br * 0.06)
       }
 
       if (game.selected.includes(e)) {

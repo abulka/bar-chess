@@ -61,7 +61,7 @@ import { PIECE_LIST, PIECES, WEAPONS } from './pieces'
 import { destReachable, findPath } from './pathfind'
 import { anchorFor, clearMotion, clearOrder, noteOrder, planStep } from './queue'
 import { instaKillOrderedNote } from './instaKill'
-import { NO_PRESERVE_TURNS, armNoPreserve, noPreserveOrderedNote } from './noPreserve'
+import { NO_PRESERVE_TURNS, armNoPreserve, noPreserveOrderedNote, orderInsists } from './noPreserve'
 import {
   buildBoard,
   buildWorldSnapshot,
@@ -180,6 +180,19 @@ export interface PieceInfo {
     movedThisTurn: boolean
     /** Latched safe-hold target HP (0 = no hold) — pending self-preservation. */
     holdUntilHp: number
+  }
+  /**
+   * Whether the automatic retreat rule applies to this piece right now, mirroring
+   * the `orders` system's preserve gate. `reason` explains an inactive state:
+   * `insist` (the player force-ordered it, with `until` the auto-restore turn),
+   * `finishing` (a king-only endgame/side), `rule` (auto-preserve is off) or
+   * `ai-king` (an AI king defends its post instead).
+   */
+  preserve: {
+    active: boolean
+    reason: 'pawn' | 'rule' | 'finishing' | 'insist' | 'ai-king' | null
+    /** For `insist`: first turn preservation may run again, else -1. */
+    until: number
   }
 }
 
@@ -3306,6 +3319,34 @@ export class Game {
       this.tick,
     )
 
+    // Why the automatic retreat rule does or does not apply to this piece right
+    // now. Mirrors the gate at the top of the `orders` preserve pass (including
+    // its world scan for king-only sides) so the panel can never claim
+    // preservation is on while the simulation suppresses it.
+    const enemyTeam: TeamId = ref.team === 'red' ? 'blue' : 'red'
+    const fieldAlive: Record<TeamId, number> = { red: 0, blue: 0 }
+    const kingAlive: Record<TeamId, boolean> = { red: false, blue: false }
+    for (const o of this.world.query(PieceType, Team, Health)) {
+      if (this.world.require(o, Health).cur <= 0) continue
+      const t = this.world.require(o, Team)
+      if (this.world.require(o, PieceType).kind === 'king') kingAlive[t] = true
+      else fieldAlive[t]++
+    }
+    const kingOnly = (t: TeamId): boolean => kingAlive[t] && fieldAlive[t] === 0
+    const insists = order !== undefined && orderInsists(order, this.turn)
+    const preserveReason: PieceInfo['preserve']['reason'] =
+      ref.kind === 'pawn'
+        ? 'pawn'
+        : !this.autoPreserve
+          ? 'rule'
+          : kingOnly(enemyTeam) || kingOnly(ref.team)
+            ? 'finishing'
+            : insists
+              ? 'insist'
+              : this.teams[ref.team].controller === 'ai' && ref.kind === 'king'
+                ? 'ai-king'
+                : null
+
     return {
       entity: e,
       kind: ref.kind,
@@ -3349,6 +3390,11 @@ export class Game {
         moving: motion?.moving ?? false,
         movedThisTurn: motion?.movedThisTurn ?? false,
         holdUntilHp: motion?.holdUntilHp ?? 0,
+      },
+      preserve: {
+        active: preserveReason === null,
+        reason: preserveReason,
+        until: insists && order !== undefined ? order.noPreserveUntil : -1,
       },
     }
   }

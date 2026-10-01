@@ -45,6 +45,17 @@ export function noPreserveEndedNote(): string {
 }
 
 /**
+ * Order-history note recorded once the window lapses while a phase rule keeps
+ * the piece pressing anyway: the finishing phase (enemy or own side king-only),
+ * auto-preserve being off, or an AI king's post. "Restored" would be a lie here.
+ */
+export function noPreserveEndedSuppressedNote(finishing: boolean): string {
+  return finishing
+    ? 'no-preserve over — finishing phase, still pressing'
+    : 'no-preserve over — self-preservation stays off'
+}
+
+/**
  * Arm the insist override on an order: suspend self-preservation until `turn`
  * plus `turns`, and release any latched healing hold so it cannot veto the
  * order. The caller records the order-history note.

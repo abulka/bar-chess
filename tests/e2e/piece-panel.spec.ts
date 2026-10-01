@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { loadGame } from './helpers'
+import { loadGame, settle } from './helpers'
 
 test.beforeEach(async ({ page }) => {
   await loadGame(page)
@@ -20,6 +20,9 @@ test('the piece panel shows health % and two threshold notches with region hints
   await expect(panel.locator('.bar .notch')).toHaveCount(2)
   // The old rules text block is gone.
   await expect(panel.locator('.collapsible')).toHaveCount(0)
+  // Self-preservation reads as a passive, active rule beside the status pill.
+  await expect(panel.locator('.status-pill.preserve.on')).toContainText('self-preservation')
+  await expect(panel.locator('.status-pill.preserve.on')).toContainText('on')
 
   // Instant hover hints, one per bar region.
   await panel.locator('.bar .zone').nth(2).hover()
@@ -39,6 +42,24 @@ test('pawns show no notches and a "never retreat" hint', async ({ page }) => {
 
   const panel = page.locator('.piece-panel')
   await expect(panel.locator('.bar .notch')).toHaveCount(0)
+  // Pawns never retreat, so they carry no self-preservation pill either.
+  await expect(panel.locator('.status-pill.preserve')).toHaveCount(0)
   await panel.locator('.bar .zone').first().hover()
   await expect(panel.locator('.bar-tip')).toContainText('never retreat')
+})
+
+test('a force order flips the pill off and counts down to auto-restore', async ({ page }) => {
+  await page.evaluate(() => {
+    const g = (window as any).game
+    const knight = g.toDebugJson().pieces.find((p: any) => p.team === 'blue' && p.kind === 'knight')
+    g.selected = [knight.e]
+    const orders = g.world.allStores.find((s: any) => s.name === 'Order')
+    orders.map.get(knight.e).noPreserveUntil = g.turn + 3
+  })
+  await settle(page)
+
+  const panel = page.locator('.piece-panel')
+  await expect(panel.locator('.status-pill.preserve.off')).toContainText('off')
+  // Paused on the turn the order was issued: two turns of suspension remain.
+  await expect(panel.locator('.line.preserve-note')).toContainText('auto-restores in 2 turns')
 })

@@ -355,6 +355,26 @@ describe('orders system — automatic self-preservation', () => {
     expect(ctx.world.require(queen, Motion).intent).toBe('preserve')
   })
 
+  it('does not promise "restored" when the finishing phase keeps it pressing', () => {
+    const ctx = hurtContext(true)
+    createPiece(ctx, 'blue', PIECES.king, { x: 3, y: 7 })
+    const queen = createPiece(ctx, 'blue', PIECES.queen, { x: 4, y: 4 })
+    // Red is already down to its king, so self-preservation is suppressed for
+    // the whole finishing phase regardless of the insist window.
+    createPiece(ctx, 'red', PIECES.king, { x: 4, y: 0 })
+    const order = ctx.world.require(queen, Order)
+    order.kind = 'goto'
+    order.dest = { x: 0, y: 4 }
+    order.noPreserveUntil = ctx.turn + 2
+
+    ctx.turn = order.noPreserveUntil
+    run(ctx)
+
+    expect(order.noPreserveUntil).toBe(-1)
+    expect(order.log.some((n) => n.text.includes('finishing phase'))).toBe(true)
+    expect(order.log.some((n) => n.text.includes('restored'))).toBe(false)
+  })
+
   it('lets cheap pieces hold where expensive ones bail', () => {
     const ctx = hurtContext(true)
     const pawn = createPiece(ctx, 'blue', PIECES.pawn, { x: 4, y: 4 })

@@ -5,13 +5,21 @@ vi.mock('../../src/render/terrain', () => ({
   bakeTerrain: () => ({ width: 0, height: 0 }),
 }))
 
-import { Health, Motion, PieceType, Render, Target, Weapon } from '../../src/ecs/components'
+import { Health, Motion, Order, PieceType, Render, Target, Weapon } from '../../src/ecs/components'
 import { DEATH_FX_COLOR, DEATH_TREMBLE_TTL, HIT_FX_COLOR } from '../../src/game/constants'
 import { Game } from '../../src/game/game'
 import { buildOccupancy } from '../../src/game/occupancy'
 import { WEAPONS } from '../../src/game/pieces'
 import { HEAL_COLOR, HEAL_TIP_COLOR } from '../../src/game/healing'
-import { BAR_BG, CHECKMATE_CROSS_COLOR, POTSHOT_COLOR, PRESERVE_COLOR, RELOAD_FILL, healthColor } from '../../src/render/palette'
+import {
+  BAR_BG,
+  CHECKMATE_CROSS_COLOR,
+  NO_PRESERVE_BADGE_COLOR,
+  POTSHOT_COLOR,
+  PRESERVE_COLOR,
+  RELOAD_FILL,
+  healthColor,
+} from '../../src/render/palette'
 import { Renderer } from '../../src/render/renderer'
 import { orderAttack, placePiece } from '../helpers'
 
@@ -44,11 +52,20 @@ interface DrawnImage {
   alpha: number
 }
 
+/** A filled circle (arc + fill), e.g. an order or insist badge. */
+interface Disc {
+  x: number
+  y: number
+  r: number
+  style: string
+}
+
 class RecordingContext {
   strokes: Stroke[] = []
   rects: Rect[] = []
   fills: Rect[] = []
   images: DrawnImage[] = []
+  discs: Disc[] = []
   strokeStyle = ''
   fillStyle = ''
   lineWidth = 1
@@ -61,6 +78,7 @@ class RecordingContext {
 
   private dash: number[] = []
   private points: { x: number; y: number }[] = []
+  private pendingArc: { x: number; y: number; r: number } | null = null
 
   setTransform(): void {}
   save(): void {}
@@ -72,6 +90,7 @@ class RecordingContext {
   clip(): void {}
   beginPath(): void {
     this.points = []
+    this.pendingArc = null
   }
   closePath(): void {}
   moveTo(x: number, y: number): void {
@@ -80,9 +99,14 @@ class RecordingContext {
   lineTo(x: number, y: number): void {
     this.points.push({ x, y })
   }
-  arc(): void {}
+  arc(x: number, y: number, r: number): void {
+    this.pendingArc = { x, y, r }
+  }
   ellipse(): void {}
-  fill(): void {}
+  fill(): void {
+    if (this.pendingArc) this.discs.push({ ...this.pendingArc, style: this.fillStyle })
+    this.pendingArc = null
+  }
   createRadialGradient(): { addColorStop: () => void } {
     return { addColorStop: () => {} }
   }
@@ -93,6 +117,7 @@ class RecordingContext {
       dash: [...this.dash],
       points: [...this.points],
     })
+    this.pendingArc = null
   }
   fillRect(x: number, y: number, w: number, h: number): void {
     this.fills.push({ x, y, w, h, style: this.fillStyle })
@@ -224,6 +249,42 @@ describe('Renderer firing-line overlay', () => {
     expect(s.ctx.strokes.some((st) => st.style === PRESERVE_COLOR)).toBe(true)
     // No gold route polyline (the #ffd166 selection ring is arc-only, not a route).
     expect(s.ctx.strokes.some((st) => st.style === ROUTE && st.points.length >= 2)).toBe(false)
+  })
+})
+
+describe('Renderer insist badge', () => {
+  let s: ReturnType<typeof setup>
+  let attacker: number
+  let target: number
+
+  beforeEach(() => {
+    s = setup()
+    attacker = placePiece(s.game, 'queen', 'blue', { x: 4, y: 4 })
+    target = placePiece(s.game, 'king', 'red', { x: 4, y: 6 })
+    s.game.selected = [attacker]
+  })
+
+  it('draws an amber "!" disc while a force order suspends preservation', () => {
+    orderAttack(s.game, attacker, target, true)
+    s.game.world.require(attacker, Order).noPreserveUntil = s.game.turn + 3
+    s.renderer.draw(s.game)
+
+    expect(s.ctx.discs.some((d) => d.style === NO_PRESERVE_BADGE_COLOR)).toBe(true)
+  })
+
+  it('draws no insist badge on a plain order', () => {
+    orderAttack(s.game, attacker, target, true)
+    s.renderer.draw(s.game)
+
+    expect(s.ctx.discs.some((d) => d.style === NO_PRESERVE_BADGE_COLOR)).toBe(false)
+  })
+
+  it('drops the badge once the insist window has lapsed', () => {
+    orderAttack(s.game, attacker, target, true)
+    s.game.world.require(attacker, Order).noPreserveUntil = s.game.turn
+    s.renderer.draw(s.game)
+
+    expect(s.ctx.discs.some((d) => d.style === NO_PRESERVE_BADGE_COLOR)).toBe(false)
   })
 })
 

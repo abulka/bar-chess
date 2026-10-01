@@ -12,7 +12,7 @@ import type { PieceDef } from '../../game/pieces'
 import { destReachable as canReach } from '../../game/pathfind'
 import { noteOrder, clearMotion, clearOrder, promoteNext, rechainQueue } from '../../game/queue'
 import { hasInstaKill, instaKillLandedNote } from '../../game/instaKill'
-import { orderInsists, noPreserveEndedNote, noPreserveSuppressedNote } from '../../game/noPreserve'
+import { orderInsists, noPreserveEndedNote, noPreserveEndedSuppressedNote, noPreserveSuppressedNote } from '../../game/noPreserve'
 import { CRITICAL_WOUND, HIT_STREAK_TRIGGER, preserveThreshold, recoverThreshold } from '../../game/selfPreservation'
 import { Cell, Health, Motion, Order, PieceType, Target, Team, hasLiveCell } from '../components'
 import type { MotionData, MotionIntent, OrderData } from '../components'
@@ -412,7 +412,16 @@ const system: System = {
       if (insists) {
         motion.holdUntilHp = 0
       } else if (order.noPreserveUntil >= 0 && ctx.turn >= order.noPreserveUntil) {
-        noteOrder(order, ctx.tick, noPreserveEndedNote())
+        // Say "restored" only when the rule can actually run; a finishing phase,
+        // the auto-preserve toggle being off, or an AI king's post still
+        // suppresses it, and the history should not promise otherwise.
+        const canPreserve =
+          ctx.autoPreserve && !endgame && !lastStandKing && !(controller === 'ai' && isKing)
+        noteOrder(
+          order,
+          ctx.tick,
+          canPreserve ? noPreserveEndedNote() : noPreserveEndedSuppressedNote(endgame || lastStandKing),
+        )
         order.noPreserveUntil = -1
       }
       if (

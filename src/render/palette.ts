@@ -40,6 +40,9 @@ export const SELECT_COLOR = '#ffd166'
 /** Order badge colours: green M for a move order, red A for an attack order. */
 export const ORDER_MOVE_COLOR = '#4ad991'
 export const ORDER_ATTACK_COLOR = '#ff3b30'
+/** Amber "insist" badge: the player force-ordered this piece, suspending
+ * self-preservation — its kamikaze commitment is visible on the board. */
+export const NO_PRESERVE_BADGE_COLOR = '#ffd166'
 /** The small red cross drawn over a checkmated king. */
 export const CHECKMATE_CROSS_COLOR = '#ff3b30'
 

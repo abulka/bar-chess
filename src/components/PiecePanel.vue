@@ -73,6 +73,32 @@ const noPreserveLeft = computed(() => {
   return Math.max(0, props.snapshot.turnActive ? base : base - 1)
 })
 
+/** Whether the automatic retreat rule applies to this piece right now. */
+const preserve = computed(() => info.value?.preserve ?? null)
+const preserveOff = computed(() => !!preserve.value && !preserve.value.active)
+/**
+ * A one-line explanation for an inactive self-preservation state, so the player
+ * knows when (or why) it comes back — or that it will not.
+ */
+const preserveReason = computed(() => {
+  const p = preserve.value
+  if (!p || p.active) return ''
+  switch (p.reason) {
+    case 'insist': {
+      const n = noPreserveLeft.value
+      return `auto-restores in ${n} turn${n === 1 ? '' : 's'}`
+    }
+    case 'finishing':
+      return 'finishing phase — no retreat until the enemy king falls'
+    case 'rule':
+      return 'the auto-preserve rule is off'
+    case 'ai-king':
+      return 'the king holds its post'
+    default:
+      return ''
+  }
+})
+
 /** Pawns can never retreat (they only step forward), so they show no notches. */
 const isPawn = computed(() => info.value?.kind === 'pawn')
 
@@ -197,9 +223,22 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
       </div>
 
       <div class="sub">status</div>
-      <p v-if="status" class="status-pill" :class="status.label.toLowerCase()">
-        <b>{{ status.label }}</b>
-        <span v-if="status.detail" class="muted"> · {{ status.detail }}</span>
+      <div class="pill-row">
+        <p v-if="status" class="status-pill" :class="status.label.toLowerCase()">
+          <b>{{ status.label }}</b>
+          <span v-if="status.detail" class="muted"> · {{ status.detail }}</span>
+        </p>
+        <p
+          v-if="preserve && preserve.reason !== 'pawn'"
+          class="status-pill preserve"
+          :class="preserveOff ? 'off' : 'on'"
+          :title="preserveOff ? preserveReason : 'retreats this piece when it is hurt or under fire'"
+        >
+          <b>self-preservation</b> <span class="muted">{{ preserveOff ? 'off' : 'on' }}</span>
+        </p>
+      </div>
+      <p v-if="preserveOff && preserveReason" class="line tiny preserve-note">
+        {{ preserveReason }}
       </p>
       <p v-if="!info.commandable" class="line muted tiny">not under your control</p>
 
@@ -464,6 +503,7 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
   border-radius: 999px;
   font-size: 11px;
   line-height: 1.6;
+  white-space: nowrap;
 }
 
 .status-pill.move {
@@ -476,6 +516,41 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
 
 .status-pill.auto {
   border-style: dashed;
+}
+
+/* Status and self-preservation pills share one wrapping row. */
+.pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The preservation pill is dashed when on (a passive rule) and amber when a
+ * force-order or a phase rule has switched the retreat off. The full term does
+ * not fit the rail beside a long status, so it may wrap to two centred lines. */
+.status-pill.preserve {
+  white-space: normal;
+  text-align: center;
+}
+
+/* Never split the term itself; let the on/off state drop to its own line. */
+.status-pill.preserve b {
+  white-space: nowrap;
+}
+
+.status-pill.preserve.on {
+  border-style: dashed;
+}
+
+.status-pill.preserve.off {
+  border-color: #ffd166;
+  color: #ffd166;
+}
+
+.line.preserve-note {
+  color: #ffd166;
+  opacity: 0.85;
 }
 
 .queue {

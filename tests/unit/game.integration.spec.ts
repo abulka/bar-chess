@@ -756,6 +756,63 @@ describe('Game integration — no-preserve prompt', () => {
   })
 })
 
+describe('Game integration — piece preserve descriptor', () => {
+  beforeEach(() => clearComponents())
+
+  /** A blue knight with both kings and one red rook, so no side is king-only. */
+  function fieldGame(): { game: Game; piece: number; enemyField: number } {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    createPiece(shim, 'blue', PIECES.king, { x: 4, y: 7 })
+    const piece = createPiece(shim, 'blue', PIECES.knight, { x: 3, y: 5 })
+    createPiece(shim, 'red', PIECES.king, { x: 4, y: 0 })
+    const enemyField = createPiece(shim, 'red', PIECES.rook, { x: 0, y: 0 })
+    game.selected = [piece]
+    return { game, piece, enemyField }
+  }
+
+  it('reports preservation on by default', () => {
+    const { game } = fieldGame()
+    expect(game.snapshot().pieceInfo?.preserve).toEqual({ active: true, reason: null, until: -1 })
+  })
+
+  it('reports an insist window with the turn it auto-restores', () => {
+    const { game, piece } = fieldGame()
+    game.orderAt({ x: 3, y: 4 }, 'move')
+    expect(game.insistOn(piece)).toBe(true)
+
+    const preserve = game.snapshot().pieceInfo!.preserve
+    expect(preserve.active).toBe(false)
+    expect(preserve.reason).toBe('insist')
+    expect(preserve.until).toBe(game.world.require(piece, Order).noPreserveUntil)
+  })
+
+  it('reports the finishing phase when the enemy is down to its king', () => {
+    const { game, enemyField } = fieldGame()
+    game.world.destroy(enemyField)
+    expect(game.snapshot().pieceInfo!.preserve).toMatchObject({ active: false, reason: 'finishing' })
+  })
+
+  it('reports the rule being off', () => {
+    const { game } = fieldGame()
+    game.setAutoPreserve(false)
+    expect(game.snapshot().pieceInfo!.preserve).toMatchObject({ active: false, reason: 'rule' })
+  })
+
+  it('reports pawns as never preserving', () => {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    createPiece(shim, 'blue', PIECES.king, { x: 4, y: 7 })
+    const pawn = createPiece(shim, 'blue', PIECES.pawn, { x: 3, y: 6 })
+    createPiece(shim, 'red', PIECES.king, { x: 4, y: 0 })
+    createPiece(shim, 'red', PIECES.rook, { x: 0, y: 0 })
+    game.selected = [pawn]
+    expect(game.snapshot().pieceInfo!.preserve).toMatchObject({ active: false, reason: 'pawn' })
+  })
+})
+
 describe('Game integration — AI move budget', () => {
   beforeEach(() => clearComponents())
 
