@@ -92,6 +92,8 @@ const preserveReason = computed(() => {
       return 'finishing phase — no retreat until the enemy king falls'
     case 'rule':
       return 'the auto-preserve rule is off'
+    case 'pawn':
+      return 'pawns never retreat — they hold and fire instead'
     case 'ai-king':
       return 'the king holds its post'
     default:
@@ -229,7 +231,7 @@ function reloadRatio(w: { left: number; cooldown: number; fired: boolean }): num
           <span v-if="status.detail" class="muted"> · {{ status.detail }}</span>
         </p>
         <p
-          v-if="preserve && preserve.reason !== 'pawn'"
+          v-if="preserve"
           class="status-pill preserve"
           :class="preserveOff ? 'off' : 'on'"
           :title="preserveOff ? preserveReason : 'retreats this piece when it is hurt or under fire'"

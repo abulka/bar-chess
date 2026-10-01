@@ -811,6 +811,24 @@ describe('Game integration — piece preserve descriptor', () => {
     game.selected = [pawn]
     expect(game.snapshot().pieceInfo!.preserve).toMatchObject({ active: false, reason: 'pawn' })
   })
+
+  it('keeps the insist countdown for a force-ordered pawn', () => {
+    const game = new Game(8)
+    for (const e of [...game.world.query(Cell)]) game.world.destroy(e)
+    const shim = { world: game.world, board: game.board, rng: game.rng } as unknown as SimContext
+    createPiece(shim, 'blue', PIECES.king, { x: 4, y: 7 })
+    const pawn = createPiece(shim, 'blue', PIECES.pawn, { x: 3, y: 6 })
+    createPiece(shim, 'red', PIECES.king, { x: 4, y: 0 })
+    createPiece(shim, 'red', PIECES.rook, { x: 0, y: 0 })
+    game.selected = [pawn]
+    game.orderAt({ x: 3, y: 4 }, 'move')
+    expect(game.insistOn(pawn)).toBe(true)
+
+    const preserve = game.snapshot().pieceInfo!.preserve
+    expect(preserve.active).toBe(false)
+    expect(preserve.reason).toBe('insist')
+    expect(preserve.until).toBeGreaterThan(0)
+  })
 })
 
 describe('Game integration — AI move budget', () => {

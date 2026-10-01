@@ -3335,14 +3335,14 @@ export class Game {
     const kingOnly = (t: TeamId): boolean => kingAlive[t] && fieldAlive[t] === 0
     const insists = order !== undefined && orderInsists(order, this.turn)
     const preserveReason: PieceInfo['preserve']['reason'] =
-      ref.kind === 'pawn'
-        ? 'pawn'
-        : !this.autoPreserve
-          ? 'rule'
-          : kingOnly(enemyTeam) || kingOnly(ref.team)
-            ? 'finishing'
-            : insists
-              ? 'insist'
+      !this.autoPreserve
+        ? 'rule'
+        : kingOnly(enemyTeam) || kingOnly(ref.team)
+          ? 'finishing'
+          : insists
+            ? 'insist'
+            : ref.kind === 'pawn'
+              ? 'pawn'
               : this.teams[ref.team].controller === 'ai' && ref.kind === 'king'
                 ? 'ai-king'
                 : null

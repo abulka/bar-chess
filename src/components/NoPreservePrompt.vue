@@ -14,10 +14,10 @@ const emit = defineEmits<{
   <div class="no-preserve" role="alertdialog" aria-live="polite">
     <span class="mark" aria-hidden="true">!</span>
     <div class="body">
-      <p class="title">Self-preservation will pull {{ prompt.label }} back</p>
+      <p class="title">Self-preservation will interrupt {{ prompt.label }}</p>
       <p class="detail">
         <span class="coords">{{ prompt.coords.join(' · ') }}</span>
-        would retreat instead of following the order. Override for {{ NO_PRESERVE_TURNS }} turns?
+        would stop following the order to protect itself. Override for {{ NO_PRESERVE_TURNS }} turns?
       </p>
       <div class="actions">
         <button type="button" class="ctl small primary" @click="emit('confirm')">

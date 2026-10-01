@@ -33,7 +33,7 @@ test('the piece panel shows health % and two threshold notches with region hints
   await expect(panel.locator('.bar-tip')).toContainText('critical')
 })
 
-test('pawns show no notches and a "never retreat" hint', async ({ page }) => {
+test('pawns show no notches and a self-preservation off pill', async ({ page }) => {
   await page.evaluate(() => {
     const g = (window as any).game
     const pawn = g.toDebugJson().pieces.find((p: any) => p.team === 'blue' && p.kind === 'pawn')
@@ -42,10 +42,26 @@ test('pawns show no notches and a "never retreat" hint', async ({ page }) => {
 
   const panel = page.locator('.piece-panel')
   await expect(panel.locator('.bar .notch')).toHaveCount(0)
-  // Pawns never retreat, so they carry no self-preservation pill either.
-  await expect(panel.locator('.status-pill.preserve')).toHaveCount(0)
   await panel.locator('.bar .zone').first().hover()
   await expect(panel.locator('.bar-tip')).toContainText('never retreat')
+  // Pawns carry the pill too, switched off, because they never retreat.
+  await expect(panel.locator('.status-pill.preserve.off')).toContainText('off')
+  await expect(panel.locator('.line.preserve-note')).toContainText('never retreat')
+})
+
+test('a force-ordered pawn counts down to auto-restore', async ({ page }) => {
+  await page.evaluate(() => {
+    const g = (window as any).game
+    const pawn = g.toDebugJson().pieces.find((p: any) => p.team === 'blue' && p.kind === 'pawn')
+    g.selected = [pawn.e]
+    const orders = g.world.allStores.find((s: any) => s.name === 'Order')
+    orders.map.get(pawn.e).noPreserveUntil = g.turn + 3
+  })
+  await settle(page)
+
+  const panel = page.locator('.piece-panel')
+  await expect(panel.locator('.status-pill.preserve.off')).toContainText('off')
+  await expect(panel.locator('.line.preserve-note')).toContainText('auto-restores in 2 turns')
 })
 
 test('a force order flips the pill off and counts down to auto-restore', async ({ page }) => {
